@@ -38,22 +38,61 @@ fn main() -> miette::Result<()> {
 	let mut chars = file.char_indices().peekable();
 
 	use TokenType::*;
-	while let Some((cur_idx, cur_char)) = chars.next() {
-		char_idx += 1;
-
+	while let Some(&(cur_idx, cur_char)) = chars.peek() {
 		match cur_char {
-			' ' | '\t' => {}
+			' ' | '\t' => {
+				char_idx += 1;
+				chars.next();
+			}
 			'\n' => {
 				line_idx += 1;
 				char_idx = 0;
+				chars.next();
 			}
-			',' => results.push(Token::new(Comma, cur_idx, 1)),
-			'@' => results.push(Token::new(Address, cur_idx, 1)),
-			'#' => results.push(Token::new(Immediate, cur_idx, 1)),
-			'$' => {
+			',' => {
+				char_idx += 1;
+				chars.next();
+				results.push(Token::new(Comma, cur_idx, 1));
+			}
+			'+' => {
+				char_idx += 1;
+				chars.next();
+				results.push(Token::new(Plus, cur_idx, 1));
+			}
+			'-' => {
+				char_idx += 1;
+				chars.next();
+				results.push(Token::new(Dash, cur_idx, 1));
+			}
+			'@' => {
+				char_idx += 1;
+				chars.next();
+				results.push(Token::new(Address, cur_idx, 1));
+			}
+			'#' => {
+				char_idx += 1;
+				chars.next();
+				results.push(Token::new(Immediate, cur_idx, 1));
+			}
+			'0'..='9' => {
+				char_idx += 1;
+				chars.next();
 				let mut index = cur_idx + 1;
 				while let Some((idx,ch)) = chars.peek() {
+					index = *idx;
+					if !('0'..='9').contains(ch) && '_' != *ch {
+						break;
+					}
 					char_idx += 1;
+					chars.next();
+				}
+				results.push(Token::new(Number, cur_idx, index - cur_idx));
+			}
+			'$' => {
+				char_idx += 1;
+				chars.next();
+				let mut index = cur_idx + 1;
+				while let Some((idx,ch)) = chars.peek() {
 					index = *idx;
 					if !('0'..='9').contains(ch)
 					&& !('a'..='f').contains(ch)
@@ -62,92 +101,136 @@ fn main() -> miette::Result<()> {
 					{
 						break;
 					}
+					char_idx += 1;
 					chars.next();
 				}
 				results.push(Token::new(Number, cur_idx, index - cur_idx));
 			}
 			'%' => {
+				char_idx += 1;
+				chars.next();
 				let mut index = cur_idx + 1;
 				while let Some((idx,ch)) = chars.peek() {
-					char_idx += 1;
 					index = *idx;
 					if !['0', '1'].contains(ch) && '_' != *ch {
 						break;
 					}
+					char_idx += 1;
 					chars.next();
 				}
 				results.push(Token::new(Number, cur_idx, index - cur_idx));
 			}
 			'r' => {
+				char_idx += 1;
+				chars.next();
 				let mut index = cur_idx + 1;
 				while let Some((idx,ch)) = chars.peek() {
-					char_idx += 1;
 					index = *idx;
 					if !('0'..='9').contains(ch) {
 						break;
 					}
+					char_idx += 1;
 					chars.next();
 				}
 				results.push(Token::new(Register, cur_idx, index - cur_idx));
 			}
 			'a' => {
-				let Some((_,'d')) = chars.next() else {
+				char_idx += 1;
+				chars.next();
+				let Some((_,'d')) = chars.peek() else {
 					let (idx,size) = next_line(&mut chars, cur_idx, &mut line_idx, &mut char_idx);
+					char_idx += size;
 					results.push(Token::new(Unknown(line_idx,char_idx), idx, size));
 					break;
 				};
-				let Some((idx,'d')) = chars.next() else {
+				char_idx += 1;
+				chars.next();
+				let Some(&(idx,'d')) = chars.peek() else {
 					let (idx,size) = next_line(&mut chars, cur_idx, &mut line_idx, &mut char_idx);
+					char_idx += size;
 					results.push(Token::new(Unknown(line_idx,char_idx), idx, size));
 					break;
 				};
+				char_idx += 1;
+				chars.next();
 				results.push(Token::new(Add, cur_idx, idx - cur_idx + 1));
 			}
 			'm' => {
-				let Some((_,'o')) = chars.next() else {
+				char_idx += 1;
+				chars.next();
+				let Some((_,'o')) = chars.peek() else {
 					let (idx,size) = next_line(&mut chars, cur_idx, &mut line_idx, &mut char_idx);
 					results.push(Token::new(Unknown(line_idx,char_idx), idx, size));
 					break;
 				};
-				let Some((_,'v')) = chars.next() else {
+				char_idx += 1;
+				chars.next();
+				let Some((_,'v')) = chars.peek() else {
 					let (idx,size) = next_line(&mut chars, cur_idx, &mut line_idx, &mut char_idx);
 					results.push(Token::new(Unknown(line_idx,char_idx), idx, size));
 					break;
 				};
-				let Some((_,'.')) = chars.next() else {
+				char_idx += 1;
+				chars.next();
+				let Some((_,'.')) = chars.peek() else {
 					let (idx,size) = next_line(&mut chars, cur_idx, &mut line_idx, &mut char_idx);
 					results.push(Token::new(Unknown(line_idx,char_idx), idx, size));
 					break;
 				};
-				match chars.next() {
-					Some((idx,'b')) => results.push(Token::new(MovB, cur_idx, idx - cur_idx + 1)),
-					Some((idx,'w')) => results.push(Token::new(MovW, cur_idx, idx - cur_idx + 1)),
-					Some((idx,'l')) => results.push(Token::new(MovL, cur_idx, idx - cur_idx + 1)),
+				char_idx += 1;
+				chars.next();
+				match chars.peek() {
+					Some(&(idx,'b')) => {
+						char_idx += 1;
+						chars.next();
+						results.push(Token::new(MovB, cur_idx, idx - cur_idx + 1));
+					}
+					Some(&(idx,'w')) => {
+						char_idx += 1;
+						chars.next();
+						results.push(Token::new(MovW, cur_idx, idx - cur_idx + 1));
+					}
+					Some(&(idx,'l')) => {
+						char_idx += 1;
+						chars.next();
+						results.push(Token::new(MovL, cur_idx, idx - cur_idx + 1));
+					}
 					_ => {
 						let (idx,size) = next_line(&mut chars, cur_idx, &mut line_idx, &mut char_idx);
+						char_idx += size;
 						results.push(Token::new(Unknown(line_idx,char_idx), idx, size));
 					}
 				}
 			}
 			'o' => {
-				let Some((_,'r')) = chars.next() else {
+				char_idx += 1;
+				chars.next();
+				let Some((_,'r')) = chars.peek() else {
 					let (idx,size) = next_line(&mut chars, cur_idx, &mut line_idx, &mut char_idx);
+					char_idx += size;
 					results.push(Token::new(Unknown(line_idx,char_idx), idx, size));
 					break;
 				};
-				let Some((idx,'g')) = chars.next() else {
+				char_idx += 1;
+				chars.next();
+				let Some(&(idx,'g')) = chars.peek() else {
 					let (idx,size) = next_line(&mut chars, cur_idx, &mut line_idx, &mut char_idx);
+					char_idx += size;
 					results.push(Token::new(Unknown(line_idx,char_idx), idx, size));
 					break;
 				};
+				char_idx += 1;
+				chars.next();
 				results.push(Token::new(Org, cur_idx, idx - cur_idx + 1));
 			}
 			';' => {
 				let (idx,size) = next_line(&mut chars, cur_idx, &mut line_idx, &mut char_idx);
+				char_idx += size;
 				results.push(Token::new(Comment, idx, size));
 			}
 			_ => {
 				let (idx,size) = next_line(&mut chars, cur_idx, &mut line_idx, &mut char_idx);
+				char_idx += size;
 				results.push(Token::new(Unknown(line_idx,char_idx), idx, size));
 			}
 		}
@@ -183,6 +266,8 @@ enum TokenType {
 	MovW,
 	MovL,
 	Add,
+	Plus,
+	Dash,
 	Register,
 	Comma,
 	Immediate,
