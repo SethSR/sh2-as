@@ -37,7 +37,7 @@ fn main() -> miette::Result<()> {
 	let (section_table, label_table) = parser(&file, &tokens)?;
 
 	if is_silent {
-		for (address, section) in section_table {
+		for (address, section) in &section_table {
 			println!("Address: ${address:08X}");
 			for instr in section {
 				println!("\t{instr:?}");
@@ -45,7 +45,7 @@ fn main() -> miette::Result<()> {
 		}
 
 		println!("Labels:");
-		for label in label_table {
+		for label in &label_table {
 			println!("\t{label}");
 		}
 	}
@@ -391,13 +391,17 @@ fn p_str(
 	file[idx as usize..][..sz as usize].to_owned()
 }
 
+fn p_error(msg: &str) -> String {
+	format!("ERROR: {msg}")
+}
+
 fn p_expected<'a,'b,'c>(
 	file: &'a str,
 	tok: &'b Token,
 	msg: &'c str,
 ) -> String {
 	let txt = p_str(file, tok);
-	format!("ERROR: Expected {msg}, Found '{txt}'")
+	p_error(&format!("Expected {msg}, Found '{txt}'"))
 }
 
 fn p_number(
@@ -445,7 +449,8 @@ fn p_address(
 			let reg = p_reg(file, nxt_tok)?;
 			Ok(Arg::PreDec(reg))
 		} else {
-			eprintln!("{}", p_expected(file, nxt_tok, "Register"));
+			eprintln!("{}", p_expected(file, nxt_tok,
+				"Register"));
 			todo!("on error, skip to next newline");
 		}
 	} else if nxt_tok.tt == TokenType::Register {
@@ -459,7 +464,8 @@ fn p_address(
 			Ok(Arg::IndReg(reg))
 		}
 	} else {
-		eprintln!("{}", p_expected(file, nxt_tok, "Address specifier (@r_/ @-r_ / @r_+)"));
+		eprintln!("{}", p_expected(file, nxt_tok,
+			"Address specifier (@r_/ @-r_ / @r_+)"));
 		todo!("on error, skip to next newline");
 	}
 }
@@ -522,7 +528,8 @@ fn parser(
 							let num = p_number(&file, nxt_tok)?;
 							Arg::DirImm((!num).wrapping_add(1))
 						} else {
-							p_expected(&file, nxt_tok, "Number after minus sign");
+							p_expected(&file, nxt_tok,
+								"Number after minus sign");
 							todo!("on error, skip to next newline character");
 						}
 					}
@@ -538,7 +545,8 @@ fn parser(
 						Arg::DirReg(reg)
 					}
 					_ => {
-						p_expected(&file, nxt_tok, "A valid ADD source argument");
+						p_expected(&file, nxt_tok,
+							"A valid ADD source argument");
 						todo!("on error, skip to next newline");
 					}
 				};
@@ -559,7 +567,8 @@ fn parser(
 						Arg::DirReg(reg)
 					}
 					_ => {
-						p_expected(&file, nxt_tok, "A valid ADD destination argument");
+						p_expected(&file, nxt_tok,
+							"A valid ADD destination argument");
 						todo!("on error, skip to next newline");
 					}
 				};
@@ -652,6 +661,11 @@ fn parser(
 
 				let nxt_tok = p_next(&mut tok_idx, &tokens);
 				if nxt_tok.tt == Colon {
+					if label_table.contains(&label) {
+						eprintln!("{}", p_error("Label '{label}' already defined"));
+						todo!("on error, skip to newline");
+					}
+
 					section_table
 						.entry(skey)
 						.or_default()
