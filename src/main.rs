@@ -36,16 +36,20 @@ fn main() -> miette::Result<()> {
 
 	let (section_table, label_table) = parser(&file, &tokens)?;
 
-	for (address, section) in section_table {
-		println!("Address: ${address:08X}");
-		for instr in section {
-			println!("\t{instr:?}");
+	if is_silent {
+		for (address, section) in section_table {
+			println!("Address: ${address:08X}");
+			for instr in section {
+				println!("\t{instr:?}");
+			}
+		}
+
+		println!("Labels:");
+		for label in label_table {
+			println!("\t{label}");
 		}
 	}
 
-	println!("Labels:");
-	for label in label_table {
-		println!("\t{label}");
 	}
 
 	todo!("output to '{target}'");
@@ -479,6 +483,12 @@ fn p_size(
 	}
 }
 
+// TODO - srenshaw - Ensure the parser actually returns what it's supposed to.
+
+/// Parses strings of tokens into valid instructions & directives
+///
+/// Given a sequence of valid tokens, the parser should return either a section and label table for
+/// the analysis stage, or a sequence of all errors encountered while parsing the input.
 fn parser(
 	file: &str,
 	tokens: &[Token],
