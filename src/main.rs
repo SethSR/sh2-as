@@ -1,5 +1,11 @@
 
+use std::collections::{HashMap, HashSet};
+
 use miette::{IntoDiagnostic, miette};
+
+const SIZE_BYTE: usize = 1;
+const SIZE_WORD: usize = 2;
+const SIZE_LONG: usize = 4;
 
 fn main() -> miette::Result<()> {
 	let mut args = std::env::args();
@@ -16,16 +22,320 @@ fn main() -> miette::Result<()> {
 	let file = std::fs::read_to_string(source)
 		.into_diagnostic()?;
 
-	let results = lexer(&file);
+	let tokens = lexer(&file);
 
-	for result in results {
-		let (idx,sz) = (result.index, result.size);
-		let out = format!("{:?}\t'{}'", result.tt,
+	for token in &tokens {
+		let (idx,sz) = (token.index, token.size);
+		let out = format!("{:?}\t'{}'", token.tt,
 			&file[idx as usize..][..sz as usize]);
-		if let TokenType::Unknown(ln,ch) = result.tt {
+		if let TokenType::Unknown(ln,ch) = token.tt {
 			println!("{out} ({ln},{ch})");
 		} else if !is_silent {
 			println!("{out}");
+		}
+	}
+
+	let mut skey = 0;
+	let mut section_table = HashMap::<u64, Vec<Ins>>::new();
+	let mut label_table = HashSet::<String>::new();
+
+	let mut tok_idx = 0;
+	while tok_idx < tokens.len() {
+		use TokenType::*;
+		let cur_tok = &tokens[tok_idx];
+		match cur_tok.tt {
+			Add => {
+				let size = match p_size(&file, &mut tok_idx, &tokens) {
+					Ok(size) => size,
+					Err((n,msg)) => if n == 0 {
+						tok_idx -= 1;
+						SIZE_WORD
+					} else {
+						eprintln!("{msg}");
+						todo!("on error, skip to next newline");
+					}
+				};
+
+				let nxt_tok = p_next(&mut tok_idx, &tokens);
+				let src = match nxt_tok.tt {
+					Dash => {
+						let nxt_tok = p_next(&mut tok_idx, &tokens);
+						if nxt_tok.tt == Number {
+							let num = p_number(&file, nxt_tok)?;
+							Arg::Num((!num).wrapping_add(1))
+						} else {
+							p_expected(&file, nxt_tok, "Number after minus sign");
+							todo!("on error, skip to next newline character");
+						}
+					}
+					Number => {
+						let num = p_number(&file, nxt_tok)?;
+						Arg::Num(num)
+					}
+					Address => {
+						p_address(&file, &mut tok_idx, &tokens)?
+					}
+					Register => {
+						let reg = p_reg(&file, nxt_tok)?;
+						Arg::Dir(reg)
+					}
+					_ => {
+						p_expected(&file, nxt_tok, "A valid ADD source argument");
+						todo!("on error, skip to next newline");
+					}
+				};
+
+				let nxt_tok = p_next(&mut tok_idx, &tokens);
+				if nxt_tok.tt != Comma {
+					p_expected(&file, nxt_tok, "','");
+					todo!("on error, skip to next newline");
+				}
+
+				let nxt_tok = p_next(&mut tok_idx, &tokens);
+				let dst = match nxt_tok.tt {
+					Address => {
+						p_address(&file, &mut tok_idx, &tokens)?
+					}
+					Register => {
+						let reg = p_reg(&file, nxt_tok)?;
+						Arg::Dir(reg)
+					}
+					_ => {
+						p_expected(&file, nxt_tok, "A valid ADD destination argument");
+						todo!("on error, skip to next newline");
+					}
+				};
+
+				section_table
+					.entry(skey)
+					.or_default()
+					.push(Ins::Add(size,src,dst));
+			}
+			Address => {
+				eprintln!("unexpected Address");
+			}
+			BF => {
+				let nxt_tok = p_next(&mut tok_idx, &tokens);
+				if nxt_tok.tt != Identifier {
+					eprintln!("{}", p_expected(&file, nxt_tok,
+						"Label"));
+					todo!("on error, skip to newline");
+				}
+
+				let (idx,sz) = (nxt_tok.index, nxt_tok.size);
+				let txt = &file[idx as usize..][..sz as usize];
+				section_table
+					.entry(skey)
+					.or_default()
+					.push(Ins::BF(txt.to_owned()));
+			}
+			BT => {
+				eprintln!("unexpected BT");
+			}
+			Byte => {
+				eprintln!("unexpected size specifier");
+			}
+			Colon => {
+				eprintln!("unexpected Colon");
+			}
+			Comma => {
+				eprintln!("unexpected Comma");
+			}
+			Comment => {} // skip comments
+			Const => {
+				let Ok(sz) = p_size(&file, &mut tok_idx, &tokens) else {
+					todo!("on error, skip to next newline character");
+				};
+
+				let nxt_tok = p_next(&mut tok_idx, &tokens);
+				let value = match nxt_tok.tt {
+					Number => {
+						p_number(&file, nxt_tok)?
+					}
+					Identifier => {
+						todo!("set value with label address");
+					}
+					_ => {
+						p_expected(&file, nxt_tok,
+							"address literal or label");
+						todo!("on error, skip to next newline character");
+					}
+				};
+
+				// TODO - srenshaw - ensure `value` and `size` match.
+				section_table
+					.entry(skey)
+					.or_default()
+					.push(Ins::Const(sz,value));
+			}
+			Dash => {
+				eprintln!("unexpected Dash");
+			}
+			DT => {
+				let nxt_tok = p_next(&mut tok_idx, &tokens);
+				if nxt_tok.tt != Register {
+					eprintln!("{}", p_expected(&file, nxt_tok,
+						"Register"));
+					todo!("on error, skip to newline");
+				}
+
+				let reg = p_reg(&file, nxt_tok)?;
+				section_table
+					.entry(skey)
+					.or_default()
+					.push(Ins::DT(reg));
+			}
+			Dot => {
+				eprintln!("unexpected Dot");
+			}
+			Identifier => {
+				let (idx,sz) = (cur_tok.index, cur_tok.size);
+				let label = &file[idx as usize..][..sz as usize];
+
+				let nxt_tok = p_next(&mut tok_idx, &tokens);
+				if nxt_tok.tt == Colon {
+					section_table
+						.entry(skey)
+						.or_default()
+						.push(Ins::Label(label.to_owned()));
+					label_table.insert(label.to_owned());
+				} else {
+					eprintln!("{}", p_expected(&file, nxt_tok,
+						"End of label declaration ':'"));
+					todo!("on error, skip to newline");
+				}
+			}
+			Long => {
+				eprintln!("unexpected size specifier");
+			}
+			Mov => {
+				let size = match p_size(&file, &mut tok_idx, &tokens) {
+					Ok(size) => size,
+					Err((n,msg)) => if n == 0 {
+						tok_idx -= 1;
+						SIZE_WORD
+					} else {
+						eprintln!("{msg}");
+						todo!("on error, skip to newline");
+					}
+				};
+
+				let nxt_tok = p_next(&mut tok_idx, &tokens);
+				let src = match nxt_tok.tt {
+					Identifier => {
+						let (idx,sz) = (nxt_tok.index, nxt_tok.size);
+						let txt = &file[idx as usize..][..sz as usize];
+						Arg::Label(txt.to_owned())
+					}
+					Number => {
+						let num = p_number(&file, nxt_tok)?;
+						Arg::Num(num)
+					}
+					Register => {
+						let reg = p_reg(&file, nxt_tok)?;
+						Arg::Dir(reg)
+					}
+					Address => {
+						let nxt_tok = p_next(&mut tok_idx, &tokens);
+						if nxt_tok.tt != Register {
+							eprintln!("{}", p_expected(&file, nxt_tok,
+								"A valid MOV source argument"));
+							todo!("on error, skip to newline");
+						}
+
+						let reg = p_reg(&file, nxt_tok)?;
+						let nxt_tok = p_next(&mut tok_idx, &tokens);
+						if nxt_tok.tt == Plus {
+							Arg::PostInc(reg)
+						} else {
+							tok_idx -= 1;
+							Arg::IndReg(reg)
+						}
+					}
+					_ => {
+						eprintln!("{}", p_expected(&file, nxt_tok,
+							"A valid MOV source argument"));
+						todo!("on error, skip to newline");
+					}
+				};
+
+				let nxt_tok = p_next(&mut tok_idx, &tokens);
+				if nxt_tok.tt != Comma {
+					eprintln!("{}", p_expected(&file, nxt_tok,
+						"','"));
+					todo!("on error, skip to newline");
+				}
+
+				let nxt_tok = p_next(&mut tok_idx, &tokens);
+				let dst = match nxt_tok.tt {
+					Register => {
+						let reg = p_reg(&file, nxt_tok)?;
+						Arg::Dir(reg)
+					}
+					Address => {
+						let nxt_tok = p_next(&mut tok_idx, &tokens);
+						let is_pre_dec = nxt_tok.tt == Dash;
+						let nxt_tok = if is_pre_dec {
+							p_next(&mut tok_idx, &tokens)
+						} else {
+							nxt_tok
+						};
+
+						if nxt_tok.tt != Register {
+							eprintln!("{}", p_expected(&file, nxt_tok,
+								"Register"));
+							todo!("on error, skip to newline");
+						}
+
+						let reg = p_reg(&file, nxt_tok)?;
+						if is_pre_dec {
+							Arg::PreDec(reg)
+						} else {
+							Arg::IndReg(reg)
+						}
+					}
+					_ => {
+						eprintln!("{}", p_expected(&file, nxt_tok,
+							"A valid MOV destination argument"));
+						todo!("on error, skip to newline");
+					}
+				};
+
+				section_table
+					.entry(skey)
+					.or_default()
+					.push(Ins::Mov(size,src,dst));
+			}
+			Newline => {} // skip newlines
+			Number => {
+				eprintln!("unexpected Number");
+			}
+			Org => {
+				let nxt_tok = p_next(&mut tok_idx, &tokens);
+				skey = p_number(&file, nxt_tok)?;
+			}
+			Plus => {
+				eprintln!("unexpected Plus");
+			}
+			Register => {
+				eprintln!("unexpected Register");
+			}
+			Word => {
+				eprintln!("unexpected size specifier");
+			}
+			Unknown(ln,ch) => {
+				let (idx,sz) = (cur_tok.index,cur_tok.size);
+				let txt = &file[idx as usize..][..sz as usize];
+				eprintln!("unknown item @ line {ln}, char {ch}: '{txt}'");
+			}
+		}
+		tok_idx += 1;
+	}
+
+	for (address, section) in section_table {
+		println!("Address: ${address:X}");
+		for instr in section {
+			println!("\t{instr:?}");
 		}
 	}
 
@@ -115,6 +425,7 @@ fn lexer(input: &str) -> Vec<Token> {
 				line_idx += 1;
 				char_idx = 0;
 				chars.next();
+				results.push(Token::new(Newline, cur_idx, 1));
 			}
 			',' => {
 				next(&mut char_idx, &mut chars);
@@ -135,10 +446,6 @@ fn lexer(input: &str) -> Vec<Token> {
 			':' => {
 				next(&mut char_idx, &mut chars);
 				results.push(Token::new(Colon, cur_idx, 1));
-			}
-			'#' => {
-				next(&mut char_idx, &mut chars);
-				results.push(Token::new(Immediate, cur_idx, 1));
 			}
 			'.' => {
 				next(&mut char_idx, &mut chars);
@@ -169,13 +476,6 @@ fn lexer(input: &str) -> Vec<Token> {
 					|ch| ['0','1'].contains(&ch) || '_' == ch);
 				results.push(Token::new(Number, cur_idx, size));
 			}
-			'r' => {
-				next(&mut char_idx, &mut chars);
-				let size = tokenize(
-					cur_idx, &mut chars, &mut char_idx,
-					|ch| ('0'..='9').contains(&ch));
-				results.push(Token::new(Register, cur_idx, size));
-			}
 			'a' => match ident("add",
 				cur_idx, &mut chars,
 				&mut char_idx, &mut line_idx,
@@ -184,6 +484,39 @@ fn lexer(input: &str) -> Vec<Token> {
 					Add, cur_idx, sz)),
 				Err(sz) => results.push(Token::new(
 					Unknown(line_idx,char_idx), cur_idx, sz)),
+			}
+			'b' => {
+				next(&mut char_idx, &mut chars);
+				match chars.peek() {
+					Some(&(_,'f')) => {
+						next(&mut char_idx, &mut chars);
+						results.push(Token::new(BF, cur_idx, 2));
+					}
+					Some(&(_,'t')) => {
+						next(&mut char_idx, &mut chars);
+						results.push(Token::new(BT, cur_idx, 2));
+					}
+					_ => results.push(Token::new(Byte, cur_idx, 1)),
+				}
+			}
+			'd' => {
+				next(&mut char_idx, &mut chars);
+				match chars.peek() {
+					Some(&(_,'c')) => {
+						next(&mut char_idx, &mut chars);
+						results.push(Token::new(Const, cur_idx, 2));
+					}
+					Some(&(_,'t')) => {
+						next(&mut char_idx, &mut chars);
+						results.push(Token::new(DT, cur_idx, 2));
+					}
+					_ => results.push(Token::new(
+						Unknown(line_idx,char_idx), cur_idx, 1)),
+				}
+			}
+			'l' => {
+				next(&mut char_idx, &mut chars);
+				results.push(Token::new(Long, cur_idx, 1));
 			}
 			'm' => {
 				match ident("mov",
@@ -204,6 +537,17 @@ fn lexer(input: &str) -> Vec<Token> {
 					Org, cur_idx, idx)),
 				Err(sz) => results.push(Token::new(
 					Unknown(line_idx,char_idx), cur_idx, sz)),
+			}
+			'r' => {
+				next(&mut char_idx, &mut chars);
+				let size = tokenize(
+					cur_idx, &mut chars, &mut char_idx,
+					|ch| ('0'..='9').contains(&ch));
+				results.push(Token::new(Register, cur_idx, size));
+			}
+			'w' => {
+				next(&mut char_idx, &mut chars);
+				results.push(Token::new(Word, cur_idx, 1));
 			}
 			';' => {
 				let size = next_line(
@@ -247,22 +591,148 @@ impl Token {
 	}
 }
 
-#[derive(Debug)]
+#[derive(Debug,Clone,Copy,PartialEq,Eq)]
 enum TokenType {
-	Comment,
-	Org,
-	Mov,
 	Add,
-	Plus,
-	Dash,
-	Register,
-	Comma,
-	Dot,
-	Immediate,
-	Number,
-	Identifier,
-	Colon,
 	Address,
+	BF,
+	BT,
+	Byte,
+	Colon,
+	Comma,
+	Comment,
+	Const,
+	Dash,
+	DT,
+	Dot,
+	Identifier,
+	Long,
+	Mov,
+	Newline,
+	Number,
+	Org,
+	Plus,
+	Register,
+	Word,
 	Unknown(usize,usize),
+}
+
+fn p_expected<'a,'b,'c>(
+	file: &'a str,
+	tok: &'b Token,
+	msg: &'c str,
+) -> String {
+	let (idx,sz) = (tok.index, tok.size);
+	let txt = &file[idx as usize..][..sz as usize];
+	format!("ERROR: Expected {msg}, Found '{txt}'")
+}
+
+fn p_number(
+	file: &str,
+	tok: &Token,
+) -> miette::Result<u64> {
+	let (idx,sz) = (tok.index, tok.size);
+	let txt = &file[idx as usize..][..sz as usize];
+	match txt.chars().next() {
+		Some('%') => {
+			u64::from_str_radix(&txt[1..].replace('_',""), 2)
+		}
+		Some('$') => {
+			u64::from_str_radix(&txt[1..].replace('_',""), 16)
+		}
+		Some(c) if c.is_numeric() => {
+			u64::from_str_radix(&txt.replace('_',""), 10)
+		}
+		_ => unreachable!("number tokens should only have valid binary, decimal, or hexadecimal values"),
+	}.into_diagnostic()
+}
+
+fn p_reg(file: &str, tok: &Token) -> miette::Result<usize> {
+	let (idx,sz) = (tok.index, tok.size);
+	let txt = &file[idx as usize..][..sz as usize];
+	usize::from_str_radix(&txt[1..], 10)
+		.into_diagnostic()
+}
+
+fn p_next<'a>(
+	tok_idx: &'_ mut usize,
+	tokens: &'a [Token],
+) -> &'a Token {
+	*tok_idx += 1;
+	&tokens[*tok_idx]
+}
+
+fn p_address(
+	file: &str,
+	tok_idx: &mut usize,
+	tokens: &[Token],
+) -> miette::Result<Arg> {
+	let nxt_tok = p_next(tok_idx, tokens);
+	if nxt_tok.tt == TokenType::Dash {
+		let nxt_tok = p_next(tok_idx, tokens);
+		if nxt_tok.tt == TokenType::Register {
+			let reg = p_reg(file, nxt_tok)?;
+			Ok(Arg::PreDec(reg))
+		} else {
+			eprintln!("{}", p_expected(file, nxt_tok, "Register"));
+			todo!("on error, skip to next newline");
+		}
+	} else if nxt_tok.tt == TokenType::Register {
+		let reg = p_reg(file, nxt_tok)?;
+
+		let nxt_tok = p_next(tok_idx, tokens);
+		if nxt_tok.tt == TokenType::Plus {
+			Ok(Arg::PostInc(reg))
+		} else {
+			*tok_idx -= 1;
+			Ok(Arg::IndReg(reg))
+		}
+	} else {
+		eprintln!("{}", p_expected(file, nxt_tok, "Address specifier (@r_/ @-r_ / @r_+)"));
+		todo!("on error, skip to next newline");
+	}
+}
+
+fn p_size(
+	file: &str,
+	tok_idx: &mut usize,
+	tokens: &[Token],
+) -> Result<usize, (usize,String)> {
+	let nxt_tok = p_next(tok_idx, tokens);
+	if nxt_tok.tt != TokenType::Dot {
+		return Err((0,p_expected(file, nxt_tok, "'.'")));
+	}
+
+	let nxt_tok = p_next(tok_idx, tokens);
+	match nxt_tok.tt {
+		TokenType::Byte => Ok(SIZE_BYTE),
+		TokenType::Word => Ok(SIZE_WORD),
+		TokenType::Long => Ok(SIZE_LONG),
+		_ => Err((1,p_expected(file, nxt_tok, "size specifier"))),
+	}
+}
+
+type Addr = u32;
+type Reg = usize;
+
+#[derive(Debug)]
+enum Arg {
+	IndImm(Addr),
+	IndReg(Reg),
+	Dir(Reg),
+	Num(u64),
+	PreDec(Reg),
+	PostInc(Reg),
+	Label(String),
+}
+
+#[derive(Debug)]
+enum Ins {
+	Add(usize,Arg,Arg),
+	Const(usize,u64),
+	BF(String),
+	DT(Reg),
+	Label(String),
+	Mov(usize,Arg,Arg),
 }
 
