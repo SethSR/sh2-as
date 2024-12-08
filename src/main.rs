@@ -25,9 +25,8 @@ fn main() -> miette::Result<()> {
 	let tokens = lexer(&file);
 
 	for token in &tokens {
-		let (idx,sz) = (token.index, token.size);
-		let out = format!("{:?}\t'{}'", token.tt,
-			&file[idx as usize..][..sz as usize]);
+		let txt = p_str(&file, &token);
+		let out = format!("{:?}\t'{txt}'", token.tt);
 		if let TokenType::Unknown(ln,ch) = token.tt {
 			println!("{out} ({ln},{ch})");
 		} else if !is_silent {
@@ -122,12 +121,11 @@ fn main() -> miette::Result<()> {
 					todo!("on error, skip to newline");
 				}
 
-				let (idx,sz) = (nxt_tok.index, nxt_tok.size);
-				let txt = &file[idx as usize..][..sz as usize];
+				let txt = p_str(&file, &nxt_tok);
 				section_table
 					.entry(skey)
 					.or_default()
-					.push(Ins::BF(txt.to_owned()));
+					.push(Ins::BF(txt));
 			}
 			BT => {
 				eprintln!("unexpected BT");
@@ -150,10 +148,12 @@ fn main() -> miette::Result<()> {
 				let nxt_tok = p_next(&mut tok_idx, &tokens);
 				let value = match nxt_tok.tt {
 					Number => {
-						p_number(&file, nxt_tok)?
+						let num = p_number(&file, nxt_tok)?;
+						Arg::Num(num)
 					}
 					Identifier => {
-						todo!("set value with label address");
+						let txt = p_str(&file, nxt_tok);
+						Arg::Label(txt)
 					}
 					_ => {
 						p_expected(&file, nxt_tok,
@@ -189,16 +189,15 @@ fn main() -> miette::Result<()> {
 				eprintln!("unexpected Dot");
 			}
 			Identifier => {
-				let (idx,sz) = (cur_tok.index, cur_tok.size);
-				let label = &file[idx as usize..][..sz as usize];
+				let label = p_str(&file, &cur_tok);
 
 				let nxt_tok = p_next(&mut tok_idx, &tokens);
 				if nxt_tok.tt == Colon {
 					section_table
 						.entry(skey)
 						.or_default()
-						.push(Ins::Label(label.to_owned()));
-					label_table.insert(label.to_owned());
+						.push(Ins::Label(label.clone()));
+					label_table.insert(label);
 				} else {
 					eprintln!("{}", p_expected(&file, nxt_tok,
 						"End of label declaration ':'"));
@@ -223,9 +222,8 @@ fn main() -> miette::Result<()> {
 				let nxt_tok = p_next(&mut tok_idx, &tokens);
 				let src = match nxt_tok.tt {
 					Identifier => {
-						let (idx,sz) = (nxt_tok.index, nxt_tok.size);
-						let txt = &file[idx as usize..][..sz as usize];
-						Arg::Label(txt.to_owned())
+						let txt = p_str(&file, &nxt_tok);
+						Arg::Label(txt)
 					}
 					Number => {
 						let num = p_number(&file, nxt_tok)?;
@@ -324,8 +322,7 @@ fn main() -> miette::Result<()> {
 				eprintln!("unexpected size specifier");
 			}
 			Unknown(ln,ch) => {
-				let (idx,sz) = (cur_tok.index,cur_tok.size);
-				let txt = &file[idx as usize..][..sz as usize];
+				let txt = p_str(&file, &cur_tok);
 				eprintln!("unknown item @ line {ln}, char {ch}: '{txt}'");
 			}
 		}
@@ -617,13 +614,20 @@ enum TokenType {
 	Unknown(usize,usize),
 }
 
+fn p_str(
+	file: &str,
+	tok: &Token,
+) -> String {
+	let (idx,sz) = (tok.index, tok.size);
+	file[idx as usize..][..sz as usize].to_owned()
+}
+
 fn p_expected<'a,'b,'c>(
 	file: &'a str,
 	tok: &'b Token,
 	msg: &'c str,
 ) -> String {
-	let (idx,sz) = (tok.index, tok.size);
-	let txt = &file[idx as usize..][..sz as usize];
+	let txt = p_str(file, tok);
 	format!("ERROR: Expected {msg}, Found '{txt}'")
 }
 
@@ -631,8 +635,7 @@ fn p_number(
 	file: &str,
 	tok: &Token,
 ) -> miette::Result<u64> {
-	let (idx,sz) = (tok.index, tok.size);
-	let txt = &file[idx as usize..][..sz as usize];
+	let txt = p_str(file, tok);
 	match txt.chars().next() {
 		Some('%') => {
 			u64::from_str_radix(&txt[1..].replace('_',""), 2)
@@ -648,8 +651,7 @@ fn p_number(
 }
 
 fn p_reg(file: &str, tok: &Token) -> miette::Result<usize> {
-	let (idx,sz) = (tok.index, tok.size);
-	let txt = &file[idx as usize..][..sz as usize];
+	let txt = p_str(file, tok);
 	usize::from_str_radix(&txt[1..], 10)
 		.into_diagnostic()
 }
@@ -729,7 +731,7 @@ enum Arg {
 #[derive(Debug)]
 enum Ins {
 	Add(usize,Arg,Arg),
-	Const(usize,u64),
+	Const(usize,Arg),
 	BF(String),
 	DT(Reg),
 	Label(String),
