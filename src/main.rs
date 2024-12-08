@@ -606,7 +606,7 @@ fn parser(
 					}
 					_ => {
 						p_expected(&file, nxt_tok,
-							"address literal or label");
+							"integer literal or label");
 						todo!("on error, skip to next newline character");
 					}
 				};
