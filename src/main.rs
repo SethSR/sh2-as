@@ -3,10 +3,6 @@ use std::collections::{HashMap, HashSet};
 
 use miette::{IntoDiagnostic, miette};
 
-const SIZE_BYTE: usize = 1;
-const SIZE_WORD: usize = 2;
-const SIZE_LONG: usize = 4;
-
 fn main() -> miette::Result<()> {
 	let mut args = std::env::args();
 	args.next();
@@ -371,13 +367,20 @@ impl std::fmt::Debug for Arg {
 }
 
 #[derive(Debug)]
+enum Size {
+	Byte,
+	Word,
+	Long,
+}
+
+#[derive(Debug)]
 enum Ins {
-	Add(usize,Arg,Arg),
-	Const(usize,Arg),
+	Add(Size,Arg,Arg),
+	Const(Size,Arg),
 	BF(String),
 	DT(Reg),
 	Label(String),
-	Mov(usize,Arg,Arg),
+	Mov(Size,Arg,Arg),
 }
 
 type SectionTable = HashMap<u64, Vec<Ins>>;
@@ -470,11 +473,12 @@ fn p_address(
 	}
 }
 
+type ErrFlag = usize;
 fn p_size(
 	file: &str,
 	tok_idx: &mut usize,
 	tokens: &[Token],
-) -> Result<usize, (usize,String)> {
+) -> Result<Size, (ErrFlag,String)> {
 	let nxt_tok = p_next(tok_idx, tokens);
 	if nxt_tok.tt != TokenType::Dot {
 		return Err((0,p_expected(file, nxt_tok, "'.'")));
@@ -482,9 +486,9 @@ fn p_size(
 
 	let nxt_tok = p_next(tok_idx, tokens);
 	match nxt_tok.tt {
-		TokenType::Byte => Ok(SIZE_BYTE),
-		TokenType::Word => Ok(SIZE_WORD),
-		TokenType::Long => Ok(SIZE_LONG),
+		TokenType::Byte => Ok(Size::Byte),
+		TokenType::Word => Ok(Size::Word),
+		TokenType::Long => Ok(Size::Long),
 		_ => Err((1,p_expected(file, nxt_tok, "size specifier"))),
 	}
 }
@@ -513,7 +517,7 @@ fn parser(
 					Ok(size) => size,
 					Err((n,msg)) => if n == 0 {
 						tok_idx -= 1;
-						SIZE_WORD
+						Size::Word
 					} else {
 						eprintln!("{msg}");
 						todo!("on error, skip to next newline");
@@ -685,7 +689,7 @@ fn parser(
 					Ok(size) => size,
 					Err((n,msg)) => if n == 0 {
 						tok_idx -= 1;
-						SIZE_WORD
+						Size::Word
 					} else {
 						eprintln!("{msg}");
 						todo!("on error, skip to newline");
