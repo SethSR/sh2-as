@@ -359,7 +359,7 @@ type Addr = u32;
 type Reg = usize;
 
 enum Arg {
-	DirImm(u64),
+	DirImm(i64),
 	DirReg(Reg),
 	DispR0(Reg),
 	DispReg(i8,Reg),
@@ -444,17 +444,17 @@ fn p_expected<'a,'b,'c>(
 fn p_number(
 	file: &str,
 	tok: &Token,
-) -> miette::Result<u64> {
+) -> miette::Result<i64> {
 	let txt = p_str(file, tok);
 	match txt.chars().next() {
 		Some('%') => {
-			u64::from_str_radix(&txt[1..].replace('_',""), 2)
+			i64::from_str_radix(&txt[1..].replace('_',""), 2)
 		}
 		Some('$') => {
-			u64::from_str_radix(&txt[1..].replace('_',""), 16)
+			i64::from_str_radix(&txt[1..].replace('_',""), 16)
 		}
 		Some(c) if c.is_numeric() => {
-			u64::from_str_radix(&txt.replace('_',""), 10)
+			i64::from_str_radix(&txt.replace('_',""), 10)
 		}
 		_ => unreachable!("number tokens should only have valid binary, decimal, or hexadecimal values"),
 	}.into_diagnostic()
@@ -553,7 +553,7 @@ fn parser(
 						let nxt_tok = p_next(&mut tok_idx, &tokens);
 						if nxt_tok.tt == Number {
 							let num = p_number(&file, nxt_tok)?;
-							Arg::DirImm((!num).wrapping_add(1))
+							Arg::DirImm(-num)
 						} else {
 							p_expected(&file, nxt_tok,
 								"Number after minus sign");
@@ -810,7 +810,7 @@ fn parser(
 			}
 			Org => {
 				let nxt_tok = p_next(&mut tok_idx, &tokens);
-				skey = p_number(&file, nxt_tok)?;
+				skey = p_number(&file, nxt_tok)? as u64;
 			}
 			Plus => {
 				eprintln!("unexpected Plus");
