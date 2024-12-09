@@ -73,7 +73,7 @@ fn main() -> miette::Result<()> {
 			.into_diagnostic()?;
 	}
 
-	todo!("output to '{target}'");
+	Ok(())
 }
 
 /* Lexer */
@@ -336,6 +336,7 @@ fn lexer(input: &str) -> Vec<Token> {
 					cur_idx, &mut chars, &mut char_idx,
 					|ch| ('a'..='z').contains(&ch)
 						|| ('A'..='Z').contains(&ch)
+						|| ('0'..='9').contains(&ch)
 						|| '_' == ch);
 				results.push(Token::new(Identifier,cur_idx,size));
 			}
@@ -919,7 +920,7 @@ fn resolver(
 						let cur_addr = section_start as u32 + results.len() as u32 * 2;
 						let offset = lbl_addr as i64 - cur_addr as i64;
 						let disp = offset / 2;
-						if disp < i8::MIN as i64 || disp > i8::MAX as i64 {
+						if !(i8::MIN as i64..=i8::MAX as i64).contains(&disp) {
 							todo!("Relative address too big! Switch to memory load and move?");
 						}
 						let disp = disp as i8 as u8 as u16;
@@ -949,11 +950,13 @@ fn resolver(
 						let cur_addr = section_start as u32 + results.len() as u32 * 2;
 						let offset = lbl_addr as i64 - cur_addr as i64;
 						let disp = offset / 4;
-						if disp < i8::MIN as i64 || disp > i8::MAX as i64 {
+						if !(i8::MIN as i64..=i8::MAX as i64).contains(&disp) {
 							todo!("Relative address too big! Switch to memory load and move?");
 						}
 						let disp = disp as i8;
 						results.push(Inc(Mov(Long,DispPC(disp),DirReg(*rdst))));
+					} else {
+						results.push(Inc(Mov(Long,Arg::Label(lsrc.clone()),DirReg(*rdst))));
 					}
 				}
 				Mov(Byte,DirImm(isrc),DirReg(rdst)) |
@@ -962,10 +965,10 @@ fn resolver(
 					let base = 0b1110_0000_0000_0000;
 					let nbyte = to_byte2(rdst);
 					let imm = *isrc as i64;
-					if imm < i16::MIN as i64 || imm > i16::MAX as i64 {
+					if !(i16::MIN as i64..=i16::MAX as i64).contains(&imm) {
 						// 32-bit immediate
 						eprintln!("Moving 32-bit immediates is not implemented yet. Declare a labeled constant and move the label instead.");
-					} else if imm < i8::MIN as i64 || imm > i8::MAX as i64 {
+					} else if !(i8::MIN as i64..=i8::MAX as i64).contains(&imm) {
 						// 16-bit immediate
 						eprintln!("Moving 16-bit immediates is not implemented yet. Declare a labeled constant and move the label instead.");
 					} else {
