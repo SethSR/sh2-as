@@ -910,8 +910,27 @@ fn resolver(
 					results.push(Com((value >> 16) as u16));
 					results.push(Com(*value as u16));
 				}
-				BF(label) => {}
-				DT(reg) => {}
+				BF(label) => {
+					if !label_table.contains_key(label) {
+						todo!("Unknown label '{label}'");
+					}
+					if let Some(lbl_addr) = label_table[label] {
+						let base = 0b10001011_00000000;
+						let cur_addr = section_start as u32 + results.len() as u32 * 2;
+						let offset = lbl_addr as i64 - cur_addr as i64;
+						let disp = offset / 2;
+						if disp < i8::MIN as i64 || disp > i8::MAX as i64 {
+							todo!("Relative address too big! Switch to memory load and move?");
+						}
+						let disp = disp as i8 as u8 as u16;
+						results.push(Com(base | disp));
+					}
+				}
+				DT(reg) => {
+					let base = 0b0100_0000_00010000;
+					let nbyte = to_byte2(reg);
+					results.push(Com(base | nbyte));
+				}
 				Ins::Label(label) => {
 					if !label_table.contains_key(label) {
 						todo!("Unknown label '{label}'");
