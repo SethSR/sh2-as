@@ -885,7 +885,21 @@ fn resolver(
 			use Size::*;
 			use State::*;
 			match instr {
-				Add(src,dst) => {}
+				Add(DirReg(rsrc),DirReg(rdst)) => {
+					let base = 0b0111_0000_0000_1100;
+					let nbyte = to_byte2(rdst);
+					let mbyte = to_byte3(rsrc);
+					results.push(Com(base | nbyte | mbyte));
+				}
+				Add(DirImm(isrc),DirReg(rdst)) => {
+					let base = 0b0111_0000_00000000;
+					let nbyte = to_byte2(rdst);
+					if !(i8::MIN as i64..=i8::MAX as i64).contains(isrc) {
+						todo!("Adding word and long immediate values is not implemented. Declare a constant and move it into a register instead.");
+					}
+					let iword = *isrc as i8 as u8 as u16;
+					results.push(Com(base | nbyte | iword));
+				}
 				Const(Byte,DirImm(_)) => {
 					eprintln!("Attempting to declare a byte constant. This doesn't work currently.");
 				}
