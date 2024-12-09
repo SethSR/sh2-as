@@ -49,7 +49,7 @@ fn main() -> miette::Result<()> {
 	let (section_table, label_table) = resolver(&section_table, &label_table);
 
 	for (address, section) in &section_table {
-		println!("Address: {address:08X}");
+		println!("Address: ${address:08X}");
 		for instr in section {
 			println!("  {instr:?}");
 		}
@@ -57,7 +57,7 @@ fn main() -> miette::Result<()> {
 
 	println!("Labels:");
 	for (label,address) in &label_table {
-		println!("  {label}: {address:?}");
+		println!("  {label}: {address:08X?}");
 	}
 
 	// TODO - srenshaw - This is just for debugging purposes. This is not the "real" output!
@@ -409,7 +409,7 @@ enum Size {
 
 #[derive(Debug)]
 enum Ins {
-	Add(Size,Arg,Arg),
+	Add(Arg,Arg),
 	Const(Size,Arg),
 	BF(String),
 	DT(Reg),
@@ -547,17 +547,6 @@ fn parser(
 		let cur_tok = &tokens[tok_idx];
 		match cur_tok.tt {
 			Add => {
-				let size = match p_size(&file, &mut tok_idx, &tokens) {
-					Ok(size) => size,
-					Err((n,msg)) => if n == 0 {
-						tok_idx -= 1;
-						Size::Word
-					} else {
-						eprintln!("{msg}");
-						todo!("on error, skip to next newline");
-					}
-				};
-
 				let nxt_tok = p_next(&mut tok_idx, &tokens);
 				let src = match nxt_tok.tt {
 					Dash => {
@@ -614,7 +603,7 @@ fn parser(
 				section_table
 					.entry(skey)
 					.or_default()
-					.push(Ins::Add(size,src,dst));
+					.push(Ins::Add(src,dst));
 			}
 			Address => {
 				eprintln!("unexpected Address");
@@ -896,8 +885,17 @@ fn resolver(
 			use Size::*;
 			use State::*;
 			match instr {
-				Add(size,src,dst) => {}
-				Const(size,value) => {}
+				Add(src,dst) => {}
+				Const(Byte,DirImm(_)) => {
+					eprintln!("Attempting to declare a byte constant. This doesn't work currently.");
+				}
+				Const(Word,DirImm(value)) => {
+					results.push(Com(*value as u16));
+				}
+				Const(Long,DirImm(value)) => {
+					results.push(Com((value >> 16) as u16));
+					results.push(Com(*value as u16));
+				}
 				BF(label) => {}
 				DT(reg) => {}
 				Ins::Label(label) => {
@@ -930,8 +928,18 @@ fn resolver(
 				Mov(Long,DirImm(isrc),DirReg(rdst)) => {
 					let base = 0b1110_0000_0000_0000;
 					let nbyte = to_byte2(rdst);
-					let iword = (isrc & 0xFF) as u16;
-					results.push(Com(base | nbyte | iword));
+					let imm = *isrc as i64;
+					if imm < i16::MIN as i64 || imm > i16::MAX as i64 {
+						// 32-bit immediate
+						eprintln!("Attempting to load a 32-bit value. This doesn't work currently.");
+					} else if imm < i8::MIN as i64 || imm > i8::MAX as i64 {
+						// 16-bit immediate
+						eprintln!("Attempting to load a 16-bit value. This doesn't work currently.");
+					} else {
+						// 8-bit immediate
+						let iword = (isrc & 0xFF) as u16;
+						results.push(Com(base | nbyte | iword));
+					}
 				}
 				Mov(Word,DispPC(disp),DirReg(rdst)) => {
 					let base = 0b1001_0000_00000000;
