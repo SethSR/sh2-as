@@ -32,7 +32,7 @@ fn main() -> miette::Result<()> {
 
 	let (section_table, label_table) = parser(&file, &tokens)?;
 
-	if is_silent {
+	if !is_silent {
 		for (address, section) in &section_table {
 			println!("Address: ${address:08X}");
 			for instr in section {
@@ -46,6 +46,31 @@ fn main() -> miette::Result<()> {
 		}
 	}
 
+	let (section_table, label_table) = resolver(&section_table, &label_table);
+
+	for (address, section) in &section_table {
+		println!("Address: {address:08X}");
+		for instr in section {
+			println!("  {instr:?}");
+		}
+	}
+
+	println!("Labels:");
+	for (label,address) in &label_table {
+		println!("  {label}: {address:?}");
+	}
+
+	// TODO - srenshaw - This is just for debugging purposes. This is not the "real" output!
+	for (_, section) in section_table {
+		let output = section.iter()
+			.map(|state| match state {
+				State::Com(word) => *word,
+				State::Inc(_) => 0xDEAD,
+			})
+			.flat_map(|word| [(word >> 8) as u8, word as u8])
+			.collect::<Vec<u8>>();
+		std::fs::write(&target, output)
+			.into_diagnostic()?;
 	}
 
 	todo!("output to '{target}'");
@@ -336,7 +361,10 @@ type Reg = usize;
 enum Arg {
 	DirImm(u64),
 	DirReg(Reg),
-	IndImm(Addr),
+	DispR0(Reg),
+	DispReg(i8,Reg),
+	DispPC(i8),
+	DispGBR(i8),
 	IndReg(Reg),
 	Label(String),
 	PostInc(Reg),
@@ -352,8 +380,14 @@ impl std::fmt::Debug for Arg {
 				write!(fmt, "DirImm(${imm:08X})"),
 			Arg::DirReg(reg) =>
 				write!(fmt, "DirReg(R{reg})"),
-			Arg::IndImm(addr) =>
-				write!(fmt, "IndImm(${addr:08X})"),
+			Arg::DispR0(reg) =>
+				write!(fmt, "DispR0(R{reg})"),
+			Arg::DispReg(disp,reg) =>
+				write!(fmt, "DispReg({disp},R{reg})"),
+			Arg::DispPC(disp) =>
+				write!(fmt, "DispPC({disp})"),
+			Arg::DispGBR(disp) =>
+				write!(fmt, "DispGBR({disp})"),
 			Arg::IndReg(reg) =>
 				write!(fmt, "IndReg(R{reg})"),
 			Arg::Label(lbl) =>
@@ -807,5 +841,208 @@ fn parser(
 	}
 
 	Ok((section_table, label_table))
+}
+
+enum State {
+	/// Instruction completed for output
+	Com(u16),
+	/// Instruction / directive still waiting on label resolution
+	Inc(Ins),
+}
+
+impl std::fmt::Debug for State {
+	fn fmt(&self, fmt: &mut std::fmt::Formatter) -> std::fmt::Result {
+		match self {
+			Self::Com(inst) => write!(fmt, "Com(${inst:04X})"),
+			Self::Inc(inst) => write!(fmt, "Inc({inst:?})"),
+		}
+	}
+}
+
+fn to_byte2(reg: &usize) -> u16 {
+	(reg << 12) as u16
+}
+
+fn to_byte3(reg: &usize) -> u16 {
+	(reg << 8) as u16
+}
+
+fn to_sbyte(size: &Size) -> u16 {
+	match size {
+		Size::Byte => 0b00,
+		Size::Word => 0b01,
+		Size::Long => 0b10,
+	}
+}
+
+fn resolver(
+	section_table: &SectionTable,
+	label_table: &LabelTable,
+) -> (
+	HashMap<u64, Vec<State>>,
+	HashMap<String, Option<u32>>,
+) {
+	let mut label_table = label_table
+		.into_iter()
+		.map(|label| (label.clone(),None))
+		.collect::<HashMap<String, Option<u32>>>();
+
+	let mut new_section_table = HashMap::<u64,Vec<State>>::new();
+	for (&section_start, section) in section_table {
+		let mut results = Vec::with_capacity(section.len());
+		for instr in section {
+			use Arg::*;
+			use Ins::*;
+			use Size::*;
+			use State::*;
+			match instr {
+				Add(size,src,dst) => {}
+				Const(size,value) => {}
+				BF(label) => {}
+				DT(reg) => {}
+				Ins::Label(label) => {
+					if !label_table.contains_key(label) {
+						todo!("Unknown label '{label}'");
+					}
+					if let Some(addr) = label_table[label] {
+						todo!("Label '{label}' already defined to {addr:08X}");
+					}
+					label_table.insert(label.clone(),
+						Some(section_start as u32 + results.len() as u32 * 2));
+				}
+				Mov(Long,Arg::Label(lsrc),DirReg(rdst)) => {
+					if !label_table.contains_key(lsrc) {
+						todo!("Unknown label '{lsrc}'");
+					}
+					if let Some(lbl_addr) = label_table[lsrc] {
+						let cur_addr = section_start as u32 + results.len() as u32 * 2;
+						let offset = lbl_addr as i64 - cur_addr as i64;
+						let disp = offset / 4;
+						if disp <= i8::MIN as i64 || disp >= i8::MAX as i64 {
+							todo!("Relative address too big! Switch to memory load and move?");
+						}
+						let disp = disp as i8;
+						results.push(Inc(Mov(Long,DispPC(disp),DirReg(*rdst))));
+					}
+				}
+				Mov(Byte,DirImm(isrc),DirReg(rdst)) |
+				Mov(Word,DirImm(isrc),DirReg(rdst)) |
+				Mov(Long,DirImm(isrc),DirReg(rdst)) => {
+					let base = 0b1110_0000_0000_0000;
+					let nbyte = to_byte2(rdst);
+					let iword = (isrc & 0xFF) as u16;
+					results.push(Com(base | nbyte | iword));
+				}
+				Mov(Word,DispPC(disp),DirReg(rdst)) => {
+					let base = 0b1001_0000_00000000;
+					let nbyte = to_byte2(rdst);
+					let dword = *disp as u8 as u16;
+					results.push(Com(base | nbyte | dword));
+				}
+				Mov(Long,DispPC(disp),DirReg(rdst)) => {
+					let base = 0b1101_0000_00000000;
+					let nbyte = to_byte2(rdst);
+					let dword = *disp as u8 as u16;
+					results.push(Com(base | nbyte | dword));
+				}
+				Mov(Byte,DirReg(rsrc),DirReg(rdst)) |
+				Mov(Word,DirReg(rsrc),DirReg(rdst)) |
+				Mov(Long,DirReg(rsrc),DirReg(rdst)) => {
+					let base = 0b0110_0000_0000_0011;
+					let nbyte = to_byte2(rdst);
+					let mbyte = to_byte3(rsrc);
+					results.push(Com(base | nbyte | mbyte));
+				}
+				Mov(size,DirReg(rsrc),IndReg(rdst)) => {
+					let base = 0b0010_0000_0000_0000;
+					let nbyte = to_byte2(rdst);
+					let mbyte = to_byte3(rsrc);
+					let sbyte = to_sbyte(size);
+					results.push(Com(base | nbyte | mbyte | sbyte));
+				}
+				Mov(size,IndReg(rsrc),DirReg(rdst)) => {
+					let base = 0b0110_0000_0000_0000;
+					let nbyte = to_byte2(rdst);
+					let mbyte = to_byte3(rsrc);
+					let sbyte = to_sbyte(size);
+					results.push(Com(base | nbyte | mbyte | sbyte));
+				}
+				Mov(size,DirReg(rsrc),PreDec(rdst)) => {
+					let base = 0b0010_0000_0000_0100;
+					let nbyte = to_byte2(rdst);
+					let mbyte = to_byte3(rsrc);
+					let sbyte = to_sbyte(size);
+					results.push(Com(base | nbyte | mbyte | sbyte));
+				}
+				Mov(size,PostInc(rsrc),DirReg(rdst)) => {
+					let base = 0b0110_0000_0000_0100;
+					let nbyte = to_byte2(rdst);
+					let mbyte = to_byte3(rsrc);
+					let sbyte = to_sbyte(size);
+					results.push(Com(base | nbyte | mbyte | sbyte));
+				}
+				Mov(size @ Byte,DirReg(0),DispReg(disp,rdst)) |
+				Mov(size @ Word,DirReg(0),DispReg(disp,rdst)) => {
+					let base = 0b10000000_0000_0000;
+					let sbyte = to_sbyte(size) << 8;
+					let nbyte = to_byte3(rdst);
+					let dbyte = (*disp as u8 as u16) & 0x0F;
+					results.push(Com(base | sbyte | nbyte | dbyte));
+				}
+				Mov(Long,DirReg(rsrc),DispReg(disp,rdst)) => {
+					let base = 0b0001_0000_0000_0000;
+					let nbyte = to_byte2(rdst);
+					let mbyte = to_byte3(rsrc);
+					let dbyte = (*disp as u8 as u16) & 0x0F;
+					results.push(Com(base | nbyte | mbyte | dbyte));
+				}
+				Mov(size @ Byte,DispReg(disp,rsrc),DirReg(0)) |
+				Mov(size @ Word,DispReg(disp,rsrc),DirReg(0)) => {
+					let base = 0b10000100_0000_0000;
+					let sbyte = to_sbyte(size) << 8;
+					let mbyte = to_byte3(rsrc);
+					let dbyte = (*disp as u8 as u16) & 0x0F;
+					results.push(Com(base | sbyte | mbyte | dbyte));
+				}
+				Mov(Long,DispReg(disp,rsrc),DirReg(rdst)) => {
+					let base = 0b0101_0000_0000_0000;
+					let nbyte = to_byte2(rdst);
+					let mbyte = to_byte3(rsrc);
+					let dbyte = (*disp as u8 as u16) & 0x0F;
+					results.push(Com(base | nbyte | mbyte | dbyte));
+				}
+				Mov(size,DirReg(rsrc),DispR0(rdst)) => {
+					let base = 0b0000_0000_0000_0100;
+					let nbyte = to_byte2(rdst);
+					let mbyte = to_byte3(rsrc);
+					let sbyte = to_sbyte(size);
+					results.push(Com(base | nbyte | mbyte | sbyte));
+				}
+				Mov(size,DispR0(rsrc),DirReg(rdst)) => {
+					let base = 0b0000_0000_0000_1100;
+					let nbyte = to_byte2(rdst);
+					let mbyte = to_byte3(rsrc);
+					let sbyte = to_sbyte(size);
+					results.push(Com(base | nbyte | mbyte | sbyte));
+				}
+				Mov(size,DirReg(0),DispGBR(disp)) => {
+					let base = 0b11000000_00000000;
+					let sbyte = to_sbyte(size) << 8;
+					let dword = *disp as u8 as u16;
+					results.push(Com(base | sbyte | dword));
+				}
+				Mov(size,DispGBR(disp),DirReg(0)) => {
+					let base = 0b11000100_00000000;
+					let sbyte = to_sbyte(size) << 8;
+					let dword = *disp as u8 as u16;
+					results.push(Com(base | sbyte | dword));
+				}
+				_ => todo!("Invalid instruction: {instr:?}"),
+			}
+		}
+		new_section_table.insert(section_start, results);
+	}
+
+	(new_section_table, label_table)
 }
 
