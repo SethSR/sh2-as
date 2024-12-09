@@ -949,7 +949,7 @@ fn resolver(
 						let cur_addr = section_start as u32 + results.len() as u32 * 2;
 						let offset = lbl_addr as i64 - cur_addr as i64;
 						let disp = offset / 4;
-						if disp <= i8::MIN as i64 || disp >= i8::MAX as i64 {
+						if disp < i8::MIN as i64 || disp > i8::MAX as i64 {
 							todo!("Relative address too big! Switch to memory load and move?");
 						}
 						let disp = disp as i8;
@@ -964,10 +964,10 @@ fn resolver(
 					let imm = *isrc as i64;
 					if imm < i16::MIN as i64 || imm > i16::MAX as i64 {
 						// 32-bit immediate
-						eprintln!("Attempting to load a 32-bit value. This doesn't work currently.");
+						eprintln!("Moving 32-bit immediates is not implemented yet. Declare a labeled constant and move the label instead.");
 					} else if imm < i8::MIN as i64 || imm > i8::MAX as i64 {
 						// 16-bit immediate
-						eprintln!("Attempting to load a 16-bit value. This doesn't work currently.");
+						eprintln!("Moving 16-bit immediates is not implemented yet. Declare a labeled constant and move the label instead.");
 					} else {
 						// 8-bit immediate
 						let iword = (isrc & 0xFF) as u16;
