@@ -30,7 +30,7 @@ fn main() -> miette::Result<()> {
 		}
 	}
 
-	let (section_table, label_table) = parser(&file, &tokens)?;
+	let (mut section_table, mut label_table) = parser(&file, &tokens)?;
 
 	if !is_silent {
 		for (address, section) in &section_table {
@@ -41,12 +41,17 @@ fn main() -> miette::Result<()> {
 		}
 
 		println!("Labels:");
-		for label in &label_table {
+		for (label,_) in &label_table {
 			println!("\t{label}");
 		}
 	}
 
-	let (section_table, label_table) = resolver(&section_table, &label_table);
+	let limit = 10;
+	for _ in 0..limit {
+		if resolver(&mut section_table, &mut label_table) {
+			break;
+		}
+	}
 
 	for (address, section) in &section_table {
 		println!("Address: ${address:08X}");
@@ -64,8 +69,8 @@ fn main() -> miette::Result<()> {
 	for (_, section) in section_table {
 		let output = section.iter()
 			.map(|state| match state {
-				State::Com(word) => *word,
-				State::Inc(_) => 0xDEAD,
+				State::Complete(word) => *word,
+				State::Incomplete(_) => 0xDEAD,
 			})
 			.flat_map(|word| [(word >> 8) as u8, word as u8])
 			.collect::<Vec<u8>>();
@@ -359,6 +364,7 @@ fn lexer(input: &str) -> Vec<Token> {
 type Addr = u32;
 type Reg = usize;
 
+#[derive(Clone)]
 enum Arg {
 	DirImm(i64),
 	DirReg(Reg),
@@ -401,14 +407,14 @@ impl std::fmt::Debug for Arg {
 	}
 }
 
-#[derive(Debug)]
+#[derive(Debug,Clone,Copy)]
 enum Size {
 	Byte,
 	Word,
 	Long,
 }
 
-#[derive(Debug)]
+#[derive(Debug,Clone)]
 enum Ins {
 	Add(Arg,Arg),
 	Const(Size,Arg),
@@ -418,8 +424,25 @@ enum Ins {
 	Mov(Size,Arg,Arg),
 }
 
-type SectionTable = HashMap<u64, Vec<Ins>>;
-type LabelTable = HashSet<String>;
+#[derive(Clone)]
+enum State {
+	/// Instruction completed for output
+	Complete(u16),
+	/// Instruction / directive still waiting on label resolution
+	Incomplete(Ins),
+}
+
+impl std::fmt::Debug for State {
+	fn fmt(&self, fmt: &mut std::fmt::Formatter) -> std::fmt::Result {
+		match self {
+			Self::Complete(inst) => write!(fmt, "Complete(${inst:04X})"),
+			Self::Incomplete(inst) => write!(fmt, "Incomplete({inst:?})"),
+		}
+	}
+}
+
+type SectionTable = HashMap<u64, Vec<State>>;
+type LabelTable = HashMap<String,Option<u32>>;
 
 fn p_str(
 	file: &str,
@@ -604,7 +627,7 @@ fn parser(
 				section_table
 					.entry(skey)
 					.or_default()
-					.push(Ins::Add(src,dst));
+					.push(State::Incomplete(Ins::Add(src,dst)));
 			}
 			Address => {
 				eprintln!("unexpected Address");
@@ -621,7 +644,7 @@ fn parser(
 				section_table
 					.entry(skey)
 					.or_default()
-					.push(Ins::BF(txt));
+					.push(State::Incomplete(Ins::BF(txt)));
 			}
 			BT => {
 				eprintln!("unexpected BT");
@@ -662,7 +685,7 @@ fn parser(
 				section_table
 					.entry(skey)
 					.or_default()
-					.push(Ins::Const(sz,value));
+					.push(State::Incomplete(Ins::Const(sz,value)));
 			}
 			Dash => {
 				eprintln!("unexpected Dash");
@@ -679,7 +702,7 @@ fn parser(
 				section_table
 					.entry(skey)
 					.or_default()
-					.push(Ins::DT(reg));
+					.push(State::Incomplete(Ins::DT(reg)));
 			}
 			Dot => {
 				eprintln!("unexpected Dot");
@@ -689,7 +712,7 @@ fn parser(
 
 				let nxt_tok = p_next(&mut tok_idx, &tokens);
 				if nxt_tok.tt == Colon {
-					if label_table.contains(&label) {
+					if label_table.contains_key(&label) {
 						eprintln!("{}", p_error("Label '{label}' already defined"));
 						todo!("on error, skip to newline");
 					}
@@ -697,8 +720,8 @@ fn parser(
 					section_table
 						.entry(skey)
 						.or_default()
-						.push(Ins::Label(label.clone()));
-					label_table.insert(label);
+						.push(State::Incomplete(Ins::Label(label.clone())));
+					label_table.insert(label, None);
 				} else {
 					eprintln!("{}", p_expected(&file, nxt_tok,
 						"End of label declaration ':'"));
@@ -803,7 +826,7 @@ fn parser(
 				section_table
 					.entry(skey)
 					.or_default()
-					.push(Ins::Mov(size,src,dst));
+					.push(State::Incomplete(Ins::Mov(size,src,dst)));
 			}
 			Newline => {} // skip newlines
 			Number => {
@@ -833,22 +856,6 @@ fn parser(
 	Ok((section_table, label_table))
 }
 
-enum State {
-	/// Instruction completed for output
-	Com(u16),
-	/// Instruction / directive still waiting on label resolution
-	Inc(Ins),
-}
-
-impl std::fmt::Debug for State {
-	fn fmt(&self, fmt: &mut std::fmt::Formatter) -> std::fmt::Result {
-		match self {
-			Self::Com(inst) => write!(fmt, "Com(${inst:04X})"),
-			Self::Inc(inst) => write!(fmt, "Inc({inst:?})"),
-		}
-	}
-}
-
 fn to_byte2(reg: &usize) -> u16 {
 	(reg << 12) as u16
 }
@@ -866,244 +873,244 @@ fn to_sbyte(size: &Size) -> u16 {
 }
 
 fn resolver(
-	section_table: &SectionTable,
-	label_table: &LabelTable,
-) -> (
-	HashMap<u64, Vec<State>>,
-	HashMap<String, Option<u32>>,
-) {
-	let mut label_table = label_table
-		.into_iter()
-		.map(|label| (label.clone(),None))
-		.collect::<HashMap<String, Option<u32>>>();
+	section_table: &mut SectionTable,
+	label_table: &mut LabelTable,
+) -> bool {
+	let mut is_resolved = true;
 
-	let mut new_section_table = HashMap::<u64,Vec<State>>::new();
-	for (&section_start, section) in section_table {
-		let mut results = Vec::with_capacity(section.len());
-		for instr in section {
-			use Arg::*;
-			use Ins::*;
-			use Size::*;
-			use State::*;
-			match instr {
-				Add(DirReg(rsrc),DirReg(rdst)) => {
-					let base = 0b0111_0000_0000_1100;
-					let nbyte = to_byte2(rdst);
-					let mbyte = to_byte3(rsrc);
-					results.push(Com(base | nbyte | mbyte));
-				}
-				Add(DirImm(isrc),DirReg(rdst)) => {
-					let base = 0b0111_0000_00000000;
-					let nbyte = to_byte2(rdst);
-					if !(i8::MIN as i64..=i8::MAX as i64).contains(isrc) {
-						todo!("Adding word and long immediate values is not implemented. Declare a constant and move it into a register instead.");
+	*section_table = section_table.iter()
+		.map(|(&section_start, section)| {
+			let mut results = Vec::with_capacity(section.len());
+			for instr in section {
+				use Arg::*;
+				use Ins::*;
+				use Size::*;
+				use State::*;
+				match instr {
+					Incomplete(Add(DirReg(rsrc),DirReg(rdst))) => {
+						let base = 0b0111_0000_0000_1100;
+						let nbyte = to_byte2(rdst);
+						let mbyte = to_byte3(rsrc);
+						results.push(Complete(base | nbyte | mbyte));
 					}
-					let iword = *isrc as i8 as u8 as u16;
-					results.push(Com(base | nbyte | iword));
-				}
-				Const(Byte,DirImm(_)) => {
-					eprintln!("Attempting to declare a byte constant. This doesn't work currently.");
-				}
-				Const(Word,DirImm(value)) => {
-					results.push(Com(*value as u16));
-				}
-				Const(Long,DirImm(value)) => {
-					results.push(Com((value >> 16) as u16));
-					results.push(Com(*value as u16));
-				}
-				BF(label) => {
-					if !label_table.contains_key(label) {
-						todo!("Unknown label '{label}'");
-					}
-					if let Some(lbl_addr) = label_table[label] {
-						let base = 0b10001011_00000000;
-						let cur_addr = section_start as u32 + results.len() as u32 * 2;
-						let offset = lbl_addr as i64 - cur_addr as i64;
-						let disp = offset / 2;
-						if !(i8::MIN as i64..=i8::MAX as i64).contains(&disp) {
-							todo!("Relative address too big! Switch to memory load and move?");
+					Incomplete(Add(DirImm(isrc),DirReg(rdst))) => {
+						let base = 0b0111_0000_00000000;
+						let nbyte = to_byte2(rdst);
+						if !(i8::MIN as i64..=i8::MAX as i64).contains(&isrc) {
+							todo!("Adding word and long immediate values is not implemented. Declare a constant and move it into a register instead.");
 						}
-						let disp = disp as i8 as u8 as u16;
-						results.push(Com(base | disp));
+						let iword = *isrc as i8 as u8 as u16;
+						results.push(Complete(base | nbyte | iword));
 					}
-				}
-				DT(reg) => {
-					let base = 0b0100_0000_00010000;
-					let nbyte = to_byte2(reg);
-					results.push(Com(base | nbyte));
-				}
-				Ins::Label(label) => {
-					if !label_table.contains_key(label) {
-						todo!("Unknown label '{label}'");
+					Incomplete(Const(Byte,DirImm(_))) => {
+						eprintln!("Attempting to declare a byte constant. This doesn't work currently.");
 					}
-					if let Some(addr) = label_table[label] {
-						todo!("Label '{label}' already defined to {addr:08X}");
+					Incomplete(Const(Word,DirImm(value))) => {
+						results.push(Complete(*value as u16));
 					}
-					label_table.insert(label.clone(),
-						Some(section_start as u32 + results.len() as u32 * 2));
-				}
-				Mov(Word,Arg::Label(lsrc),DirReg(rdst)) => {
-					if !label_table.contains_key(lsrc) {
-						todo!("Unknown label '{lsrc}'");
+					Incomplete(Const(Long,DirImm(value))) => {
+						results.push(Complete((*value >> 16) as u16));
+						results.push(Complete(*value as u16));
 					}
-					if let Some(lbl_addr) = label_table[lsrc] {
-						let cur_addr = section_start as u32 + results.len() as u32 * 2;
-						let offset = lbl_addr as i64 - cur_addr as i64;
-						let disp = offset / 2;
-						if !(i8::MIN as i64..=i8::MAX as i64).contains(&disp) {
-							todo!("Relative address too big! Switch to memory load and move?");
+					Incomplete(BF(label)) => {
+						if !label_table.contains_key(label) {
+							todo!("Unknown label '{label}'");
 						}
-						let disp = disp as i8;
-						results.push(Inc(Mov(Word,DispPC(disp),DirReg(*rdst))));
-					} else {
-						results.push(Inc(Mov(Word,Arg::Label(lsrc.clone()),DirReg(*rdst))));
-					}
-				}
-				Mov(Long,Arg::Label(lsrc),DirReg(rdst)) => {
-					if !label_table.contains_key(lsrc) {
-						todo!("Unknown label '{lsrc}'");
-					}
-					if let Some(lbl_addr) = label_table[lsrc] {
-						let cur_addr = section_start as u32 + results.len() as u32 * 2;
-						let offset = lbl_addr as i64 - cur_addr as i64;
-						let disp = offset / 4;
-						if !(i8::MIN as i64..=i8::MAX as i64).contains(&disp) {
-							todo!("Relative address too big! Switch to memory load and move?");
+						if let Some(lbl_addr) = label_table[label] {
+							let base = 0b10001011_00000000;
+							let cur_addr = section_start as u32 + results.len() as u32 * 2;
+							let offset = lbl_addr as i64 - cur_addr as i64;
+							let disp = offset / 2;
+							if !(i8::MIN as i64..=i8::MAX as i64).contains(&disp) {
+								todo!("Relative address too big! Switch to memory load and move?");
+							}
+							let disp = disp as i8 as u8 as u16;
+							results.push(Complete(base | disp));
 						}
-						let disp = disp as i8;
-						results.push(Inc(Mov(Long,DispPC(disp),DirReg(*rdst))));
-					} else {
-						results.push(Inc(Mov(Long,Arg::Label(lsrc.clone()),DirReg(*rdst))));
 					}
-				}
-				Mov(Byte,DirImm(isrc),DirReg(rdst)) |
-				Mov(Word,DirImm(isrc),DirReg(rdst)) |
-				Mov(Long,DirImm(isrc),DirReg(rdst)) => {
-					let base = 0b1110_0000_0000_0000;
-					let nbyte = to_byte2(rdst);
-					let imm = *isrc as i64;
-					if !(i16::MIN as i64..=i16::MAX as i64).contains(&imm) {
-						// 32-bit immediate
-						eprintln!("Moving 32-bit immediates is not implemented yet. Declare a labeled constant and move the label instead.");
-					} else if !(i8::MIN as i64..=i8::MAX as i64).contains(&imm) {
-						// 16-bit immediate
-						eprintln!("Moving 16-bit immediates is not implemented yet. Declare a labeled constant and move the label instead.");
-					} else {
-						// 8-bit immediate
-						let iword = (isrc & 0xFF) as u16;
-						results.push(Com(base | nbyte | iword));
+					Incomplete(DT(reg)) => {
+						let base = 0b0100_0000_00010000;
+						let nbyte = to_byte2(reg);
+						results.push(Complete(base | nbyte));
 					}
+					Incomplete(Ins::Label(label)) => {
+						if !label_table.contains_key(label) {
+							todo!("Unknown label '{label}'");
+						}
+						if let Some(addr) = label_table[label] {
+							todo!("Label '{label}' already defined to {addr:08X}");
+						}
+						label_table.insert(label.clone(),
+							Some(section_start as u32 + results.len() as u32 * 2));
+					}
+					Incomplete(Mov(Word,Arg::Label(lsrc),DirReg(rdst))) => {
+						if !label_table.contains_key(lsrc) {
+							todo!("Unknown label '{lsrc}'");
+						}
+						if let Some(lbl_addr) = label_table[lsrc] {
+							let cur_addr = section_start as u32 + results.len() as u32 * 2;
+							let offset = lbl_addr as i64 - cur_addr as i64;
+							let disp = offset / 2;
+							if !(i8::MIN as i64..=i8::MAX as i64).contains(&disp) {
+								todo!("Relative address too big! Switch to memory load and move?");
+							}
+							let disp = disp as i8;
+							results.push(Incomplete(Mov(Word,DispPC(disp),DirReg(*rdst))));
+							is_resolved = false;
+						} else {
+							results.push(Incomplete(Mov(Word,Arg::Label(lsrc.clone()),DirReg(*rdst))));
+							is_resolved = false;
+						}
+					}
+					Incomplete(Mov(Long,Arg::Label(lsrc),DirReg(rdst))) => {
+						if !label_table.contains_key(lsrc) {
+							todo!("Unknown label '{lsrc}'");
+						}
+						if let Some(lbl_addr) = label_table[lsrc] {
+							let cur_addr = section_start as u32 + results.len() as u32 * 2;
+							let offset = lbl_addr as i64 - cur_addr as i64;
+							let disp = offset / 4;
+							if !(i8::MIN as i64..=i8::MAX as i64).contains(&disp) {
+								todo!("Relative address too big! Switch to memory load and move?");
+							}
+							let disp = disp as i8;
+							results.push(Incomplete(Mov(Long,DispPC(disp),DirReg(*rdst))));
+							is_resolved = false;
+						} else {
+							results.push(Incomplete(Mov(Long,Arg::Label(lsrc.clone()),DirReg(*rdst))));
+							is_resolved = false;
+						}
+					}
+					Incomplete(Mov(Byte,DirImm(isrc),DirReg(rdst))) |
+					Incomplete(Mov(Word,DirImm(isrc),DirReg(rdst))) |
+					Incomplete(Mov(Long,DirImm(isrc),DirReg(rdst))) => {
+						let base = 0b1110_0000_0000_0000;
+						let nbyte = to_byte2(rdst);
+						let imm = *isrc as i64;
+						if !(i16::MIN as i64..=i16::MAX as i64).contains(&imm) {
+							// 32-bit immediate
+							eprintln!("Moving 32-bit immediates is not implemented yet. Declare a labeled constant and move the label instead.");
+						} else if !(i8::MIN as i64..=i8::MAX as i64).contains(&imm) {
+							// 16-bit immediate
+							eprintln!("Moving 16-bit immediates is not implemented yet. Declare a labeled constant and move the label instead.");
+						} else {
+							// 8-bit immediate
+							let iword = (*isrc & 0xFF) as u16;
+							results.push(Complete(base | nbyte | iword));
+						}
+					}
+					Incomplete(Mov(Word,DispPC(disp),DirReg(rdst))) => {
+						let base = 0b1001_0000_00000000;
+						let nbyte = to_byte2(rdst);
+						let dword = *disp as u8 as u16;
+						results.push(Complete(base | nbyte | dword));
+					}
+					Incomplete(Mov(Long,DispPC(disp),DirReg(rdst))) => {
+						let base = 0b1101_0000_00000000;
+						let nbyte = to_byte2(rdst);
+						let dword = *disp as u8 as u16;
+						results.push(Complete(base | nbyte | dword));
+					}
+					Incomplete(Mov(Byte,DirReg(rsrc),DirReg(rdst))) |
+					Incomplete(Mov(Word,DirReg(rsrc),DirReg(rdst))) |
+					Incomplete(Mov(Long,DirReg(rsrc),DirReg(rdst))) => {
+						let base = 0b0110_0000_0000_0011;
+						let nbyte = to_byte2(rdst);
+						let mbyte = to_byte3(rsrc);
+						results.push(Complete(base | nbyte | mbyte));
+					}
+					Incomplete(Mov(size,DirReg(rsrc),IndReg(rdst))) => {
+						let base = 0b0010_0000_0000_0000;
+						let nbyte = to_byte2(rdst);
+						let mbyte = to_byte3(rsrc);
+						let sbyte = to_sbyte(size);
+						results.push(Complete(base | nbyte | mbyte | sbyte));
+					}
+					Incomplete(Mov(size,IndReg(rsrc),DirReg(rdst))) => {
+						let base = 0b0110_0000_0000_0000;
+						let nbyte = to_byte2(rdst);
+						let mbyte = to_byte3(rsrc);
+						let sbyte = to_sbyte(size);
+						results.push(Complete(base | nbyte | mbyte | sbyte));
+					}
+					Incomplete(Mov(size,DirReg(rsrc),PreDec(rdst))) => {
+						let base = 0b0010_0000_0000_0100;
+						let nbyte = to_byte2(rdst);
+						let mbyte = to_byte3(rsrc);
+						let sbyte = to_sbyte(size);
+						results.push(Complete(base | nbyte | mbyte | sbyte));
+					}
+					Incomplete(Mov(size,PostInc(rsrc),DirReg(rdst))) => {
+						let base = 0b0110_0000_0000_0100;
+						let nbyte = to_byte2(rdst);
+						let mbyte = to_byte3(rsrc);
+						let sbyte = to_sbyte(size);
+						results.push(Complete(base | nbyte | mbyte | sbyte));
+					}
+					Incomplete(Mov(size @ Byte,DirReg(0),DispReg(disp,rdst))) |
+					Incomplete(Mov(size @ Word,DirReg(0),DispReg(disp,rdst))) => {
+						let base = 0b10000000_0000_0000;
+						let sbyte = to_sbyte(size) << 8;
+						let nbyte = to_byte3(rdst);
+						let dbyte = (*disp as u8 as u16) & 0x0F;
+						results.push(Complete(base | sbyte | nbyte | dbyte));
+					}
+					Incomplete(Mov(Long,DirReg(rsrc),DispReg(disp,rdst))) => {
+						let base = 0b0001_0000_0000_0000;
+						let nbyte = to_byte2(rdst);
+						let mbyte = to_byte3(rsrc);
+						let dbyte = (*disp as u8 as u16) & 0x0F;
+						results.push(Complete(base | nbyte | mbyte | dbyte));
+					}
+					Incomplete(Mov(size @ Byte,DispReg(disp,rsrc),DirReg(0))) |
+					Incomplete(Mov(size @ Word,DispReg(disp,rsrc),DirReg(0))) => {
+						let base = 0b10000100_0000_0000;
+						let sbyte = to_sbyte(size) << 8;
+						let mbyte = to_byte3(rsrc);
+						let dbyte = (*disp as u8 as u16) & 0x0F;
+						results.push(Complete(base | sbyte | mbyte | dbyte));
+					}
+					Incomplete(Mov(Long,DispReg(disp,rsrc),DirReg(rdst))) => {
+						let base = 0b0101_0000_0000_0000;
+						let nbyte = to_byte2(rdst);
+						let mbyte = to_byte3(rsrc);
+						let dbyte = (*disp as u8 as u16) & 0x0F;
+						results.push(Complete(base | nbyte | mbyte | dbyte));
+					}
+					Incomplete(Mov(size,DirReg(rsrc),DispR0(rdst))) => {
+						let base = 0b0000_0000_0000_0100;
+						let nbyte = to_byte2(rdst);
+						let mbyte = to_byte3(rsrc);
+						let sbyte = to_sbyte(size);
+						results.push(Complete(base | nbyte | mbyte | sbyte));
+					}
+					Incomplete(Mov(size,DispR0(rsrc),DirReg(rdst))) => {
+						let base = 0b0000_0000_0000_1100;
+						let nbyte = to_byte2(rdst);
+						let mbyte = to_byte3(rsrc);
+						let sbyte = to_sbyte(size);
+						results.push(Complete(base | nbyte | mbyte | sbyte));
+					}
+					Incomplete(Mov(size,DirReg(0),DispGBR(disp))) => {
+						let base = 0b11000000_00000000;
+						let sbyte = to_sbyte(size) << 8;
+						let dword = *disp as u8 as u16;
+						results.push(Complete(base | sbyte | dword));
+					}
+					Incomplete(Mov(size,DispGBR(disp),DirReg(0))) => {
+						let base = 0b11000100_00000000;
+						let sbyte = to_sbyte(size) << 8;
+						let dword = *disp as u8 as u16;
+						results.push(Complete(base | sbyte | dword));
+					}
+					Complete(_) => results.push(instr.clone()),
+					_ => todo!("Invalid instruction: {instr:?}"),
 				}
-				Mov(Word,DispPC(disp),DirReg(rdst)) => {
-					let base = 0b1001_0000_00000000;
-					let nbyte = to_byte2(rdst);
-					let dword = *disp as u8 as u16;
-					results.push(Com(base | nbyte | dword));
-				}
-				Mov(Long,DispPC(disp),DirReg(rdst)) => {
-					let base = 0b1101_0000_00000000;
-					let nbyte = to_byte2(rdst);
-					let dword = *disp as u8 as u16;
-					results.push(Com(base | nbyte | dword));
-				}
-				Mov(Byte,DirReg(rsrc),DirReg(rdst)) |
-				Mov(Word,DirReg(rsrc),DirReg(rdst)) |
-				Mov(Long,DirReg(rsrc),DirReg(rdst)) => {
-					let base = 0b0110_0000_0000_0011;
-					let nbyte = to_byte2(rdst);
-					let mbyte = to_byte3(rsrc);
-					results.push(Com(base | nbyte | mbyte));
-				}
-				Mov(size,DirReg(rsrc),IndReg(rdst)) => {
-					let base = 0b0010_0000_0000_0000;
-					let nbyte = to_byte2(rdst);
-					let mbyte = to_byte3(rsrc);
-					let sbyte = to_sbyte(size);
-					results.push(Com(base | nbyte | mbyte | sbyte));
-				}
-				Mov(size,IndReg(rsrc),DirReg(rdst)) => {
-					let base = 0b0110_0000_0000_0000;
-					let nbyte = to_byte2(rdst);
-					let mbyte = to_byte3(rsrc);
-					let sbyte = to_sbyte(size);
-					results.push(Com(base | nbyte | mbyte | sbyte));
-				}
-				Mov(size,DirReg(rsrc),PreDec(rdst)) => {
-					let base = 0b0010_0000_0000_0100;
-					let nbyte = to_byte2(rdst);
-					let mbyte = to_byte3(rsrc);
-					let sbyte = to_sbyte(size);
-					results.push(Com(base | nbyte | mbyte | sbyte));
-				}
-				Mov(size,PostInc(rsrc),DirReg(rdst)) => {
-					let base = 0b0110_0000_0000_0100;
-					let nbyte = to_byte2(rdst);
-					let mbyte = to_byte3(rsrc);
-					let sbyte = to_sbyte(size);
-					results.push(Com(base | nbyte | mbyte | sbyte));
-				}
-				Mov(size @ Byte,DirReg(0),DispReg(disp,rdst)) |
-				Mov(size @ Word,DirReg(0),DispReg(disp,rdst)) => {
-					let base = 0b10000000_0000_0000;
-					let sbyte = to_sbyte(size) << 8;
-					let nbyte = to_byte3(rdst);
-					let dbyte = (*disp as u8 as u16) & 0x0F;
-					results.push(Com(base | sbyte | nbyte | dbyte));
-				}
-				Mov(Long,DirReg(rsrc),DispReg(disp,rdst)) => {
-					let base = 0b0001_0000_0000_0000;
-					let nbyte = to_byte2(rdst);
-					let mbyte = to_byte3(rsrc);
-					let dbyte = (*disp as u8 as u16) & 0x0F;
-					results.push(Com(base | nbyte | mbyte | dbyte));
-				}
-				Mov(size @ Byte,DispReg(disp,rsrc),DirReg(0)) |
-				Mov(size @ Word,DispReg(disp,rsrc),DirReg(0)) => {
-					let base = 0b10000100_0000_0000;
-					let sbyte = to_sbyte(size) << 8;
-					let mbyte = to_byte3(rsrc);
-					let dbyte = (*disp as u8 as u16) & 0x0F;
-					results.push(Com(base | sbyte | mbyte | dbyte));
-				}
-				Mov(Long,DispReg(disp,rsrc),DirReg(rdst)) => {
-					let base = 0b0101_0000_0000_0000;
-					let nbyte = to_byte2(rdst);
-					let mbyte = to_byte3(rsrc);
-					let dbyte = (*disp as u8 as u16) & 0x0F;
-					results.push(Com(base | nbyte | mbyte | dbyte));
-				}
-				Mov(size,DirReg(rsrc),DispR0(rdst)) => {
-					let base = 0b0000_0000_0000_0100;
-					let nbyte = to_byte2(rdst);
-					let mbyte = to_byte3(rsrc);
-					let sbyte = to_sbyte(size);
-					results.push(Com(base | nbyte | mbyte | sbyte));
-				}
-				Mov(size,DispR0(rsrc),DirReg(rdst)) => {
-					let base = 0b0000_0000_0000_1100;
-					let nbyte = to_byte2(rdst);
-					let mbyte = to_byte3(rsrc);
-					let sbyte = to_sbyte(size);
-					results.push(Com(base | nbyte | mbyte | sbyte));
-				}
-				Mov(size,DirReg(0),DispGBR(disp)) => {
-					let base = 0b11000000_00000000;
-					let sbyte = to_sbyte(size) << 8;
-					let dword = *disp as u8 as u16;
-					results.push(Com(base | sbyte | dword));
-				}
-				Mov(size,DispGBR(disp),DirReg(0)) => {
-					let base = 0b11000100_00000000;
-					let sbyte = to_sbyte(size) << 8;
-					let dword = *disp as u8 as u16;
-					results.push(Com(base | sbyte | dword));
-				}
-				_ => todo!("Invalid instruction: {instr:?}"),
 			}
-		}
-		new_section_table.insert(section_start, results);
-	}
 
-	(new_section_table, label_table)
+			(section_start, results)
+		}).collect();
+
+	is_resolved
 }
 
