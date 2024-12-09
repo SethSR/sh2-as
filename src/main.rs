@@ -942,6 +942,23 @@ fn resolver(
 					label_table.insert(label.clone(),
 						Some(section_start as u32 + results.len() as u32 * 2));
 				}
+				Mov(Word,Arg::Label(lsrc),DirReg(rdst)) => {
+					if !label_table.contains_key(lsrc) {
+						todo!("Unknown label '{lsrc}'");
+					}
+					if let Some(lbl_addr) = label_table[lsrc] {
+						let cur_addr = section_start as u32 + results.len() as u32 * 2;
+						let offset = lbl_addr as i64 - cur_addr as i64;
+						let disp = offset / 2;
+						if !(i8::MIN as i64..=i8::MAX as i64).contains(&disp) {
+							todo!("Relative address too big! Switch to memory load and move?");
+						}
+						let disp = disp as i8;
+						results.push(Inc(Mov(Word,DispPC(disp),DirReg(*rdst))));
+					} else {
+						results.push(Inc(Mov(Word,Arg::Label(lsrc.clone()),DirReg(*rdst))));
+					}
+				}
 				Mov(Long,Arg::Label(lsrc),DirReg(rdst)) => {
 					if !label_table.contains_key(lsrc) {
 						todo!("Unknown label '{lsrc}'");
