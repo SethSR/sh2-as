@@ -1,7 +1,7 @@
 
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 
-use miette::{IntoDiagnostic, miette};
+use miette::IntoDiagnostic;
 
 fn main() -> miette::Result<()> {
 	let mut args = std::env::args();
