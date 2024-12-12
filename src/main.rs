@@ -276,78 +276,12 @@ fn lexer(input: &str) -> Vec<Token> {
 					|ch| ['0','1'].contains(&ch) || '_' == ch);
 				results.push(Token::new(Number, cur_idx, size));
 			}
-			'a' => match ident("add",
-				cur_idx, &mut chars,
-				&mut char_idx, &mut line_idx,
-			) {
-				Ok(sz) => results.push(Token::new(
-					Add, cur_idx, sz)),
-				Err(sz) => results.push(Token::new(
-					Unknown(line_idx,char_idx), cur_idx, sz)),
-			}
-			'b' => {
-				next(&mut char_idx, &mut chars);
-				match chars.peek() {
-					Some(&(_,'f')) => {
-						next(&mut char_idx, &mut chars);
-						results.push(Token::new(BF, cur_idx, 2));
-					}
-					Some(&(_,'t')) => {
-						next(&mut char_idx, &mut chars);
-						results.push(Token::new(BT, cur_idx, 2));
-					}
-					_ => results.push(Token::new(Byte, cur_idx, 1)),
-				}
-			}
-			'd' => {
-				next(&mut char_idx, &mut chars);
-				match chars.peek() {
-					Some(&(_,'c')) => {
-						next(&mut char_idx, &mut chars);
-						results.push(Token::new(Const, cur_idx, 2));
-					}
-					Some(&(_,'t')) => {
-						next(&mut char_idx, &mut chars);
-						results.push(Token::new(DT, cur_idx, 2));
-					}
-					_ => results.push(Token::new(
-						Unknown(line_idx,char_idx), cur_idx, 1)),
-				}
-			}
-			'l' => {
-				next(&mut char_idx, &mut chars);
-				results.push(Token::new(Long, cur_idx, 1));
-			}
-			'm' => {
-				match ident("mov",
-					cur_idx, &mut chars,
-					&mut char_idx, &mut line_idx,
-				) {
-					Ok(sz) => results.push(Token::new(
-						Mov, cur_idx, sz)),
-					Err(sz) => results.push(Token::new(
-						Unknown(line_idx,char_idx), cur_idx, sz)),
-				}
-			}
-			'o' => match ident("org",
-				cur_idx, &mut chars,
-				&mut char_idx, &mut line_idx)
-			{
-				Ok(idx) => results.push(Token::new(
-					Org, cur_idx, idx)),
-				Err(sz) => results.push(Token::new(
-					Unknown(line_idx,char_idx), cur_idx, sz)),
-			}
 			'r' => {
 				next(&mut char_idx, &mut chars);
 				let size = tokenize(
 					cur_idx, &mut chars, &mut char_idx,
 					|ch| ('0'..='9').contains(&ch));
 				results.push(Token::new(Register, cur_idx, size));
-			}
-			'w' => {
-				next(&mut char_idx, &mut chars);
-				results.push(Token::new(Word, cur_idx, 1));
 			}
 			';' => {
 				let size = next_line(
@@ -363,7 +297,19 @@ fn lexer(input: &str) -> Vec<Token> {
 						|| ('A'..='Z').contains(&ch)
 						|| ('0'..='9').contains(&ch)
 						|| '_' == ch);
-				results.push(Token::new(Identifier,cur_idx,size));
+				let tt = match input[cur_idx..][..size].to_lowercase().as_str() {
+					"add" => Add,
+					"bf" => BF,
+					"bt" => BT,
+					"dc" => Const,
+					"dt" => DT,
+					"l" => Long,
+					"mov" => Mov,
+					"org" => Org,
+					"w" => Word,
+					_ => Identifier,
+				};
+				results.push(Token::new(tt,cur_idx,size));
 			}
 			_ => {
 				let size = next_line(
