@@ -107,17 +107,21 @@ enum TokenType {
 	Comma,
 	Comment,
 	Const,
+	CParen,
 	Dash,
 	DT,
 	Dot,
+	Equal,
 	Identifier,
 	Long,
 	Mov,
 	Newline,
 	Number,
+	OParen,
 	Org,
 	Plus,
 	Register,
+	Slash,
 	Word,
 	Unknown(usize,usize),
 }
@@ -219,6 +223,10 @@ fn lexer(input: &str) -> Vec<Token> {
 				next(&mut char_idx, &mut chars);
 				results.push(Token::new(Dash, cur_idx, 1));
 			}
+			'/' => {
+				next(&mut char_idx, &mut chars);
+				results.push(Token::new(Slash, cur_idx, 1));
+			}
 			'@' => {
 				next(&mut char_idx, &mut chars);
 				results.push(Token::new(Address, cur_idx, 1));
@@ -237,6 +245,18 @@ fn lexer(input: &str) -> Vec<Token> {
 					cur_idx, &mut chars, &mut char_idx,
 					|ch| ('0'..='9').contains(&ch) || '_' == ch);
 				results.push(Token::new(Number, cur_idx, size));
+			}
+			'=' => {
+				next(&mut char_idx, &mut chars);
+				results.push(Token::new(Equal, cur_idx, 1));
+			}
+			'(' => {
+				next(&mut char_idx, &mut chars);
+				results.push(Token::new(OParen,cur_idx,1));
+			}
+			')' => {
+				next(&mut char_idx, &mut chars);
+				results.push(Token::new(CParen,cur_idx,1));
 			}
 			'$' => {
 				next(&mut char_idx, &mut chars);
@@ -677,6 +697,7 @@ fn parser(
 					.or_default()
 					.push(State::Incomplete(Ins::Const(sz,value)));
 			}
+			CParen => eprintln!("unexpected close-parenthesis"),
 			Dash => eprintln!("unexpected Dash"),
 			DT => {
 				let nxt_tok = p_next(&mut tok_idx, &tokens);
@@ -693,6 +714,7 @@ fn parser(
 					.push(State::Incomplete(Ins::DT(reg)));
 			}
 			Dot => eprintln!("unexpected Dot"),
+			Equal => eprintln!("unexpected Equal"),
 			Identifier => {
 				let label = p_str(&file, &cur_tok);
 
@@ -814,12 +836,14 @@ fn parser(
 			}
 			Newline => {} // skip newlines
 			Number => eprintln!("unexpected Number"),
+			OParen => eprintln!("unexpected open-parenthesis"),
 			Org => {
 				let nxt_tok = p_next(&mut tok_idx, &tokens);
 				skey = p_number(&file, nxt_tok)? as u64;
 			}
 			Plus => eprintln!("unexpected Plus"),
 			Register => eprintln!("unexpected Register"),
+			Slash => eprintln!("unexpected Slash"),
 			Word => eprintln!("unexpected size specifier"),
 			Unknown(ln,ch) => {
 				let txt = p_str(&file, &cur_tok);
