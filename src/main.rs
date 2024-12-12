@@ -629,9 +629,7 @@ fn parser(
 					.or_default()
 					.push(State::Incomplete(Ins::Add(src,dst)));
 			}
-			Address => {
-				eprintln!("unexpected Address");
-			}
+			Address => eprintln!("unexpected Address"),
 			BF => {
 				let nxt_tok = p_next(&mut tok_idx, &tokens);
 				if nxt_tok.tt != Identifier {
@@ -646,18 +644,10 @@ fn parser(
 					.or_default()
 					.push(State::Incomplete(Ins::BF(txt)));
 			}
-			BT => {
-				eprintln!("unexpected BT");
-			}
-			Byte => {
-				eprintln!("unexpected size specifier");
-			}
-			Colon => {
-				eprintln!("unexpected Colon");
-			}
-			Comma => {
-				eprintln!("unexpected Comma");
-			}
+			BT => eprintln!("unexpected BT"),
+			Byte => eprintln!("unexpected size specifier"),
+			Colon => eprintln!("unexpected Colon"),
+			Comma => eprintln!("unexpected Comma"),
 			Comment => {} // skip comments
 			Const => {
 				let Ok(sz) = p_size(&file, &mut tok_idx, &tokens) else {
@@ -687,9 +677,7 @@ fn parser(
 					.or_default()
 					.push(State::Incomplete(Ins::Const(sz,value)));
 			}
-			Dash => {
-				eprintln!("unexpected Dash");
-			}
+			Dash => eprintln!("unexpected Dash"),
 			DT => {
 				let nxt_tok = p_next(&mut tok_idx, &tokens);
 				if nxt_tok.tt != Register {
@@ -704,9 +692,7 @@ fn parser(
 					.or_default()
 					.push(State::Incomplete(Ins::DT(reg)));
 			}
-			Dot => {
-				eprintln!("unexpected Dot");
-			}
+			Dot => eprintln!("unexpected Dot"),
 			Identifier => {
 				let label = p_str(&file, &cur_tok);
 
@@ -728,9 +714,7 @@ fn parser(
 					todo!("on error, skip to newline");
 				}
 			}
-			Long => {
-				eprintln!("unexpected size specifier");
-			}
+			Long => eprintln!("unexpected size specifier"),
 			Mov => {
 				let size = match p_size(&file, &mut tok_idx, &tokens) {
 					Ok(size) => size,
@@ -829,22 +813,14 @@ fn parser(
 					.push(State::Incomplete(Ins::Mov(size,src,dst)));
 			}
 			Newline => {} // skip newlines
-			Number => {
-				eprintln!("unexpected Number");
-			}
+			Number => eprintln!("unexpected Number"),
 			Org => {
 				let nxt_tok = p_next(&mut tok_idx, &tokens);
 				skey = p_number(&file, nxt_tok)? as u64;
 			}
-			Plus => {
-				eprintln!("unexpected Plus");
-			}
-			Register => {
-				eprintln!("unexpected Register");
-			}
-			Word => {
-				eprintln!("unexpected size specifier");
-			}
+			Plus => eprintln!("unexpected Plus"),
+			Register => eprintln!("unexpected Register"),
+			Word => eprintln!("unexpected size specifier"),
 			Unknown(ln,ch) => {
 				let txt = p_str(&file, &cur_tok);
 				eprintln!("unknown item @ line {ln}, char {ch}: '{txt}'");
