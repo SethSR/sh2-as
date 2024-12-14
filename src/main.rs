@@ -100,38 +100,101 @@ impl Token {
 
 #[derive(Debug,Clone,Copy,PartialEq,Eq)]
 enum TokenType {
-	Add,
-	And,
+	ADD,
+	ADDC,
+	ADDV,
+	AND,
 	Address,
 	BF,
+	BRA,
+	BRAF,
+	BSR,
+	BSRF,
 	BT,
 	Byte,
+	CLRMAC,
+	CLRT,
+	CMP,
+	CParen,
 	Colon,
 	Comma,
 	Comment,
 	Const,
-	CParen,
-	Dash,
+	DIV0S,
+	DIV0U,
+	DIV1,
+	DMULS,
+	DMULU,
 	DT,
+	Dash,
 	Dot,
+	EQ,
+	EXTS,
+	EXTU,
 	Equal,
+	GE,
+	GT,
+	HI,
+	HS,
 	Identifier,
+	JMP,
+	JSR,
+	LDC,
+	LDS,
 	Long,
-	Mov,
-	Mulu,
+	MAC,
+	MOV,
+	MOVA,
+	MOVT,
+	MUL,
+	MULS,
+	MULU,
+	NEG,
+	NEGC,
+	NOP,
+	NOT,
 	Newline,
 	Number,
 	OParen,
-	Or,
+	OR,
 	Org,
+	PL,
+	PZ,
 	Plus,
+	ROTCL,
+	ROTCR,
+	ROTL,
+	ROTR,
+	RTE,
+	RTS,
 	Register,
-	Rts,
+	SETT,
+	SHAL,
+	SHAR,
+	SHLL,
+	SHLL16,
+	SHLL2,
+	SHLL8,
+	SHLR,
+	SHLR16,
+	SHLR2,
+	SHLR8,
+	SLEEP,
+	STC,
+	STR,
+	STS,
+	SUB,
+	SUBC,
+	SUBV,
+	SWAP,
 	Slash,
-	Sts,
-	Word,
-	Xor,
+	TAS,
+	TRAPA,
+	TST,
 	Unknown,
+	Word,
+	XOR,
+	XTRCT,
 }
 
 fn lexer(input: &str) -> Vec<Token> {
@@ -269,6 +332,7 @@ fn lexer(input: &str) -> Vec<Token> {
 				let size = next_line(cur_idx, &mut chars, &mut char_idx);
 				results.push(Token::new(Comment, cur_idx, size, line_idx, char_idx_s+1));
 			}
+
 			c if c.is_alphabetic() => {
 				let size = tokenize(
 					cur_idx, &mut chars, &mut char_idx,
@@ -277,22 +341,85 @@ fn lexer(input: &str) -> Vec<Token> {
 						|| ('0'..='9').contains(&ch)
 						|| '_' == ch);
 				let tt = match input[cur_idx..][..size].to_lowercase().as_str() {
-					"add" => Add,
-					"and" => And,
+					"add" => ADD,
+					"addc" => ADDC,
+					"addv" => ADDV,
+					"and" => AND,
 					"b" => Byte,
 					"bf" => BF,
+					"bra" => BRA,
+					"braf" => BRAF,
+					"bsr" => BSR,
+					"bsrf" => BSRF,
 					"bt" => BT,
+					"clrmac" => CLRMAC,
+					"clrt" => CLRT,
+					"cmp" => CMP,
 					"dc" => Const,
+					"div0s" => DIV0S,
+					"div0u" => DIV0U,
+					"div1" => DIV1,
+					"dmuls" => DMULS,
+					"dmulu" => DMULU,
 					"dt" => DT,
+					"eq" => EQ,
+					"exts" => EXTS,
+					"extu" => EXTU,
+					"ge" => GE,
+					"gt" => GT,
+					"hi" => HI,
+					"hs" => HS,
+					"jmp" => JMP,
+					"jsr" => JSR,
 					"l" => Long,
-					"mov" => Mov,
-					"mulu" => Mulu,
-					"or" => Or,
+					"ldc" => LDC,
+					"lds" => LDS,
+					"mac" => MAC,
+					"mov" => MOV,
+					"mova" => MOVA,
+					"movt" => MOVT,
+					"mul" => MUL,
+					"muls" => MULS,
+					"mulu" => MULU,
+					"neg" => NEG,
+					"negc" => NEGC,
+					"nop" => NOP,
+					"not" => NOT,
+					"or" => OR,
 					"org" => Org,
-					"rts" => Rts,
-					"sts" => Sts,
+					"pl" => PL,
+					"pz" => PZ,
+					"rotcl" => ROTCL,
+					"rotcr" => ROTCR,
+					"rotl" => ROTL,
+					"rotr" => ROTR,
+					"rte" => RTE,
+					"rts" => RTS,
+					"sett" => SETT,
+					"shal" => SHAL,
+					"shar" => SHAR,
+					"shll" => SHLL,
+					"shll16" => SHLL16,
+					"shll2" => SHLL2,
+					"shll8" => SHLL8,
+					"shlr" => SHLR,
+					"shlr16" => SHLR16,
+					"shlr2" => SHLR2,
+					"shlr8" => SHLR8,
+					"sleep" => SLEEP,
+					"stc" => STC,
+					"str" => STR,
+					"sts" => STS,
+					"sub" => SUB,
+					"subc" => SUBC,
+					"subv" => SUBV,
+					"swap" => SWAP,
+					"tas" => TAS,
+					"trapa" => TRAPA,
+					"tst" => TST,
 					"w" => Word,
-					"xor" => Xor,
+					"xor" => XOR,
+					"xtrct" => XTRCT,
 					_ => Identifier,
 				};
 				results.push(Token::new(tt,cur_idx,size, line_idx, char_idx - size + 1));
@@ -367,12 +494,12 @@ enum Size {
 
 #[derive(Debug,Clone)]
 enum Ins {
-	Add(Arg,Arg),
+	ADD(Arg,Arg),
 	Const(Size,Arg),
 	BF(String),
 	DT(Reg),
 	Label(String),
-	Mov(Size,Arg,Arg),
+	MOV(Size,Arg,Arg),
 }
 
 #[derive(Clone)]
@@ -521,7 +648,7 @@ fn parser(
 		use TokenType::*;
 		let cur_tok = &tokens[tok_idx];
 		match cur_tok.tt {
-			Add => {
+			ADD => {
 				let nxt_tok = p_next(&mut tok_idx, &tokens);
 				let src = match nxt_tok.tt {
 					Dash => {
@@ -578,9 +705,11 @@ fn parser(
 				section_table
 					.entry(skey)
 					.or_default()
-					.push(State::Incomplete(Ins::Add(src,dst)));
+					.push(State::Incomplete(Ins::ADD(src,dst)));
 			}
-			And => eprintln!("unexpected AND"),
+			ADDC => eprintln!("unexpected ADDC"),
+			ADDV => eprintln!("unexpected ADDV"),
+			AND => eprintln!("unexpected AND"),
 			Address => eprintln!("unexpected Address"),
 			BF => {
 				let nxt_tok = p_next(&mut tok_idx, &tokens);
@@ -596,8 +725,15 @@ fn parser(
 					.or_default()
 					.push(State::Incomplete(Ins::BF(txt)));
 			}
+			BRA => eprintln!("unexpected BRA"),
+			BRAF => eprintln!("unexpected BRAF"),
+			BSR => eprintln!("unexpected BSR"),
+			BSRF => eprintln!("unexpected BSRF"),
 			BT => eprintln!("unexpected BT"),
 			Byte => eprintln!("unexpected size specifier"),
+			CLRMAC => eprintln!("unexpected CLRMAC"),
+			CLRT => eprintln!("unexpected CLRT"),
+			CMP => eprintln!("unexpected CMP"),
 			Colon => eprintln!("unexpected Colon"),
 			Comma => eprintln!("unexpected Comma"),
 			Comment => {} // skip comments
@@ -631,6 +767,11 @@ fn parser(
 			}
 			CParen => eprintln!("unexpected close-parenthesis"),
 			Dash => eprintln!("unexpected Dash"),
+			DIV0S => eprintln!("unexpected DIV0S"),
+			DIV0U => eprintln!("unexpected DIV0U"),
+			DIV1 => eprintln!("unexpected DIV1"),
+			DMULS => eprintln!("unexpected DMULS"),
+			DMULU => eprintln!("unexpected DMULU"),
 			DT => {
 				let nxt_tok = p_next(&mut tok_idx, &tokens);
 				if nxt_tok.tt != Register {
@@ -646,7 +787,14 @@ fn parser(
 					.push(State::Incomplete(Ins::DT(reg)));
 			}
 			Dot => eprintln!("unexpected Dot"),
+			EQ => eprintln!("unexpected EQ"),
 			Equal => eprintln!("unexpected Equal"),
+			EXTS => eprintln!("unexpected EXTS"),
+			EXTU => eprintln!("unexpected EXTU"),
+			GE => eprintln!("unexpected GE"),
+			GT => eprintln!("unexpected GT"),
+			HI => eprintln!("unexpected HI"),
+			HS => eprintln!("unexpected HS"),
 			Identifier => {
 				let label = p_str(&file, &cur_tok);
 
@@ -668,8 +816,13 @@ fn parser(
 					todo!("on error, skip to newline");
 				}
 			}
+			JMP => eprintln!("unexpected JMP"),
+			JSR => eprintln!("unexpected JSR"),
+			LDC => eprintln!("unexpected LDC"),
+			LDS => eprintln!("unexpected LDS"),
 			Long => eprintln!("unexpected size specifier"),
-			Mov => {
+			MAC => eprintln!("unexpected MAC"),
+			MOV => {
 				let size = match p_size(&file, &mut tok_idx, &tokens) {
 					Ok(size) => size,
 					Err((n,msg)) => if n == 0 {
@@ -764,24 +917,61 @@ fn parser(
 				section_table
 					.entry(skey)
 					.or_default()
-					.push(State::Incomplete(Ins::Mov(size,src,dst)));
+					.push(State::Incomplete(Ins::MOV(size,src,dst)));
 			}
-			Mulu => eprintln!("unexpected MULU"),
+			MOVA => eprintln!("unexpected MOVA"),
+			MOVT => eprintln!("unexpected MOVT"),
+			MUL => eprintln!("unexpected MUL"),
+			MULS => eprintln!("unexpected MULS"),
+			MULU => eprintln!("unexpected MULU"),
+			NEG => eprintln!("unexpected NEG"),
+			NEGC => eprintln!("unexpected NEGC"),
 			Newline => {} // skip newlines
+			NOP => eprintln!("unexpected NOP"),
+			NOT => eprintln!("unexpected NOT"),
 			Number => eprintln!("unexpected Number"),
 			OParen => eprintln!("unexpected open-parenthesis"),
-			Or => eprintln!("unexpected OR"),
+			OR => eprintln!("unexpected OR"),
 			Org => {
 				let nxt_tok = p_next(&mut tok_idx, &tokens);
 				skey = p_number(&file, nxt_tok)? as u64;
 			}
+			PL => eprintln!("unexpected PL"),
 			Plus => eprintln!("unexpected Plus"),
+			PZ => eprintln!("unexpected PZ"),
 			Register => eprintln!("unexpected Register"),
-			Rts => eprintln!("unexpected RTS"),
+			ROTCL => eprintln!("unexpected ROTCL"),
+			ROTCR => eprintln!("unexpected ROTCR"),
+			ROTL => eprintln!("unexpected ROTL"),
+			ROTR => eprintln!("unexpected ROTR"),
+			RTE => eprintln!("unexpected RTE"),
+			RTS => eprintln!("unexpected RTS"),
+			SETT => eprintln!("unexpected SETT"),
+			SHAL => eprintln!("unexpected SHAL"),
+			SHAR => eprintln!("unexpected SHAR"),
+			SHLL => eprintln!("unexpected SHLL"),
+			SHLL2 => eprintln!("unexpected SHLL2"),
+			SHLL8 => eprintln!("unexpected SHLL8"),
+			SHLL16 => eprintln!("unexpected SHLL16"),
+			SHLR => eprintln!("unexpected SHLR"),
+			SHLR2 => eprintln!("unexpected SHLR2"),
+			SHLR8 => eprintln!("unexpected SHLR8"),
+			SHLR16 => eprintln!("unexpected SHLR16"),
 			Slash => eprintln!("unexpected Slash"),
-			Sts => eprintln!("unexpected STS"),
+			SLEEP => eprintln!("unexpected SLEEP"),
+			STC => eprintln!("unexpected STC"),
+			STS => eprintln!("unexpected STS"),
+			STR => eprintln!("unexpected STR"),
+			SUB => eprintln!("unexpected SUB"),
+			SUBC => eprintln!("unexpected SUBC"),
+			SUBV => eprintln!("unexpected SUBV"),
+			SWAP => eprintln!("unexpected SWAP"),
+			TAS => eprintln!("unexpected TAS"),
+			TRAPA => eprintln!("unexpected TRAPA"),
+			TST => eprintln!("unexpected TST"),
 			Word => eprintln!("unexpected size specifier"),
-			Xor => eprintln!("unexpected XOR"),
+			XOR => eprintln!("unexpected XOR"),
+			XTRCT => eprintln!("unexpected XTRCT"),
 			Unknown => {
 				let txt = p_str(&file, &cur_tok);
 				eprintln!("unknown item @ line {}, char {}: '{txt}'", cur_tok.line, cur_tok.pos);
@@ -824,13 +1014,13 @@ fn resolver(
 				use Size::*;
 				use State::*;
 				match instr {
-					Incomplete(Add(DirReg(rsrc),DirReg(rdst))) => {
+					Incomplete(ADD(DirReg(rsrc),DirReg(rdst))) => {
 						let base = 0b0111_0000_0000_1100;
 						let nbyte = to_byte2(rdst);
 						let mbyte = to_byte3(rsrc);
 						results.push(Complete(base | nbyte | mbyte));
 					}
-					Incomplete(Add(DirImm(isrc),DirReg(rdst))) => {
+					Incomplete(ADD(DirImm(isrc),DirReg(rdst))) => {
 						let base = 0b0111_0000_00000000;
 						let nbyte = to_byte2(rdst);
 						if !(i8::MIN as i64..=i8::MAX as i64).contains(&isrc) {
@@ -880,7 +1070,7 @@ fn resolver(
 						label_table.insert(label.clone(),
 							Some(section_start as u32 + results.len() as u32 * 2));
 					}
-					Incomplete(Mov(Word,Arg::Label(lsrc),DirReg(rdst))) => {
+					Incomplete(MOV(Word,Arg::Label(lsrc),DirReg(rdst))) => {
 						if !label_table.contains_key(lsrc) {
 							todo!("Unknown label '{lsrc}'");
 						}
@@ -892,14 +1082,14 @@ fn resolver(
 								todo!("Relative address too big! Switch to memory load and move?");
 							}
 							let disp = disp as i8;
-							results.push(Incomplete(Mov(Word,DispPC(disp),DirReg(*rdst))));
+							results.push(Incomplete(MOV(Word,DispPC(disp),DirReg(*rdst))));
 							is_resolved = false;
 						} else {
-							results.push(Incomplete(Mov(Word,Arg::Label(lsrc.clone()),DirReg(*rdst))));
+							results.push(Incomplete(MOV(Word,Arg::Label(lsrc.clone()),DirReg(*rdst))));
 							is_resolved = false;
 						}
 					}
-					Incomplete(Mov(Long,Arg::Label(lsrc),DirReg(rdst))) => {
+					Incomplete(MOV(Long,Arg::Label(lsrc),DirReg(rdst))) => {
 						if !label_table.contains_key(lsrc) {
 							todo!("Unknown label '{lsrc}'");
 						}
@@ -911,130 +1101,128 @@ fn resolver(
 								todo!("Relative address too big! Switch to memory load and move?");
 							}
 							let disp = disp as i8;
-							results.push(Incomplete(Mov(Long,DispPC(disp),DirReg(*rdst))));
+							results.push(Incomplete(MOV(Long,DispPC(disp),DirReg(*rdst))));
 							is_resolved = false;
 						} else {
-							results.push(Incomplete(Mov(Long,Arg::Label(lsrc.clone()),DirReg(*rdst))));
+							results.push(Incomplete(MOV(Long,Arg::Label(lsrc.clone()),DirReg(*rdst))));
 							is_resolved = false;
 						}
 					}
-					Incomplete(Mov(Byte,DirImm(isrc),DirReg(rdst))) |
-					Incomplete(Mov(Word,DirImm(isrc),DirReg(rdst))) |
-					Incomplete(Mov(Long,DirImm(isrc),DirReg(rdst))) => {
+					Incomplete(MOV(Byte,DirImm(isrc),DirReg(rdst))) |
+					Incomplete(MOV(Word,DirImm(isrc),DirReg(rdst))) |
+					Incomplete(MOV(Long,DirImm(isrc),DirReg(rdst))) => {
 						let base = 0b1110_0000_0000_0000;
 						let nbyte = to_byte2(rdst);
 						let imm = *isrc as i64;
 						if !(i16::MIN as i64..=i16::MAX as i64).contains(&imm) {
 							// 32-bit immediate
-							eprintln!("Moving 32-bit immediates is not implemented yet. Declare a labeled constant and move the label instead.");
 						} else if !(i8::MIN as i64..=i8::MAX as i64).contains(&imm) {
 							// 16-bit immediate
-							eprintln!("Moving 16-bit immediates is not implemented yet. Declare a labeled constant and move the label instead.");
 						} else {
 							// 8-bit immediate
 							let iword = (*isrc & 0xFF) as u16;
 							results.push(Complete(base | nbyte | iword));
 						}
 					}
-					Incomplete(Mov(Word,DispPC(disp),DirReg(rdst))) => {
+					Incomplete(MOV(Word,DispPC(disp),DirReg(rdst))) => {
 						let base = 0b1001_0000_00000000;
 						let nbyte = to_byte2(rdst);
 						let dword = *disp as u8 as u16;
 						results.push(Complete(base | nbyte | dword));
 					}
-					Incomplete(Mov(Long,DispPC(disp),DirReg(rdst))) => {
+					Incomplete(MOV(Long,DispPC(disp),DirReg(rdst))) => {
 						let base = 0b1101_0000_00000000;
 						let nbyte = to_byte2(rdst);
 						let dword = *disp as u8 as u16;
 						results.push(Complete(base | nbyte | dword));
 					}
-					Incomplete(Mov(Byte,DirReg(rsrc),DirReg(rdst))) |
-					Incomplete(Mov(Word,DirReg(rsrc),DirReg(rdst))) |
-					Incomplete(Mov(Long,DirReg(rsrc),DirReg(rdst))) => {
+					Incomplete(MOV(Byte,DirReg(rsrc),DirReg(rdst))) |
+					Incomplete(MOV(Word,DirReg(rsrc),DirReg(rdst))) |
+					Incomplete(MOV(Long,DirReg(rsrc),DirReg(rdst))) => {
 						let base = 0b0110_0000_0000_0011;
 						let nbyte = to_byte2(rdst);
 						let mbyte = to_byte3(rsrc);
 						results.push(Complete(base | nbyte | mbyte));
 					}
-					Incomplete(Mov(size,DirReg(rsrc),IndReg(rdst))) => {
+					Incomplete(MOV(size,DirReg(rsrc),IndReg(rdst))) => {
 						let base = 0b0010_0000_0000_0000;
 						let nbyte = to_byte2(rdst);
 						let mbyte = to_byte3(rsrc);
 						let sbyte = to_sbyte(size);
 						results.push(Complete(base | nbyte | mbyte | sbyte));
 					}
-					Incomplete(Mov(size,IndReg(rsrc),DirReg(rdst))) => {
+					Incomplete(MOV(size,IndReg(rsrc),DirReg(rdst))) => {
 						let base = 0b0110_0000_0000_0000;
 						let nbyte = to_byte2(rdst);
 						let mbyte = to_byte3(rsrc);
 						let sbyte = to_sbyte(size);
 						results.push(Complete(base | nbyte | mbyte | sbyte));
 					}
-					Incomplete(Mov(size,DirReg(rsrc),PreDec(rdst))) => {
+					Incomplete(MOV(size,DirReg(rsrc),PreDec(rdst))) => {
 						let base = 0b0010_0000_0000_0100;
 						let nbyte = to_byte2(rdst);
 						let mbyte = to_byte3(rsrc);
 						let sbyte = to_sbyte(size);
 						results.push(Complete(base | nbyte | mbyte | sbyte));
 					}
-					Incomplete(Mov(size,PostInc(rsrc),DirReg(rdst))) => {
+					Incomplete(MOV(size,PostInc(rsrc),DirReg(rdst))) => {
 						let base = 0b0110_0000_0000_0100;
 						let nbyte = to_byte2(rdst);
 						let mbyte = to_byte3(rsrc);
 						let sbyte = to_sbyte(size);
 						results.push(Complete(base | nbyte | mbyte | sbyte));
 					}
-					Incomplete(Mov(size @ Byte,DirReg(0),DispReg(disp,rdst))) |
-					Incomplete(Mov(size @ Word,DirReg(0),DispReg(disp,rdst))) => {
+					Incomplete(MOV(size @ Byte,DirReg(0),DispReg(disp,rdst))) |
+					Incomplete(MOV(size @ Word,DirReg(0),DispReg(disp,rdst))) => {
 						let base = 0b10000000_0000_0000;
 						let sbyte = to_sbyte(size) << 8;
 						let nbyte = to_byte3(rdst);
 						let dbyte = (*disp as u8 as u16) & 0x0F;
 						results.push(Complete(base | sbyte | nbyte | dbyte));
 					}
-					Incomplete(Mov(Long,DirReg(rsrc),DispReg(disp,rdst))) => {
+					Incomplete(MOV(Long,DirReg(rsrc),DispReg(disp,rdst))) => {
 						let base = 0b0001_0000_0000_0000;
 						let nbyte = to_byte2(rdst);
 						let mbyte = to_byte3(rsrc);
 						let dbyte = (*disp as u8 as u16) & 0x0F;
 						results.push(Complete(base | nbyte | mbyte | dbyte));
 					}
-					Incomplete(Mov(size @ Byte,DispReg(disp,rsrc),DirReg(0))) |
-					Incomplete(Mov(size @ Word,DispReg(disp,rsrc),DirReg(0))) => {
+					Incomplete(MOV(size @ Byte,DispReg(disp,rsrc),DirReg(0))) |
+					Incomplete(MOV(size @ Word,DispReg(disp,rsrc),DirReg(0))) => {
 						let base = 0b10000100_0000_0000;
 						let sbyte = to_sbyte(size) << 8;
 						let mbyte = to_byte3(rsrc);
 						let dbyte = (*disp as u8 as u16) & 0x0F;
 						results.push(Complete(base | sbyte | mbyte | dbyte));
 					}
-					Incomplete(Mov(Long,DispReg(disp,rsrc),DirReg(rdst))) => {
+					Incomplete(MOV(Long,DispReg(disp,rsrc),DirReg(rdst))) => {
 						let base = 0b0101_0000_0000_0000;
 						let nbyte = to_byte2(rdst);
 						let mbyte = to_byte3(rsrc);
 						let dbyte = (*disp as u8 as u16) & 0x0F;
 						results.push(Complete(base | nbyte | mbyte | dbyte));
 					}
-					Incomplete(Mov(size,DirReg(rsrc),DispR0(rdst))) => {
+					Incomplete(MOV(size,DirReg(rsrc),DispR0(rdst))) => {
 						let base = 0b0000_0000_0000_0100;
 						let nbyte = to_byte2(rdst);
 						let mbyte = to_byte3(rsrc);
 						let sbyte = to_sbyte(size);
 						results.push(Complete(base | nbyte | mbyte | sbyte));
 					}
-					Incomplete(Mov(size,DispR0(rsrc),DirReg(rdst))) => {
+					Incomplete(MOV(size,DispR0(rsrc),DirReg(rdst))) => {
 						let base = 0b0000_0000_0000_1100;
 						let nbyte = to_byte2(rdst);
 						let mbyte = to_byte3(rsrc);
 						let sbyte = to_sbyte(size);
 						results.push(Complete(base | nbyte | mbyte | sbyte));
 					}
-					Incomplete(Mov(size,DirReg(0),DispGBR(disp))) => {
+					Incomplete(MOV(size,DirReg(0),DispGBR(disp))) => {
 						let base = 0b11000000_00000000;
 						let sbyte = to_sbyte(size) << 8;
 						let dword = *disp as u8 as u16;
 						results.push(Complete(base | sbyte | dword));
 					}
-					Incomplete(Mov(size,DispGBR(disp),DirReg(0))) => {
+					Incomplete(MOV(size,DispGBR(disp),DirReg(0))) => {
 						let base = 0b11000100_00000000;
 						let sbyte = to_sbyte(size) << 8;
 						let dword = *disp as u8 as u16;
