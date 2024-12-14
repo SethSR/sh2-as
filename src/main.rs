@@ -88,11 +88,13 @@ struct Token {
 	tt: TokenType,
 	index: u16,
 	size: u8,
+	line: u16,
+	pos: u16,
 }
 
 impl Token {
-	fn new(tt: TokenType, index: usize, size: usize) -> Self {
-		Self { tt, index: index as u16, size: size as u8 }
+	fn new(tt: TokenType, index: usize, size: usize, line: usize, pos: usize) -> Self {
+		Self { tt, index: index as u16, size: size as u8, line: line as u16 + 1, pos: pos as u16 }
 	}
 }
 
@@ -209,54 +211,54 @@ fn lexer(input: &str) -> Vec<Token> {
 				line_idx += 1;
 				char_idx = 0;
 				chars.next();
-				results.push(Token::new(Newline, cur_idx, 1));
+				results.push(Token::new(Newline, cur_idx, 1, line_idx, char_idx));
 			}
 			',' => {
 				next(&mut char_idx, &mut chars);
-				results.push(Token::new(Comma, cur_idx, 1));
+				results.push(Token::new(Comma, cur_idx, 1, line_idx, char_idx));
 			}
 			'+' => {
 				next(&mut char_idx, &mut chars);
-				results.push(Token::new(Plus, cur_idx, 1));
+				results.push(Token::new(Plus, cur_idx, 1, line_idx, char_idx));
 			}
 			'-' => {
 				next(&mut char_idx, &mut chars);
-				results.push(Token::new(Dash, cur_idx, 1));
+				results.push(Token::new(Dash, cur_idx, 1, line_idx, char_idx));
 			}
 			'/' => {
 				next(&mut char_idx, &mut chars);
-				results.push(Token::new(Slash, cur_idx, 1));
+				results.push(Token::new(Slash, cur_idx, 1, line_idx, char_idx));
 			}
 			'@' => {
 				next(&mut char_idx, &mut chars);
-				results.push(Token::new(Address, cur_idx, 1));
+				results.push(Token::new(Address, cur_idx, 1, line_idx, char_idx));
 			}
 			':' => {
 				next(&mut char_idx, &mut chars);
-				results.push(Token::new(Colon, cur_idx, 1));
+				results.push(Token::new(Colon, cur_idx, 1, line_idx, char_idx));
 			}
 			'.' => {
 				next(&mut char_idx, &mut chars);
-				results.push(Token::new(Dot, cur_idx, 1));
+				results.push(Token::new(Dot, cur_idx, 1, line_idx, char_idx));
 			}
 			'0'..='9' => {
 				next(&mut char_idx, &mut chars);
 				let size = tokenize(
 					cur_idx, &mut chars, &mut char_idx,
 					|ch| ('0'..='9').contains(&ch) || '_' == ch);
-				results.push(Token::new(Number, cur_idx, size));
+				results.push(Token::new(Number, cur_idx, size, line_idx, char_idx));
 			}
 			'=' => {
 				next(&mut char_idx, &mut chars);
-				results.push(Token::new(Equal, cur_idx, 1));
+				results.push(Token::new(Equal, cur_idx, 1, line_idx, char_idx));
 			}
 			'(' => {
 				next(&mut char_idx, &mut chars);
-				results.push(Token::new(OParen,cur_idx,1));
+				results.push(Token::new(OParen,cur_idx,1, line_idx, char_idx));
 			}
 			')' => {
 				next(&mut char_idx, &mut chars);
-				results.push(Token::new(CParen,cur_idx,1));
+				results.push(Token::new(CParen,cur_idx,1, line_idx, char_idx));
 			}
 			'$' => {
 				next(&mut char_idx, &mut chars);
@@ -267,28 +269,28 @@ fn lexer(input: &str) -> Vec<Token> {
 						|| ('A'..='F').contains(&ch)
 						|| '_' == ch
 				);
-				results.push(Token::new(Number, cur_idx, size));
+				results.push(Token::new(Number, cur_idx, size, line_idx, char_idx));
 			}
 			'%' => {
 				next(&mut char_idx, &mut chars);
 				let size = tokenize(
 					cur_idx, &mut chars, &mut char_idx,
 					|ch| ['0','1'].contains(&ch) || '_' == ch);
-				results.push(Token::new(Number, cur_idx, size));
+				results.push(Token::new(Number, cur_idx, size, line_idx, char_idx));
 			}
 			'r' => {
 				next(&mut char_idx, &mut chars);
 				let size = tokenize(
 					cur_idx, &mut chars, &mut char_idx,
 					|ch| ('0'..='9').contains(&ch));
-				results.push(Token::new(Register, cur_idx, size));
+				results.push(Token::new(Register, cur_idx, size, line_idx, char_idx));
 			}
 			';' => {
 				let size = next_line(
 					cur_idx, &mut chars,
 					&mut char_idx, &mut line_idx);
 				char_idx += size;
-				results.push(Token::new(Comment, cur_idx, size));
+				results.push(Token::new(Comment, cur_idx, size, line_idx, char_idx));
 			}
 			c if c.is_alphabetic() => {
 				let size = tokenize(
@@ -309,7 +311,7 @@ fn lexer(input: &str) -> Vec<Token> {
 					"w" => Word,
 					_ => Identifier,
 				};
-				results.push(Token::new(tt,cur_idx,size));
+				results.push(Token::new(tt,cur_idx,size, line_idx, char_idx));
 			}
 			_ => {
 				let size = next_line(
@@ -317,7 +319,7 @@ fn lexer(input: &str) -> Vec<Token> {
 					&mut char_idx, &mut line_idx);
 				char_idx += size;
 				results.push(Token::new(
-					Unknown(line_idx,char_idx), cur_idx, size));
+					Unknown(line_idx,char_idx), cur_idx, size, line_idx, char_idx));
 			}
 		}
 	}
@@ -428,7 +430,7 @@ fn p_expected<'a,'b,'c>(
 	msg: &'c str,
 ) -> String {
 	let txt = p_str(file, tok);
-	p_error(&format!("Expected {msg}, Found '{txt}'"))
+	p_error(&format!("Expected {msg}, Found '{txt}' @ ({}:{})", tok.line, tok.pos))
 }
 
 fn p_number(
