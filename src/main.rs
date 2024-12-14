@@ -3,6 +3,10 @@ use std::collections::HashMap;
 
 use miette::IntoDiagnostic;
 
+mod lexer;
+use lexer::lexer;
+use lexer::{Token, TokenType};
+
 fn main() -> miette::Result<()> {
 	let mut args = std::env::args();
 	args.next();
@@ -21,12 +25,9 @@ fn main() -> miette::Result<()> {
 	let tokens = lexer(&file);
 
 	for token in &tokens {
-		let txt = p_str(&file, &token);
-		let out = format!("{:?}\t'{txt}'", token.tt);
-		if let TokenType::Unknown = token.tt {
-			println!("{out} ({},{})", token.line, token.pos);
-		} else if !is_silent {
-			println!("{out} ({},{})", token.line, token.pos);
+		let out = token.to_debug_string(&file);
+		if token.get_type() == TokenType::Unknown || !is_silent {
+			println!("{out}");
 		}
 	}
 
@@ -79,360 +80,6 @@ fn main() -> miette::Result<()> {
 	}
 
 	Ok(())
-}
-
-/* Lexer */
-
-#[derive(Debug)]
-struct Token {
-	tt: TokenType,
-	index: u16,
-	size: u8,
-	line: u16,
-	pos: u16,
-}
-
-impl Token {
-	fn new(tt: TokenType, index: usize, size: usize, line: usize, pos: usize) -> Self {
-		Self { tt, index: index as u16, size: size as u8, line: line as u16 + 1, pos: pos as u16 }
-	}
-}
-
-#[derive(Debug,Clone,Copy,PartialEq,Eq)]
-enum TokenType {
-	ADD,
-	ADDC,
-	ADDV,
-	AND,
-	Address,
-	BF,
-	BRA,
-	BRAF,
-	BSR,
-	BSRF,
-	BT,
-	Byte,
-	CLRMAC,
-	CLRT,
-	CMP,
-	CParen,
-	Colon,
-	Comma,
-	Comment,
-	Const,
-	DIV0S,
-	DIV0U,
-	DIV1,
-	DMULS,
-	DMULU,
-	DT,
-	Dash,
-	Dot,
-	EQ,
-	EXTS,
-	EXTU,
-	Equal,
-	GE,
-	GT,
-	HI,
-	HS,
-	Identifier,
-	JMP,
-	JSR,
-	LDC,
-	LDS,
-	Long,
-	MAC,
-	MOV,
-	MOVA,
-	MOVT,
-	MUL,
-	MULS,
-	MULU,
-	NEG,
-	NEGC,
-	NOP,
-	NOT,
-	Newline,
-	Number,
-	OParen,
-	OR,
-	Org,
-	PL,
-	PZ,
-	Plus,
-	ROTCL,
-	ROTCR,
-	ROTL,
-	ROTR,
-	RTE,
-	RTS,
-	Register,
-	SETT,
-	SHAL,
-	SHAR,
-	SHLL,
-	SHLL16,
-	SHLL2,
-	SHLL8,
-	SHLR,
-	SHLR16,
-	SHLR2,
-	SHLR8,
-	SLEEP,
-	STC,
-	STR,
-	STS,
-	SUB,
-	SUBC,
-	SUBV,
-	SWAP,
-	Slash,
-	TAS,
-	TRAPA,
-	TST,
-	Unknown,
-	Word,
-	XOR,
-	XTRCT,
-}
-
-fn lexer(input: &str) -> Vec<Token> {
-	fn next(
-		idx: &mut usize,
-		chars: &mut impl Iterator<Item=(usize,char)>,
-	) {
-		*idx += 1;
-		chars.next();
-	}
-
-	fn tokenize<I: Iterator<Item=(usize,char)>>(
-		cur_idx: usize,
-		chars: &mut std::iter::Peekable<I>,
-		char_idx: &mut usize,
-		pred: fn(char) -> bool,
-	) -> usize {
-		let mut index = cur_idx + 1;
-		while let Some((idx,ch)) = chars.peek() {
-			index = *idx;
-			if !pred(*ch) {
-				break;
-			}
-			next(char_idx, chars);
-		}
-		index - cur_idx
-	}
-
-	fn next_line<I: Iterator<Item=(usize,char)>>(
-		cur_idx: usize,
-		chars: &mut std::iter::Peekable<I>,
-		char_idx: &mut usize,
-	) -> usize {
-		let mut index = cur_idx + 1;
-		while let Some((cmt_idx,cmt_char)) = chars.peek() {
-			*char_idx += 1;
-			index = *cmt_idx;
-			if *cmt_char == '\n' {
-				break;
-			}
-			next(char_idx, chars);
-		}
-		index - cur_idx
-	}
-
-	let mut results = Vec::new();
-	let mut line_idx = 0;
-	let mut char_idx = 0;
-	let mut chars = input.char_indices().peekable();
-
-	use TokenType::*;
-	while let Some(&(cur_idx, cur_char)) = chars.peek() {
-		match cur_char {
-			' ' | '\t' => next(&mut char_idx, &mut chars),
-			'\n' => {
-				chars.next();
-				results.push(Token::new(Newline, cur_idx, 1, line_idx, char_idx));
-				line_idx += 1;
-				char_idx = 0;
-			}
-			',' => {
-				next(&mut char_idx, &mut chars);
-				results.push(Token::new(Comma, cur_idx, 1, line_idx, char_idx));
-			}
-			'+' => {
-				next(&mut char_idx, &mut chars);
-				results.push(Token::new(Plus, cur_idx, 1, line_idx, char_idx));
-			}
-			'-' => {
-				next(&mut char_idx, &mut chars);
-				results.push(Token::new(Dash, cur_idx, 1, line_idx, char_idx));
-			}
-			'/' => {
-				next(&mut char_idx, &mut chars);
-				results.push(Token::new(Slash, cur_idx, 1, line_idx, char_idx));
-			}
-			'@' => {
-				next(&mut char_idx, &mut chars);
-				results.push(Token::new(Address, cur_idx, 1, line_idx, char_idx));
-			}
-			':' => {
-				next(&mut char_idx, &mut chars);
-				results.push(Token::new(Colon, cur_idx, 1, line_idx, char_idx));
-			}
-			'.' => {
-				next(&mut char_idx, &mut chars);
-				results.push(Token::new(Dot, cur_idx, 1, line_idx, char_idx));
-			}
-			'0'..='9' => {
-				next(&mut char_idx, &mut chars);
-				let size = tokenize(
-					cur_idx, &mut chars, &mut char_idx,
-					|ch| ('0'..='9').contains(&ch) || '_' == ch);
-				results.push(Token::new(Number, cur_idx, size, line_idx, char_idx - size + 1));
-			}
-			'=' => {
-				next(&mut char_idx, &mut chars);
-				results.push(Token::new(Equal, cur_idx, 1, line_idx, char_idx));
-			}
-			'(' => {
-				next(&mut char_idx, &mut chars);
-				results.push(Token::new(OParen,cur_idx,1, line_idx, char_idx));
-			}
-			')' => {
-				next(&mut char_idx, &mut chars);
-				results.push(Token::new(CParen,cur_idx,1, line_idx, char_idx));
-			}
-			'$' => {
-				next(&mut char_idx, &mut chars);
-				let size = tokenize(
-					cur_idx, &mut chars, &mut char_idx,
-					|ch| ('0'..='9').contains(&ch)
-						|| ('a'..='f').contains(&ch)
-						|| ('A'..='F').contains(&ch)
-						|| '_' == ch
-				);
-				results.push(Token::new(Number, cur_idx, size, line_idx, char_idx - size + 1));
-			}
-			'%' => {
-				next(&mut char_idx, &mut chars);
-				let size = tokenize(
-					cur_idx, &mut chars, &mut char_idx,
-					|ch| ['0','1'].contains(&ch) || '_' == ch);
-				results.push(Token::new(Number, cur_idx, size, line_idx, char_idx - size + 1));
-			}
-			'r' => {
-				next(&mut char_idx, &mut chars);
-				let size = tokenize(
-					cur_idx, &mut chars, &mut char_idx,
-					|ch| ('0'..='9').contains(&ch));
-				results.push(Token::new(Register, cur_idx, size, line_idx, char_idx - size + 1));
-			}
-			';' => {
-				let char_idx_s = char_idx;
-				let size = next_line(cur_idx, &mut chars, &mut char_idx);
-				results.push(Token::new(Comment, cur_idx, size, line_idx, char_idx_s+1));
-			}
-
-			c if c.is_alphabetic() => {
-				let size = tokenize(
-					cur_idx, &mut chars, &mut char_idx,
-					|ch| ('a'..='z').contains(&ch)
-						|| ('A'..='Z').contains(&ch)
-						|| ('0'..='9').contains(&ch)
-						|| '_' == ch);
-				let tt = match input[cur_idx..][..size].to_lowercase().as_str() {
-					"add" => ADD,
-					"addc" => ADDC,
-					"addv" => ADDV,
-					"and" => AND,
-					"b" => Byte,
-					"bf" => BF,
-					"bra" => BRA,
-					"braf" => BRAF,
-					"bsr" => BSR,
-					"bsrf" => BSRF,
-					"bt" => BT,
-					"clrmac" => CLRMAC,
-					"clrt" => CLRT,
-					"cmp" => CMP,
-					"dc" => Const,
-					"div0s" => DIV0S,
-					"div0u" => DIV0U,
-					"div1" => DIV1,
-					"dmuls" => DMULS,
-					"dmulu" => DMULU,
-					"dt" => DT,
-					"eq" => EQ,
-					"exts" => EXTS,
-					"extu" => EXTU,
-					"ge" => GE,
-					"gt" => GT,
-					"hi" => HI,
-					"hs" => HS,
-					"jmp" => JMP,
-					"jsr" => JSR,
-					"l" => Long,
-					"ldc" => LDC,
-					"lds" => LDS,
-					"mac" => MAC,
-					"mov" => MOV,
-					"mova" => MOVA,
-					"movt" => MOVT,
-					"mul" => MUL,
-					"muls" => MULS,
-					"mulu" => MULU,
-					"neg" => NEG,
-					"negc" => NEGC,
-					"nop" => NOP,
-					"not" => NOT,
-					"or" => OR,
-					"org" => Org,
-					"pl" => PL,
-					"pz" => PZ,
-					"rotcl" => ROTCL,
-					"rotcr" => ROTCR,
-					"rotl" => ROTL,
-					"rotr" => ROTR,
-					"rte" => RTE,
-					"rts" => RTS,
-					"sett" => SETT,
-					"shal" => SHAL,
-					"shar" => SHAR,
-					"shll" => SHLL,
-					"shll16" => SHLL16,
-					"shll2" => SHLL2,
-					"shll8" => SHLL8,
-					"shlr" => SHLR,
-					"shlr16" => SHLR16,
-					"shlr2" => SHLR2,
-					"shlr8" => SHLR8,
-					"sleep" => SLEEP,
-					"stc" => STC,
-					"str" => STR,
-					"sts" => STS,
-					"sub" => SUB,
-					"subc" => SUBC,
-					"subv" => SUBV,
-					"swap" => SWAP,
-					"tas" => TAS,
-					"trapa" => TRAPA,
-					"tst" => TST,
-					"w" => Word,
-					"xor" => XOR,
-					"xtrct" => XTRCT,
-					_ => Identifier,
-				};
-				results.push(Token::new(tt,cur_idx,size, line_idx, char_idx - size + 1));
-			}
-			_ => {
-				let size = next_line(cur_idx, &mut chars, &mut char_idx);
-				char_idx += size;
-				results.push(Token::new(Unknown, cur_idx, size, line_idx, char_idx));
-			}
-		}
-	}
-
-	results
 }
 
 /* Parser */
@@ -522,14 +169,6 @@ impl std::fmt::Debug for State {
 type SectionTable = HashMap<u64, Vec<State>>;
 type LabelTable = HashMap<String,Option<u32>>;
 
-fn p_str(
-	file: &str,
-	tok: &Token,
-) -> String {
-	let (idx,sz) = (tok.index, tok.size);
-	file[idx as usize..][..sz as usize].to_owned()
-}
-
 fn p_error(msg: &str) -> String {
 	format!("ERROR: {msg}")
 }
@@ -539,15 +178,16 @@ fn p_expected<'a,'b,'c>(
 	tok: &'b Token,
 	msg: &'c str,
 ) -> String {
-	let txt = p_str(file, tok);
-	p_error(&format!("Expected {msg}, Found '{txt}' @ ({}:{})", tok.line, tok.pos))
+	let txt = tok.to_string(file);
+	let (line,pos) = tok.pos();
+	p_error(&format!("Expected {msg}, Found '{txt}' @ ({line}:{pos})"))
 }
 
 fn p_number(
 	file: &str,
 	tok: &Token,
 ) -> miette::Result<i64> {
-	let txt = p_str(file, tok);
+	let txt = tok.to_string(file);
 	match txt.chars().next() {
 		Some('%') => {
 			i64::from_str_radix(&txt[1..].replace('_',""), 2)
@@ -563,7 +203,7 @@ fn p_number(
 }
 
 fn p_reg(file: &str, tok: &Token) -> miette::Result<Reg> {
-	let txt = p_str(file, tok);
+	let txt = tok.to_string(file);
 	u8::from_str_radix(&txt[1..], 10)
 		.into_diagnostic()
 }
@@ -582,9 +222,9 @@ fn p_address(
 	tokens: &[Token],
 ) -> miette::Result<Arg> {
 	let nxt_tok = p_next(tok_idx, tokens);
-	if nxt_tok.tt == TokenType::Dash {
+	if nxt_tok.get_type() == TokenType::Dash {
 		let nxt_tok = p_next(tok_idx, tokens);
-		if nxt_tok.tt == TokenType::Register {
+		if nxt_tok.get_type() == TokenType::Register {
 			let reg = p_reg(file, nxt_tok)?;
 			Ok(Arg::PreDec(reg))
 		} else {
@@ -592,11 +232,11 @@ fn p_address(
 				"Register"));
 			todo!("on error, skip to next newline");
 		}
-	} else if nxt_tok.tt == TokenType::Register {
+	} else if nxt_tok.get_type() == TokenType::Register {
 		let reg = p_reg(file, nxt_tok)?;
 
 		let nxt_tok = p_next(tok_idx, tokens);
-		if nxt_tok.tt == TokenType::Plus {
+		if nxt_tok.get_type() == TokenType::Plus {
 			Ok(Arg::PostInc(reg))
 		} else {
 			*tok_idx -= 1;
@@ -616,12 +256,12 @@ fn p_size(
 	tokens: &[Token],
 ) -> Result<Size, (ErrFlag,String)> {
 	let nxt_tok = p_next(tok_idx, tokens);
-	if nxt_tok.tt != TokenType::Dot {
+	if nxt_tok.get_type() != TokenType::Dot {
 		return Err((0,p_expected(file, nxt_tok, "'.'")));
 	}
 
 	let nxt_tok = p_next(tok_idx, tokens);
-	match nxt_tok.tt {
+	match nxt_tok.get_type() {
 		TokenType::Byte => Ok(Size::Byte),
 		TokenType::Word => Ok(Size::Word),
 		TokenType::Long => Ok(Size::Long),
@@ -647,13 +287,13 @@ fn parser(
 	while tok_idx < tokens.len() {
 		use TokenType::*;
 		let cur_tok = &tokens[tok_idx];
-		match cur_tok.tt {
+		match cur_tok.get_type() {
 			ADD => {
 				let nxt_tok = p_next(&mut tok_idx, &tokens);
-				let src = match nxt_tok.tt {
+				let src = match nxt_tok.get_type() {
 					Dash => {
 						let nxt_tok = p_next(&mut tok_idx, &tokens);
-						if nxt_tok.tt == Number {
+						if nxt_tok.get_type() == Number {
 							let num = p_number(&file, nxt_tok)?;
 							Arg::DirImm(-num)
 						} else {
@@ -681,13 +321,13 @@ fn parser(
 				};
 
 				let nxt_tok = p_next(&mut tok_idx, &tokens);
-				if nxt_tok.tt != Comma {
+				if nxt_tok.get_type() != Comma {
 					p_expected(&file, nxt_tok, "','");
 					todo!("on error, skip to next newline");
 				}
 
 				let nxt_tok = p_next(&mut tok_idx, &tokens);
-				let dst = match nxt_tok.tt {
+				let dst = match nxt_tok.get_type() {
 					Address => {
 						p_address(&file, &mut tok_idx, &tokens)?
 					}
@@ -713,13 +353,13 @@ fn parser(
 			Address => eprintln!("unexpected Address"),
 			BF => {
 				let nxt_tok = p_next(&mut tok_idx, &tokens);
-				if nxt_tok.tt != Identifier {
+				if nxt_tok.get_type() != Identifier {
 					eprintln!("{}", p_expected(&file, nxt_tok,
 						"Label"));
 					todo!("on error, skip to newline");
 				}
 
-				let txt = p_str(&file, &nxt_tok);
+				let txt = nxt_tok.to_string(&file);
 				section_table
 					.entry(skey)
 					.or_default()
@@ -743,13 +383,13 @@ fn parser(
 				};
 
 				let nxt_tok = p_next(&mut tok_idx, &tokens);
-				let value = match nxt_tok.tt {
+				let value = match nxt_tok.get_type() {
 					Number => {
 						let imm = p_number(&file, nxt_tok)?;
 						Arg::DirImm(imm)
 					}
 					Identifier => {
-						let txt = p_str(&file, nxt_tok);
+						let txt = nxt_tok.to_string(&file);
 						Arg::Label(txt)
 					}
 					_ => {
@@ -774,7 +414,7 @@ fn parser(
 			DMULU => eprintln!("unexpected DMULU"),
 			DT => {
 				let nxt_tok = p_next(&mut tok_idx, &tokens);
-				if nxt_tok.tt != Register {
+				if nxt_tok.get_type() != Register {
 					eprintln!("{}", p_expected(&file, nxt_tok,
 						"Register"));
 					todo!("on error, skip to newline");
@@ -796,10 +436,10 @@ fn parser(
 			HI => eprintln!("unexpected HI"),
 			HS => eprintln!("unexpected HS"),
 			Identifier => {
-				let label = p_str(&file, &cur_tok);
+				let label = cur_tok.to_string(&file);
 
 				let nxt_tok = p_next(&mut tok_idx, &tokens);
-				if nxt_tok.tt == Colon {
+				if nxt_tok.get_type() == Colon {
 					if label_table.contains_key(&label) {
 						eprintln!("{}", p_error("Label '{label}' already defined"));
 						todo!("on error, skip to newline");
@@ -835,9 +475,9 @@ fn parser(
 				};
 
 				let nxt_tok = p_next(&mut tok_idx, &tokens);
-				let src = match nxt_tok.tt {
+				let src = match nxt_tok.get_type() {
 					Identifier => {
-						let txt = p_str(&file, &nxt_tok);
+						let txt = nxt_tok.to_string(&file);
 						Arg::Label(txt)
 					}
 					Number => {
@@ -873,28 +513,28 @@ fn parser(
 				};
 
 				let nxt_tok = p_next(&mut tok_idx, &tokens);
-				if nxt_tok.tt != Comma {
+				if nxt_tok.get_type() != Comma {
 					eprintln!("{}", p_expected(&file, nxt_tok,
 						"','"));
 					todo!("on error, skip to newline");
 				}
 
 				let nxt_tok = p_next(&mut tok_idx, &tokens);
-				let dst = match nxt_tok.tt {
+				let dst = match nxt_tok.get_type() {
 					Register => {
 						let reg = p_reg(&file, nxt_tok)?;
 						Arg::DirReg(reg)
 					}
 					Address => {
 						let nxt_tok = p_next(&mut tok_idx, &tokens);
-						let is_pre_dec = nxt_tok.tt == Dash;
+						let is_pre_dec = nxt_tok.get_type() == Dash;
 						let nxt_tok = if is_pre_dec {
 							p_next(&mut tok_idx, &tokens)
 						} else {
 							nxt_tok
 						};
 
-						if nxt_tok.tt != Register {
+						if nxt_tok.get_type() != Register {
 							eprintln!("{}", p_expected(&file, nxt_tok,
 								"Register"));
 							todo!("on error, skip to newline");
@@ -973,8 +613,9 @@ fn parser(
 			XOR => eprintln!("unexpected XOR"),
 			XTRCT => eprintln!("unexpected XTRCT"),
 			Unknown => {
-				let txt = p_str(&file, &cur_tok);
-				eprintln!("unknown item @ line {}, char {}: '{txt}'", cur_tok.line, cur_tok.pos);
+				let txt = cur_tok.to_string(&file);
+				let (line,pos) = cur_tok.pos();
+				eprintln!("unknown item '{txt}' @ ({line}:{pos})");
 			}
 		}
 		tok_idx += 1;
@@ -1116,8 +757,10 @@ fn resolver(
 						let imm = *isrc as i64;
 						if !(i16::MIN as i64..=i16::MAX as i64).contains(&imm) {
 							// 32-bit immediate
+							eprintln!("Moving 32-bit immediates is not implemented yet. Declare a labeled constant and move the label instead.");
 						} else if !(i8::MIN as i64..=i8::MAX as i64).contains(&imm) {
 							// 16-bit immediate
+							eprintln!("Moving 16-bit immediates is not implemented yet. Declare a labeled constant and move the label instead.");
 						} else {
 							// 8-bit immediate
 							let iword = (*isrc & 0xFF) as u16;
