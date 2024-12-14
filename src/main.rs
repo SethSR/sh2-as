@@ -26,7 +26,7 @@ fn main() -> miette::Result<()> {
 		if let TokenType::Unknown(ln,ch) = token.tt {
 			println!("{out} ({ln},{ch})");
 		} else if !is_silent {
-			println!("{out}");
+			println!("{out} ({},{})", token.line, token.pos);
 		}
 	}
 
@@ -156,46 +156,19 @@ fn lexer(input: &str) -> Vec<Token> {
 
 	fn next_line<I: Iterator<Item=(usize,char)>>(
 		cur_idx: usize,
-		chars: &mut I,
-		char_idx: &mut usize,
-		line_idx: &mut usize,
-	) -> usize {
-		let mut index = cur_idx + 1;
-		while let Some((cmt_idx,cmt_char)) = chars.next() {
-			*char_idx += 1;
-			index = cmt_idx;
-			if cmt_char == '\n' {
-				*line_idx += 1;
-				*char_idx = 0;
-				break;
-			}
-		}
-		index - cur_idx
-	}
-
-	fn ident<I: Iterator<Item=(usize,char)>>(
-		id: &str,
-		cur_idx: usize,
 		chars: &mut std::iter::Peekable<I>,
 		char_idx: &mut usize,
-		line_idx: &mut usize,
-	) -> Result<usize,usize> {
-		let mut idx = cur_idx;
-		for ch in id.chars() {
-			match chars.peek() {
-				Some(&(i,c)) if c == ch => {
-					idx = i;
-					next(char_idx, chars);
-				}
-				_ => {
-					let size = next_line(
-						cur_idx, chars, char_idx, line_idx);
-					*char_idx += size;
-					return Err(size);
-				}
+	) -> usize {
+		let mut index = cur_idx + 1;
+		while let Some((cmt_idx,cmt_char)) = chars.peek() {
+			*char_idx += 1;
+			index = *cmt_idx;
+			if *cmt_char == '\n' {
+				break;
 			}
+			next(char_idx, chars);
 		}
-		Ok(idx - cur_idx + 1)
+		index - cur_idx
 	}
 
 	let mut results = Vec::new();
@@ -208,10 +181,10 @@ fn lexer(input: &str) -> Vec<Token> {
 		match cur_char {
 			' ' | '\t' => next(&mut char_idx, &mut chars),
 			'\n' => {
-				line_idx += 1;
-				char_idx = 0;
 				chars.next();
 				results.push(Token::new(Newline, cur_idx, 1, line_idx, char_idx));
+				line_idx += 1;
+				char_idx = 0;
 			}
 			',' => {
 				next(&mut char_idx, &mut chars);
@@ -246,7 +219,7 @@ fn lexer(input: &str) -> Vec<Token> {
 				let size = tokenize(
 					cur_idx, &mut chars, &mut char_idx,
 					|ch| ('0'..='9').contains(&ch) || '_' == ch);
-				results.push(Token::new(Number, cur_idx, size, line_idx, char_idx));
+				results.push(Token::new(Number, cur_idx, size, line_idx, char_idx - size + 1));
 			}
 			'=' => {
 				next(&mut char_idx, &mut chars);
@@ -269,28 +242,26 @@ fn lexer(input: &str) -> Vec<Token> {
 						|| ('A'..='F').contains(&ch)
 						|| '_' == ch
 				);
-				results.push(Token::new(Number, cur_idx, size, line_idx, char_idx));
+				results.push(Token::new(Number, cur_idx, size, line_idx, char_idx - size + 1));
 			}
 			'%' => {
 				next(&mut char_idx, &mut chars);
 				let size = tokenize(
 					cur_idx, &mut chars, &mut char_idx,
 					|ch| ['0','1'].contains(&ch) || '_' == ch);
-				results.push(Token::new(Number, cur_idx, size, line_idx, char_idx));
+				results.push(Token::new(Number, cur_idx, size, line_idx, char_idx - size + 1));
 			}
 			'r' => {
 				next(&mut char_idx, &mut chars);
 				let size = tokenize(
 					cur_idx, &mut chars, &mut char_idx,
 					|ch| ('0'..='9').contains(&ch));
-				results.push(Token::new(Register, cur_idx, size, line_idx, char_idx));
+				results.push(Token::new(Register, cur_idx, size, line_idx, char_idx - size + 1));
 			}
 			';' => {
-				let size = next_line(
-					cur_idx, &mut chars,
-					&mut char_idx, &mut line_idx);
-				char_idx += size;
-				results.push(Token::new(Comment, cur_idx, size, line_idx, char_idx));
+				let char_idx_s = char_idx;
+				let size = next_line(cur_idx, &mut chars, &mut char_idx);
+				results.push(Token::new(Comment, cur_idx, size, line_idx, char_idx_s+1));
 			}
 			c if c.is_alphabetic() => {
 				let size = tokenize(
@@ -301,6 +272,7 @@ fn lexer(input: &str) -> Vec<Token> {
 						|| '_' == ch);
 				let tt = match input[cur_idx..][..size].to_lowercase().as_str() {
 					"add" => Add,
+					"b" => Byte,
 					"bf" => BF,
 					"bt" => BT,
 					"dc" => Const,
@@ -311,12 +283,10 @@ fn lexer(input: &str) -> Vec<Token> {
 					"w" => Word,
 					_ => Identifier,
 				};
-				results.push(Token::new(tt,cur_idx,size, line_idx, char_idx));
+				results.push(Token::new(tt,cur_idx,size, line_idx, char_idx - size + 1));
 			}
 			_ => {
-				let size = next_line(
-					cur_idx, &mut chars,
-					&mut char_idx, &mut line_idx);
+				let size = next_line(cur_idx, &mut chars, &mut char_idx);
 				char_idx += size;
 				results.push(Token::new(
 					Unknown(line_idx,char_idx), cur_idx, size, line_idx, char_idx));
@@ -329,8 +299,7 @@ fn lexer(input: &str) -> Vec<Token> {
 
 /* Parser */
 
-type Addr = u32;
-type Reg = usize;
+type Reg = u8;
 
 #[derive(Clone)]
 enum Arg {
@@ -340,6 +309,7 @@ enum Arg {
 	DispReg(i8,Reg),
 	DispPC(i8),
 	DispGBR(i8),
+	DispLabel(String,Reg),
 	IndReg(Reg),
 	Label(String),
 	PostInc(Reg),
@@ -363,6 +333,8 @@ impl std::fmt::Debug for Arg {
 				write!(fmt, "DispPC({disp})"),
 			Arg::DispGBR(disp) =>
 				write!(fmt, "DispGBR({disp})"),
+			Arg::DispLabel(lbl,reg) =>
+				write!(fmt, "DispLabel({lbl},R{reg})"),
 			Arg::IndReg(reg) =>
 				write!(fmt, "IndReg(R{reg})"),
 			Arg::Label(lbl) =>
@@ -452,9 +424,9 @@ fn p_number(
 	}.into_diagnostic()
 }
 
-fn p_reg(file: &str, tok: &Token) -> miette::Result<usize> {
+fn p_reg(file: &str, tok: &Token) -> miette::Result<Reg> {
 	let txt = p_str(file, tok);
-	usize::from_str_radix(&txt[1..], 10)
+	u8::from_str_radix(&txt[1..], 10)
 		.into_diagnostic()
 }
 
@@ -804,11 +776,11 @@ fn parser(
 	Ok((section_table, label_table))
 }
 
-fn to_byte2(reg: &usize) -> u16 {
+fn to_byte2(reg: &Reg) -> u16 {
 	(reg << 12) as u16
 }
 
-fn to_byte3(reg: &usize) -> u16 {
+fn to_byte3(reg: &Reg) -> u16 {
 	(reg << 8) as u16
 }
 
