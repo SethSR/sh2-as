@@ -23,8 +23,8 @@ fn main() -> miette::Result<()> {
 	for token in &tokens {
 		let txt = p_str(&file, &token);
 		let out = format!("{:?}\t'{txt}'", token.tt);
-		if let TokenType::Unknown(ln,ch) = token.tt {
-			println!("{out} ({ln},{ch})");
+		if let TokenType::Unknown = token.tt {
+			println!("{out} ({},{})", token.line, token.pos);
 		} else if !is_silent {
 			println!("{out} ({},{})", token.line, token.pos);
 		}
@@ -101,6 +101,7 @@ impl Token {
 #[derive(Debug,Clone,Copy,PartialEq,Eq)]
 enum TokenType {
 	Add,
+	And,
 	Address,
 	BF,
 	BT,
@@ -117,15 +118,20 @@ enum TokenType {
 	Identifier,
 	Long,
 	Mov,
+	Mulu,
 	Newline,
 	Number,
 	OParen,
+	Or,
 	Org,
 	Plus,
 	Register,
+	Rts,
 	Slash,
+	Sts,
 	Word,
-	Unknown(usize,usize),
+	Xor,
+	Unknown,
 }
 
 fn lexer(input: &str) -> Vec<Token> {
@@ -272,6 +278,7 @@ fn lexer(input: &str) -> Vec<Token> {
 						|| '_' == ch);
 				let tt = match input[cur_idx..][..size].to_lowercase().as_str() {
 					"add" => Add,
+					"and" => And,
 					"b" => Byte,
 					"bf" => BF,
 					"bt" => BT,
@@ -279,8 +286,13 @@ fn lexer(input: &str) -> Vec<Token> {
 					"dt" => DT,
 					"l" => Long,
 					"mov" => Mov,
+					"mulu" => Mulu,
+					"or" => Or,
 					"org" => Org,
+					"rts" => Rts,
+					"sts" => Sts,
 					"w" => Word,
+					"xor" => Xor,
 					_ => Identifier,
 				};
 				results.push(Token::new(tt,cur_idx,size, line_idx, char_idx - size + 1));
@@ -288,8 +300,7 @@ fn lexer(input: &str) -> Vec<Token> {
 			_ => {
 				let size = next_line(cur_idx, &mut chars, &mut char_idx);
 				char_idx += size;
-				results.push(Token::new(
-					Unknown(line_idx,char_idx), cur_idx, size, line_idx, char_idx));
+				results.push(Token::new(Unknown, cur_idx, size, line_idx, char_idx));
 			}
 		}
 	}
@@ -569,6 +580,7 @@ fn parser(
 					.or_default()
 					.push(State::Incomplete(Ins::Add(src,dst)));
 			}
+			And => eprintln!("unexpected AND"),
 			Address => eprintln!("unexpected Address"),
 			BF => {
 				let nxt_tok = p_next(&mut tok_idx, &tokens);
@@ -754,20 +766,25 @@ fn parser(
 					.or_default()
 					.push(State::Incomplete(Ins::Mov(size,src,dst)));
 			}
+			Mulu => eprintln!("unexpected MULU"),
 			Newline => {} // skip newlines
 			Number => eprintln!("unexpected Number"),
 			OParen => eprintln!("unexpected open-parenthesis"),
+			Or => eprintln!("unexpected OR"),
 			Org => {
 				let nxt_tok = p_next(&mut tok_idx, &tokens);
 				skey = p_number(&file, nxt_tok)? as u64;
 			}
 			Plus => eprintln!("unexpected Plus"),
 			Register => eprintln!("unexpected Register"),
+			Rts => eprintln!("unexpected RTS"),
 			Slash => eprintln!("unexpected Slash"),
+			Sts => eprintln!("unexpected STS"),
 			Word => eprintln!("unexpected size specifier"),
-			Unknown(ln,ch) => {
+			Xor => eprintln!("unexpected XOR"),
+			Unknown => {
 				let txt = p_str(&file, &cur_tok);
-				eprintln!("unknown item @ line {ln}, char {ch}: '{txt}'");
+				eprintln!("unknown item @ line {}, char {}: '{txt}'", cur_tok.line, cur_tok.pos);
 			}
 		}
 		tok_idx += 1;
