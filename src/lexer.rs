@@ -36,8 +36,12 @@ impl Token {
 
 	pub(crate) fn to_debug_string(&self, file: &str) -> String {
 		let Token { tt, index, size, line, pos } = self;
-		let txt = &file[*index as usize..][..*size as usize];
-		format!("{tt:?}({txt}) [{line}:{pos}]")
+		if *tt == TokenType::Newline {
+			format!("{tt:?} [{line}:{pos}]")
+		} else {
+			let txt = &file[*index as usize..][..*size as usize];
+			format!("{tt:?}({txt}) [{line}:{pos}]")
+		}
 	}
 
 	pub(crate) fn pos(&self) -> (u16,u16) {
@@ -156,6 +160,33 @@ pub(crate) enum TokenType {
 	Word,
 	XOR,
 	XTRCT,
+}
+
+impl fmt::Display for TokenType {
+	fn fmt(&self, fmt: &mut fmt::Formatter) -> fmt::Result {
+		use TokenType::*;
+		let s = match self {
+			Address => "@",
+			Byte => "b",
+			CParen => ")",
+			Colon => ":",
+			Comma => ",",
+			Const => "dc",
+			Dash => "-",
+			Dot => ".",
+			Equal => "=",
+			Long => "l",
+			Newline => "\\n",
+			Number => "Number (bin/dec/hex)",
+			OParen => "(",
+			Plus => "+",
+			Register => "Register (R0-15,PC)",
+			Slash => "/",
+			Word => "w",
+			_ => &format!("{self:?}"),
+		};
+		write!(fmt, "'{s}'")
+	}
 }
 
 fn next(
