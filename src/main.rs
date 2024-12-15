@@ -842,8 +842,18 @@ fn parser(
 					.push(State::Incomplete(ins));
 			}
 			Byte => eprintln!("unexpected size specifier"),
-			CLRMAC => eprintln!("unexpected CLRMAC"),
-			CLRT => eprintln!("unexpected CLRT"),
+			CLRMAC => {
+				section_table
+					.entry(skey)
+					.or_default()
+					.push(State::Incomplete(Ins::CLRMAC));
+			}
+			CLRT => {
+				section_table
+					.entry(skey)
+					.or_default()
+					.push(State::Incomplete(Ins::CLRT));
+			}
 			CMP => eprintln!("unexpected CMP"),
 			Colon => eprintln!("unexpected Colon"),
 			Comma => eprintln!("unexpected Comma"),
