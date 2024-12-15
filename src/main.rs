@@ -666,7 +666,17 @@ fn parser(
 					.or_default()
 					.push(State::Incomplete(ins));
 			}
-			ADDC => eprintln!("unexpected ADDC"),
+			ADDC => {
+				let src_tok = match_token(&file, &mut tok_idx, &tokens, Register);
+				let src = p_reg(&file, src_tok)?;
+				match_token(&file, &mut tok_idx, &tokens, Comma);
+				let dst_tok = match_token(&file, &mut tok_idx, &tokens, Register);
+				let dst = p_reg(&file, dst_tok)?;
+				section_table
+					.entry(skey)
+					.or_default()
+					.push(State::Incomplete(Ins::ADDC(src,dst)));
+			}
 			ADDV => eprintln!("unexpected ADDV"),
 			AND => eprintln!("unexpected AND"),
 			Address => eprintln!("unexpected Address"),
