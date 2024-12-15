@@ -759,17 +759,28 @@ fn parser(
 			Address => eprintln!("unexpected Address"),
 			BF => {
 				let nxt_tok = p_next(&mut tok_idx, &tokens);
-				if nxt_tok.get_type() != Identifier {
-					eprintln!("{}", p_expected(&file, nxt_tok,
-						"Label"));
-					todo!("on error, skip to newline");
-				}
+				let ins = match nxt_tok.get_type() {
+					Identifier => {
+						let lbl = nxt_tok.to_string(&file);
+						Ins::BF(lbl)
+					}
+					Slash => {
+						match_token(&file, &mut tok_idx, &tokens, Delay);
+						let lbl_tok = match_token_with_msg(&file, &mut tok_idx, &tokens,
+							Identifier, "Label");
+						let lbl = lbl_tok.to_string(&file);
+						Ins::BFS(lbl)
+					}
+					_ => {
+						p_expected(&file, nxt_tok, "Label");
+						todo!("on error, skip to newline");
+					}
+				};
 
-				let txt = nxt_tok.to_string(&file);
 				section_table
 					.entry(skey)
 					.or_default()
-					.push(State::Incomplete(Ins::BF(txt)));
+					.push(State::Incomplete(ins));
 			}
 			BRA => eprintln!("unexpected BRA"),
 			BRAF => eprintln!("unexpected BRAF"),
@@ -813,6 +824,7 @@ fn parser(
 			}
 			CParen => eprintln!("unexpected close-parenthesis"),
 			Dash => eprintln!("unexpected Dash"),
+			Delay => eprintln!("unexpected Delay"),
 			DIV0S => eprintln!("unexpected DIV0S"),
 			DIV0U => eprintln!("unexpected DIV0U"),
 			DIV1 => eprintln!("unexpected DIV1"),
