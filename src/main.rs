@@ -154,12 +154,12 @@ pub(crate) enum Ins {
 	/// |                |                  | Overflow -> T      |         |        |
 	ADDV(Reg,Reg),
 	/// | #imm,R0        | 11001001iiiiiiii | R0 & imm -> R0     | 1       | -      |
-	AND_Imm(i8),
+	AND_Imm(u8),
 	/// | Rm,Rn          | 0010nnnnmmmm1001 | Rn & Rm -> Rn      | 1       | -      |
 	AND_Reg(Reg,Reg),
 	/// | #imm,@(R0,GBR) | 11001101iiiiiiii | (R0+GBR) & imm     | 3       | -      |
 	/// |                |                  | -> (R0+GBR)        |         |        |
-	AND_Byte(i8),
+	AND_Byte(u8),
 	/// | label          | 10011011dddddddd | if T = 0,          | 3/1     | -      |
 	/// |                |                  | dispx2+PC -> PC;   |         |        |
 	/// |                |                  | if T = 1, nop      |         |        |
@@ -597,12 +597,22 @@ fn match_token<'a>(
 	match_token_with_msg(file, idx, tokens, tt, &tt.to_string())
 }
 
-fn assert_within_i8(file: &str, tok: &Token, value: i64) {
+fn assert_within_i8(file: &str, tok: &Token, value: i64) -> i8 {
 	if !(i8::MIN as i64..i8::MAX as i64).contains(&value) {
 		p_expected(&file, tok,
 			"immediate value between -128 & 127");
 		todo!("on error, skip to next newline");
 	}
+	value as i8
+}
+
+fn assert_within_u8(file: &str, tok: &Token, value: i64) -> u8 {
+	if !(u8::MIN as i64..u8::MAX as i64).contains(&value) {
+		p_expected(&file, tok,
+			"immediate value between -128 & 127");
+		todo!("on error, skip to next newline");
+	}
+	value as u8
 }
 
 // TODO - srenshaw - Ensure the parser actually returns what it's supposed to.
@@ -631,8 +641,7 @@ fn parser(
 						let num_tok = match_token_with_msg(&file, &mut tok_idx, &tokens,
 							Number, "Number after unary minus");
 						let num = p_number(&file, num_tok)?;
-						assert_within_i8(&file, num_tok, -num);
-						let imm = (-num) as i8;
+						let imm = assert_within_i8(&file, num_tok, -num);
 						match_token(&file, &mut tok_idx, &tokens, Comma);
 						let reg_tok = match_token(&file, &mut tok_idx, &tokens, Register);
 						let reg = p_reg(&file, reg_tok)?;
@@ -640,8 +649,7 @@ fn parser(
 					}
 					Number => {
 						let num = p_number(&file, nxt_tok)?;
-						assert_within_i8(&file, nxt_tok, num);
-						let imm = num as i8;
+						let imm = assert_within_i8(&file, nxt_tok, num);
 						match_token(&file, &mut tok_idx, &tokens, Comma);
 						let reg_tok = match_token(&file, &mut tok_idx, &tokens, Register);
 						let reg = p_reg(&file, reg_tok)?;
@@ -688,7 +696,66 @@ fn parser(
 					.or_default()
 					.push(State::Incomplete(Ins::ADDV(src,dst)));
 			}
-			AND => eprintln!("unexpected AND"),
+			AND => {
+				let nxt_tok = p_next(&mut tok_idx, &tokens);
+				let ins = match nxt_tok.get_type() {
+					Number => {
+						let num = p_number(&file, nxt_tok)?;
+						let imm = assert_within_u8(&file, nxt_tok, num);
+						match_token(&file, &mut tok_idx, &tokens, Comma);
+						let reg_tok = match_token(&file, &mut tok_idx, &tokens, Register);
+						let reg = p_reg(&file, reg_tok)?;
+						if reg != 0 {
+							p_expected(&file, reg_tok,
+								"AND with an immediate source must have R0 as the destination");
+							todo!("on error, skip to newline");
+						}
+						Ins::AND_Imm(imm)
+					}
+					Register => {
+						let src = p_reg(&file, nxt_tok)?;
+						match_token(&file, &mut tok_idx, &tokens, Comma);
+						let dst_tok = match_token(&file, &mut tok_idx, &tokens, Register);
+						let dst = p_reg(&file, dst_tok)?;
+						Ins::AND_Reg(src,dst)
+					}
+					Dot => {
+						match_token(&file, &mut tok_idx, &tokens, Byte);
+						let num_tok = match_token(&file, &mut tok_idx, &tokens, Number);
+						let num = p_number(&file, num_tok)?;
+						let imm = assert_within_u8(&file, num_tok, num);
+						match_token(&file, &mut tok_idx, &tokens, Comma);
+						match_token(&file, &mut tok_idx, &tokens, Address);
+						match_token(&file, &mut tok_idx, &tokens, OParen);
+						let reg_tok = match_token(&file, &mut tok_idx, &tokens, Register);
+						let reg = p_reg(&file, reg_tok)?;
+						if reg != 0 {
+							p_expected(&file, reg_tok,
+								"AND.B must have @(R0,GBR) as the destination");
+							todo!("on error, skip to newline");
+						}
+						match_token(&file, &mut tok_idx, &tokens, Comma);
+						let nxt_tok = p_next(&mut tok_idx, &tokens);
+						if nxt_tok.to_string(&file).to_lowercase() != "gbr" {
+							p_expected(&file, nxt_tok,
+								"AND.B must have @(R0,GBR) as the destination");
+							todo!("on error, skip to newline");
+						}
+						match_token(&file, &mut tok_idx, &tokens, CParen);
+						Ins::AND_Byte(imm)
+					}
+					_ => {
+						p_expected(&file, nxt_tok,
+							"Valid AND source argument: Number or Register");
+						todo!("on error, skip to next newline");
+					}
+				};
+
+				section_table
+					.entry(skey)
+					.or_default()
+					.push(State::Incomplete(ins));
+			}
 			Address => eprintln!("unexpected Address"),
 			BF => {
 				let nxt_tok = p_next(&mut tok_idx, &tokens);
