@@ -782,10 +782,40 @@ fn parser(
 					.or_default()
 					.push(State::Incomplete(ins));
 			}
-			BRA => eprintln!("unexpected BRA"),
-			BRAF => eprintln!("unexpected BRAF"),
-			BSR => eprintln!("unexpected BSR"),
-			BSRF => eprintln!("unexpected BSRF"),
+			BRA => {
+				let lbl_tok = match_token_with_msg(&file, &mut tok_idx, &tokens,
+					Identifier, "Label");
+				let lbl = lbl_tok.to_string(&file);
+				section_table
+					.entry(skey)
+					.or_default()
+					.push(State::Incomplete(Ins::BRA(lbl)));
+			}
+			BRAF => {
+				let reg_tok = match_token(&file, &mut tok_idx, &tokens, Register);
+				let reg = p_reg(&file, reg_tok)?;
+				section_table
+					.entry(skey)
+					.or_default()
+					.push(State::Incomplete(Ins::BRAF(reg)));
+			}
+			BSR => {
+				let lbl_tok = match_token_with_msg(&file, &mut tok_idx, &tokens,
+					Identifier, "Label");
+				let lbl = lbl_tok.to_string(&file);
+				section_table
+					.entry(skey)
+					.or_default()
+					.push(State::Incomplete(Ins::BSR(lbl)));
+			}
+			BSRF => {
+				let reg_tok = match_token(&file, &mut tok_idx, &tokens, Register);
+				let reg = p_reg(&file, reg_tok)?;
+				section_table
+					.entry(skey)
+					.or_default()
+					.push(State::Incomplete(Ins::BSRF(reg)));
+			}
 			BT => eprintln!("unexpected BT"),
 			Byte => eprintln!("unexpected size specifier"),
 			CLRMAC => eprintln!("unexpected CLRMAC"),
