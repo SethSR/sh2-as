@@ -816,7 +816,31 @@ fn parser(
 					.or_default()
 					.push(State::Incomplete(Ins::BSRF(reg)));
 			}
-			BT => eprintln!("unexpected BT"),
+			BT => {
+				let nxt_tok = p_next(&mut tok_idx, &tokens);
+				let ins = match nxt_tok.get_type() {
+					Identifier => {
+						let lbl = nxt_tok.to_string(&file);
+						Ins::BT(lbl)
+					}
+					Slash => {
+						match_token(&file, &mut tok_idx, &tokens, Delay);
+						let lbl_tok = match_token_with_msg(&file, &mut tok_idx, &tokens,
+							Identifier, "Label");
+						let lbl = lbl_tok.to_string(&file);
+						Ins::BTS(lbl)
+					}
+					_ => {
+						p_expected(&file, nxt_tok, "Label");
+						todo!("on error, skip to newline");
+					}
+				};
+
+				section_table
+					.entry(skey)
+					.or_default()
+					.push(State::Incomplete(ins));
+			}
 			Byte => eprintln!("unexpected size specifier"),
 			CLRMAC => eprintln!("unexpected CLRMAC"),
 			CLRT => eprintln!("unexpected CLRT"),
