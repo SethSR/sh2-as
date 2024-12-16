@@ -920,7 +920,7 @@ fn parser(
 					Err((_,_)) => unreachable!(),
 				};
 				if size != Size::Long {
-					data.expected("Size specifier Long ('l')");
+					data.expected("Size specifier Long('l')");
 					todo!("on error, skip to newline");
 				}
 				let (src,dst) = data.match_reg_args()?;
@@ -940,7 +940,7 @@ fn parser(
 					Err((_,_)) => unreachable!(),
 				};
 				if size != Size::Long {
-					data.expected("Size specifier Long ('l')");
+					data.expected("Size specifier Long('l')");
 					todo!("on error, skip to newline");
 				}
 				let (src,dst) = data.match_reg_args()?;
@@ -1009,8 +1009,18 @@ fn parser(
 				add_to_section(&mut section_table, skey, Ins::Label(lbl.clone()));
 				label_table.insert(lbl, None);
 			}
-			JMP => eprintln!("unexpected JMP"),
-			JSR => eprintln!("unexpected JSR"),
+			JMP => {
+				// TODO - srenshaw - Add label handling for JMP
+				data.match_token(Address);
+				let reg = data.match_reg()?;
+				add_to_section(&mut section_table, skey, Ins::JMP(reg));
+			}
+			JSR => {
+				// TODO - srenshaw - Add label handling for JSR
+				data.match_token(Address);
+				let reg = data.match_reg()?;
+				add_to_section(&mut section_table, skey, Ins::JSR(reg));
+			}
 			LDC => eprintln!("unexpected LDC"),
 			LDS => eprintln!("unexpected LDS"),
 			Long => eprintln!("unexpected size specifier"),
