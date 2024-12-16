@@ -449,7 +449,8 @@ pub(crate) enum Ins {
 	XTRCT(Reg,Reg),
 
 	/*** Directives ***/
-	Const(Size,Arg),
+	Const_Imm(Size,i64),
+	Const_Label(Size,String),
 	Label(String),
 }
 
@@ -606,6 +607,24 @@ fn assert_within_i8(file: &str, tok: &Token, value: i64) -> i8 {
 	value as i8
 }
 
+fn assert_within_i16(file: &str, tok: &Token, value: i64) -> i16 {
+	if !(i16::MIN as i64..i16::MAX as i64).contains(&value) {
+		p_expected(&file, tok,
+			"immediate value between -32768 & 32767");
+		todo!("on error, skip to next newline");
+	}
+	value as i16
+}
+
+fn assert_within_i32(file: &str, tok: &Token, value: i64) -> i32 {
+	if !(i32::MIN as i64..i32::MAX as i64).contains(&value) {
+		p_expected(&file, tok,
+			"immediate value between -2147483648 & 2147483647");
+		todo!("on error, skip to next newline");
+	}
+	value as i32
+}
+
 fn assert_within_u8(file: &str, tok: &Token, value: i64) -> u8 {
 	if !(u8::MIN as i64..u8::MAX as i64).contains(&value) {
 		p_expected(&file, tok,
@@ -613,6 +632,11 @@ fn assert_within_u8(file: &str, tok: &Token, value: i64) -> u8 {
 		todo!("on error, skip to next newline");
 	}
 	value as u8
+}
+
+fn add_to_section(table: &mut SectionTable, section_key: u64, ins: Ins) {
+	table.entry(section_key).or_default()
+		.push(State::Incomplete(ins));
 }
 
 // TODO - srenshaw - Ensure the parser actually returns what it's supposed to.
@@ -668,11 +692,7 @@ fn parser(
 						todo!("on error, skip to next newline");
 					}
 				};
-
-				section_table
-					.entry(skey)
-					.or_default()
-					.push(State::Incomplete(ins));
+				add_to_section(&mut section_table, skey, ins);
 			}
 			ADDC => {
 				let src_tok = match_token(&file, &mut tok_idx, &tokens, Register);
@@ -680,10 +700,7 @@ fn parser(
 				match_token(&file, &mut tok_idx, &tokens, Comma);
 				let dst_tok = match_token(&file, &mut tok_idx, &tokens, Register);
 				let dst = p_reg(&file, dst_tok)?;
-				section_table
-					.entry(skey)
-					.or_default()
-					.push(State::Incomplete(Ins::ADDC(src,dst)));
+				add_to_section(&mut section_table, skey, Ins::ADDC(src,dst));
 			}
 			ADDV => {
 				let src_tok = match_token(&file, &mut tok_idx, &tokens, Register);
@@ -691,10 +708,7 @@ fn parser(
 				match_token(&file, &mut tok_idx, &tokens, Comma);
 				let dst_tok = match_token(&file, &mut tok_idx, &tokens, Register);
 				let dst = p_reg(&file, dst_tok)?;
-				section_table
-					.entry(skey)
-					.or_default()
-					.push(State::Incomplete(Ins::ADDV(src,dst)));
+				add_to_section(&mut section_table, skey, Ins::ADDV(src,dst));
 			}
 			AND => {
 				let nxt_tok = p_next(&mut tok_idx, &tokens);
@@ -750,11 +764,7 @@ fn parser(
 						todo!("on error, skip to next newline");
 					}
 				};
-
-				section_table
-					.entry(skey)
-					.or_default()
-					.push(State::Incomplete(ins));
+				add_to_section(&mut section_table, skey, ins);
 			}
 			Address => eprintln!("unexpected Address"),
 			BF => {
@@ -776,45 +786,29 @@ fn parser(
 						todo!("on error, skip to newline");
 					}
 				};
-
-				section_table
-					.entry(skey)
-					.or_default()
-					.push(State::Incomplete(ins));
+				add_to_section(&mut section_table, skey, ins);
 			}
 			BRA => {
 				let lbl_tok = match_token_with_msg(&file, &mut tok_idx, &tokens,
 					Identifier, "Label");
 				let lbl = lbl_tok.to_string(&file);
-				section_table
-					.entry(skey)
-					.or_default()
-					.push(State::Incomplete(Ins::BRA(lbl)));
+				add_to_section(&mut section_table, skey, Ins::BRA(lbl));
 			}
 			BRAF => {
 				let reg_tok = match_token(&file, &mut tok_idx, &tokens, Register);
 				let reg = p_reg(&file, reg_tok)?;
-				section_table
-					.entry(skey)
-					.or_default()
-					.push(State::Incomplete(Ins::BRAF(reg)));
+				add_to_section(&mut section_table, skey, Ins::BRAF(reg));
 			}
 			BSR => {
 				let lbl_tok = match_token_with_msg(&file, &mut tok_idx, &tokens,
 					Identifier, "Label");
 				let lbl = lbl_tok.to_string(&file);
-				section_table
-					.entry(skey)
-					.or_default()
-					.push(State::Incomplete(Ins::BSR(lbl)));
+				add_to_section(&mut section_table, skey, Ins::BSR(lbl));
 			}
 			BSRF => {
 				let reg_tok = match_token(&file, &mut tok_idx, &tokens, Register);
 				let reg = p_reg(&file, reg_tok)?;
-				section_table
-					.entry(skey)
-					.or_default()
-					.push(State::Incomplete(Ins::BSRF(reg)));
+				add_to_section(&mut section_table, skey, Ins::BSRF(reg));
 			}
 			BT => {
 				let nxt_tok = p_next(&mut tok_idx, &tokens);
@@ -835,25 +829,11 @@ fn parser(
 						todo!("on error, skip to newline");
 					}
 				};
-
-				section_table
-					.entry(skey)
-					.or_default()
-					.push(State::Incomplete(ins));
+				add_to_section(&mut section_table, skey, ins);
 			}
 			Byte => eprintln!("unexpected size specifier"),
-			CLRMAC => {
-				section_table
-					.entry(skey)
-					.or_default()
-					.push(State::Incomplete(Ins::CLRMAC));
-			}
-			CLRT => {
-				section_table
-					.entry(skey)
-					.or_default()
-					.push(State::Incomplete(Ins::CLRT));
-			}
+			CLRMAC => add_to_section(&mut section_table, skey, Ins::CLRMAC),
+			CLRT => add_to_section(&mut section_table, skey, Ins::CLRT),
 			CMP => eprintln!("unexpected CMP"),
 			Colon => eprintln!("unexpected Colon"),
 			Comma => eprintln!("unexpected Comma"),
@@ -864,14 +844,19 @@ fn parser(
 				};
 
 				let nxt_tok = p_next(&mut tok_idx, &tokens);
-				let value = match nxt_tok.get_type() {
+				let ins = match nxt_tok.get_type() {
 					Number => {
-						let imm = p_number(&file, nxt_tok)?;
-						Arg::DirImm(imm)
+						let num = p_number(&file, nxt_tok)?;
+						let imm = match sz {
+							Size::Byte => assert_within_i8(&file, nxt_tok, num) as i64,
+							Size::Word => assert_within_i16(&file, nxt_tok, num) as i64,
+							Size::Long => assert_within_i32(&file, nxt_tok, num) as i64,
+						};
+						Ins::Const_Imm(sz, imm)
 					}
 					Identifier => {
 						let txt = nxt_tok.to_string(&file);
-						Arg::Label(txt)
+						Ins::Const_Label(sz, txt)
 					}
 					_ => {
 						p_expected(&file, nxt_tok,
@@ -879,12 +864,7 @@ fn parser(
 						todo!("on error, skip to next newline character");
 					}
 				};
-
-				// TODO - srenshaw - ensure `value` and `size` match.
-				section_table
-					.entry(skey)
-					.or_default()
-					.push(State::Incomplete(Ins::Const(sz,value)));
+				add_to_section(&mut section_table, skey, ins);
 			}
 			CParen => eprintln!("unexpected close-parenthesis"),
 			Dash => eprintln!("unexpected Dash"),
@@ -1149,15 +1129,15 @@ fn resolver(
 						let iword = *isrc as i8 as u8 as u16;
 						results.push(Complete(base | nbyte | iword));
 					}
-					Incomplete(Const(Byte,DirImm(_))) => {
+					Incomplete(Const_Imm(Byte,_)) => {
 						eprintln!("Attempting to declare a byte constant. This doesn't work currently.");
 					}
-					Incomplete(Const(Word,DirImm(value))) => {
-						results.push(Complete(*value as u16));
+					Incomplete(Const_Imm(Word,value)) => {
+						results.push(Complete(*value as i16 as u16));
 					}
-					Incomplete(Const(Long,DirImm(value))) => {
-						results.push(Complete((*value >> 16) as u16));
-						results.push(Complete(*value as u16));
+					Incomplete(Const_Imm(Long,value)) => {
+						results.push(Complete((*value >> 16) as i16 as u16));
+						results.push(Complete(*value as i16 as u16));
 					}
 					Incomplete(BF(label)) => {
 						if !label_table.contains_key(label) {
