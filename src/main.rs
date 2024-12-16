@@ -581,10 +581,20 @@ impl Parser<'_,'_> {
 		self.curr()
 	}
 
-	fn match_token<'a>(&'a mut self,
+	fn match_token(&mut self,
 		tt: TokenType,
-	) -> &'a Token {
+	) -> &Token {
 		self.match_token_or_err(tt, &tt.to_string())
+	}
+
+	fn match_number(&mut self) -> miette::Result<i64> {
+		self.match_token(TokenType::Number);
+		self.number()
+	}
+
+	fn match_reg(&mut self) -> miette::Result<Reg> {
+		self.match_token(TokenType::Register);
+		self.reg()
 	}
 }
 
@@ -653,23 +663,20 @@ fn parser(
 						let num = data.number()?;
 						let imm = assert_within_i8(&data, -num);
 						data.match_token(Comma);
-						data.match_token(Register);
-						let reg = data.reg()?;
+						let reg = data.match_reg()?;
 						Ins::ADD_Imm(imm, reg)
 					}
 					Number => {
 						let num = data.number()?;
 						let imm = assert_within_i8(&data, num);
 						data.match_token(Comma);
-						data.match_token(Register);
-						let reg = data.reg()?;
+						let reg = data.match_reg()?;
 						Ins::ADD_Imm(imm, reg)
 					}
 					Register => {
 						let src = data.reg()?;
 						data.match_token(Comma);
-						data.match_token(Register);
-						let dst = data.reg()?;
+						let dst = data.match_reg()?;
 						Ins::ADD_Reg(src,dst)
 					}
 					_ => {
@@ -683,16 +690,14 @@ fn parser(
 				data.match_token(Register);
 				let src = data.reg()?;
 				data.match_token(Comma);
-				data.match_token(Register);
-				let dst = data.reg()?;
+				let dst = data.match_reg()?;
 				add_to_section(&mut section_table, skey, Ins::ADDC(src,dst));
 			}
 			ADDV => {
 				data.match_token(Register);
 				let src = data.reg()?;
 				data.match_token(Comma);
-				data.match_token(Register);
-				let dst = data.reg()?;
+				let dst = data.match_reg()?;
 				add_to_section(&mut section_table, skey, Ins::ADDV(src,dst));
 			}
 			AND => {
@@ -702,8 +707,7 @@ fn parser(
 						let num = data.number()?;
 						let imm = assert_within_u8(&data, num);
 						data.match_token(Comma);
-						data.match_token(Register);
-						let reg = data.reg()?;
+						let reg = data.match_reg()?;
 						if reg != 0 {
 							data.expected("AND with an immediate source must have R0 as the destination");
 							todo!("on error, skip to newline");
@@ -713,20 +717,17 @@ fn parser(
 					Register => {
 						let src = data.reg()?;
 						data.match_token(Comma);
-						data.match_token(Register);
-						let dst = data.reg()?;
+						let dst = data.match_reg()?;
 						Ins::AND_Reg(src,dst)
 					}
 					Dot => {
 						data.match_token(Byte);
-						data.match_token(Number);
-						let num = data.number()?;
+						let num = data.match_number()?;
 						let imm = assert_within_u8(&data, num);
 						data.match_token(Comma);
 						data.match_token(Address);
 						data.match_token(OParen);
-						data.match_token(Register);
-						let reg = data.reg()?;
+						let reg = data.match_reg()?;
 						if reg != 0 {
 							data.expected("AND.B must have @(R0,GBR) as the destination");
 							todo!("on error, skip to newline");
@@ -774,8 +775,7 @@ fn parser(
 				add_to_section(&mut section_table, skey, Ins::BRA(lbl));
 			}
 			BRAF => {
-				data.match_token(Register);
-				let reg = data.reg()?;
+				let reg = data.match_reg()?;
 				add_to_section(&mut section_table, skey, Ins::BRAF(reg));
 			}
 			BSR => {
@@ -784,8 +784,7 @@ fn parser(
 				add_to_section(&mut section_table, skey, Ins::BSR(lbl));
 			}
 			BSRF => {
-				data.match_token(Register);
-				let reg = data.reg()?;
+				let reg = data.match_reg()?;
 				add_to_section(&mut section_table, skey, Ins::BSRF(reg));
 			}
 			BT => {
@@ -817,7 +816,7 @@ fn parser(
 			Comment => {} // skip comments
 			Const => {
 				let Ok(sz) = data.size() else {
-					todo!("on error, skip to next newline character");
+					todo!("on error, skip to newline");
 				};
 
 				let nxt_tok = data.next();
@@ -851,8 +850,7 @@ fn parser(
 			DMULS => eprintln!("unexpected DMULS"),
 			DMULU => eprintln!("unexpected DMULU"),
 			DT => {
-				data.match_token(Register);
-				let reg = data.reg()?;
+				let reg = data.match_reg()?;
 				add_to_section(&mut section_table, skey, Ins::DT(reg));
 			}
 			Dot => eprintln!("unexpected Dot"),
@@ -867,18 +865,14 @@ fn parser(
 			Identifier => {
 				let lbl = cur_tok.to_string(&file);
 
-				let nxt_tok = data.next();
-				if nxt_tok.get_type() == Colon {
-					if label_table.contains_key(&lbl) {
-						eprintln!("{}", p_error("Label '{label}' already defined"));
-						todo!("on error, skip to newline");
-					}
-					add_to_section(&mut section_table, skey, Ins::Label(lbl.clone()));
-					label_table.insert(lbl, None);
-				} else {
-					eprintln!("{}", data.expected("End of label declaration ':'"));
+				data.match_token_or_err(Colon, "End of label declaration (':')");
+
+				if label_table.contains_key(&lbl) {
+					eprintln!("{}", p_error("Label '{label}' already defined"));
 					todo!("on error, skip to newline");
 				}
+				add_to_section(&mut section_table, skey, Ins::Label(lbl.clone()));
+				label_table.insert(lbl, None);
 			}
 			JMP => eprintln!("unexpected JMP"),
 			JSR => eprintln!("unexpected JSR"),
@@ -913,10 +907,8 @@ fn parser(
 						Arg::DirReg(reg)
 					}
 					Address => {
-						data.match_token(Register);
-						let reg = data.reg()?;
-						let nxt_tok = data.next();
-						if nxt_tok.get_type() == Plus {
+						let reg = data.match_reg()?;
+						if data.next().get_type() == Plus {
 							Arg::PostInc(reg)
 						} else {
 							data.index -= 1;
