@@ -132,7 +132,7 @@ impl std::fmt::Debug for Arg {
 	}
 }
 
-#[derive(Debug,Clone,Copy)]
+#[derive(Debug,Clone,Copy,PartialEq,Eq)]
 enum Size {
 	Byte,
 	Word,
@@ -897,11 +897,55 @@ fn parser(
 			CParen => eprintln!("unexpected close-parenthesis"),
 			Dash => eprintln!("unexpected Dash"),
 			Delay => eprintln!("unexpected Delay"),
-			DIV0S => eprintln!("unexpected DIV0S"),
-			DIV0U => eprintln!("unexpected DIV0U"),
-			DIV1 => eprintln!("unexpected DIV1"),
-			DMULS => eprintln!("unexpected DMULS"),
-			DMULU => eprintln!("unexpected DMULU"),
+			DIV0S => {
+				let (src,dst) = data.match_reg_args()?;
+				add_to_section(&mut section_table, skey, Ins::DIV0S(src,dst));
+			}
+			DIV0U => add_to_section(&mut section_table, skey, Ins::DIV0U),
+			DIV1 => {
+				let (src,dst) = data.match_reg_args()?;
+				add_to_section(&mut section_table, skey, Ins::DIV1(src,dst));
+			}
+			DMULS => {
+				let size = match data.size() {
+					Ok(sz) => sz,
+					Err((0,msg)) => {
+						eprintln!("{}", &p_error(&msg));
+						todo!("on error, skip to newline");
+					}
+					Err((1,msg)) => {
+						eprintln!("{}", &p_error(&msg));
+						todo!("on error, skip to newline");
+					}
+					Err((_,_)) => unreachable!(),
+				};
+				if size != Size::Long {
+					data.expected("Size specifier Long ('l')");
+					todo!("on error, skip to newline");
+				}
+				let (src,dst) = data.match_reg_args()?;
+				add_to_section(&mut section_table, skey, Ins::DMULS(src,dst));
+			}
+			DMULU => {
+				let size = match data.size() {
+					Ok(sz) => sz,
+					Err((0,msg)) => {
+						eprintln!("{}", &p_error(&msg));
+						todo!("on error, skip to newline");
+					}
+					Err((1,msg)) => {
+						eprintln!("{}", &p_error(&msg));
+						todo!("on error, skip to newline");
+					}
+					Err((_,_)) => unreachable!(),
+				};
+				if size != Size::Long {
+					data.expected("Size specifier Long ('l')");
+					todo!("on error, skip to newline");
+				}
+				let (src,dst) = data.match_reg_args()?;
+				add_to_section(&mut section_table, skey, Ins::DMULS(src,dst));
+			}
 			DT => {
 				let reg = data.match_reg()?;
 				add_to_section(&mut section_table, skey, Ins::DT(reg));
