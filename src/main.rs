@@ -597,6 +597,15 @@ impl Parser<'_,'_> {
 		self.reg()
 	}
 
+	fn match_r0(&mut self) -> miette::Result<()> {
+		let reg = self.match_reg()?;
+		if reg != 0 {
+			self.expected("R0");
+			todo!("on error, skip to newline");
+		}
+		Ok(())
+	}
+
 	fn match_reg_args(&mut self) -> miette::Result<(Reg,Reg)> {
 		let src = self.match_reg()?;
 		self.match_token(TokenType::Comma);
@@ -708,11 +717,7 @@ fn parser(
 						let num = data.number()?;
 						let imm = assert_within_u8(&data, num);
 						data.match_token(Comma);
-						let reg = data.match_reg()?;
-						if reg != 0 {
-							data.expected("AND with an immediate source must have R0 as the destination");
-							todo!("on error, skip to newline");
-						}
+						data.match_r0()?;
 						Ins::AND_Imm(imm)
 					}
 					Register => {
@@ -728,11 +733,7 @@ fn parser(
 						data.match_token(Comma);
 						data.match_token(Address);
 						data.match_token(OParen);
-						let reg = data.match_reg()?;
-						if reg != 0 {
-							data.expected("AND.B must have @(R0,GBR) as the destination");
-							todo!("on error, skip to newline");
-						}
+						data.match_r0()?;
 						data.match_token(Comma);
 						let nxt_tok = data.next();
 						if nxt_tok.to_string(&file).to_lowercase() != "gbr" {
@@ -821,11 +822,7 @@ fn parser(
 							let num = data.number()?;
 							let imm = assert_within_i8(&data, num);
 							data.match_token(Comma);
-							let reg = data.match_reg()?;
-							if reg != 0 {
-								data.expected("CMP/EQ with an immediate source must have R0 as the destination");
-								todo!("on error, skip to newline");
-							}
+							data.match_r0()?;
 							Ins::CMP_EQ_Imm(imm)
 						} else {
 							let (src,dst) = data.match_reg_args()?;
