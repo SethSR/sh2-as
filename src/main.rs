@@ -596,6 +596,13 @@ impl Parser<'_,'_> {
 		self.match_token(TokenType::Register);
 		self.reg()
 	}
+
+	fn match_reg_args(&mut self) -> miette::Result<(Reg,Reg)> {
+		let src = self.match_reg()?;
+		self.match_token(TokenType::Comma);
+		let dst = self.match_reg()?;
+		Ok((src,dst))
+	}
 }
 
 fn assert_within_i8(data: &Parser, value: i64) -> i8 {
@@ -687,17 +694,11 @@ fn parser(
 				add_to_section(&mut section_table, skey, ins);
 			}
 			ADDC => {
-				data.match_token(Register);
-				let src = data.reg()?;
-				data.match_token(Comma);
-				let dst = data.match_reg()?;
+				let (src,dst) = data.match_reg_args()?;
 				add_to_section(&mut section_table, skey, Ins::ADDC(src,dst));
 			}
 			ADDV => {
-				data.match_token(Register);
-				let src = data.reg()?;
-				data.match_token(Comma);
-				let dst = data.match_reg()?;
+				let (src,dst) = data.match_reg_args()?;
 				add_to_section(&mut section_table, skey, Ins::ADDV(src,dst));
 			}
 			AND => {
@@ -810,7 +811,62 @@ fn parser(
 			Byte => eprintln!("unexpected size specifier"),
 			CLRMAC => add_to_section(&mut section_table, skey, Ins::CLRMAC),
 			CLRT => add_to_section(&mut section_table, skey, Ins::CLRT),
-			CMP => eprintln!("unexpected CMP"),
+			CMP => {
+				data.match_token(Slash);
+				let nxt_tok = data.next();
+				let ins = match nxt_tok.get_type() {
+					EQ => {
+						let nxt_tok = data.next();
+						if nxt_tok.get_type() == Number {
+							let num = data.number()?;
+							let imm = assert_within_i8(&data, num);
+							data.match_token(Comma);
+							let reg = data.match_reg()?;
+							if reg != 0 {
+								data.expected("CMP/EQ with an immediate source must have R0 as the destination");
+								todo!("on error, skip to newline");
+							}
+							Ins::CMP_EQ_Imm(imm)
+						} else {
+							let (src,dst) = data.match_reg_args()?;
+							Ins::CMP_EQ_Reg(src,dst)
+						}
+					}
+					GE => {
+						let (src,dst) = data.match_reg_args()?;
+						Ins::CMP_GE(src,dst)
+					}
+					GT => {
+						let (src,dst) = data.match_reg_args()?;
+						Ins::CMP_GT(src,dst)
+					}
+					HI => {
+						let (src,dst) = data.match_reg_args()?;
+						Ins::CMP_HI(src,dst)
+					}
+					HS => {
+						let (src,dst) = data.match_reg_args()?;
+						Ins::CMP_HS(src,dst)
+					}
+					PL => {
+						let reg = data.match_reg()?;
+						Ins::CMP_PL(reg)
+					}
+					PZ => {
+						let reg = data.match_reg()?;
+						Ins::CMP_PZ(reg)
+					}
+					STR => {
+						let (src,dst) = data.match_reg_args()?;
+						Ins::CMP_STR(src,dst)
+					}
+					_ => {
+						data.expected("Comparator type (EQ,GT,GE,HI,HS,PL,PZ,STR)");
+						todo!("on error, skip to newline");
+					}
+				};
+				add_to_section(&mut section_table, skey, ins);
+			}
 			Colon => eprintln!("unexpected Colon"),
 			Comma => eprintln!("unexpected Comma"),
 			Comment => {} // skip comments
