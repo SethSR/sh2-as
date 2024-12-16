@@ -953,8 +953,46 @@ fn parser(
 			Dot => eprintln!("unexpected Dot"),
 			EQ => eprintln!("unexpected EQ"),
 			Equal => eprintln!("unexpected Equal"),
-			EXTS => eprintln!("unexpected EXTS"),
-			EXTU => eprintln!("unexpected EXTU"),
+			EXTS => {
+				let size = match data.size() {
+					Ok(sz) => sz,
+					Err((0,msg)) => {
+						eprintln!("{}", &p_error(&msg));
+						todo!("on error, skip to newline");
+					}
+					Err((1,msg)) => {
+						eprintln!("{}", &p_error(&msg));
+						todo!("on error, skip to newline");
+					}
+					Err((_,_)) => unreachable!(),
+				};
+				if size == Size::Long {
+					data.expected("Size specifier Byte('b') or Word('w')");
+					todo!("on error, skip to newline");
+				}
+				let (src,dst) = data.match_reg_args()?;
+				add_to_section(&mut section_table, skey, Ins::EXTS(size,src,dst));
+			}
+			EXTU => {
+				let size = match data.size() {
+					Ok(sz) => sz,
+					Err((0,msg)) => {
+						eprintln!("{}", &p_error(&msg));
+						todo!("on error, skip to newline");
+					}
+					Err((1,msg)) => {
+						eprintln!("{}", &p_error(&msg));
+						todo!("on error, skip to newline");
+					}
+					Err((_,_)) => unreachable!(),
+				};
+				if size == Size::Long {
+					data.expected("Size specifier Byte('b') or Word('w')");
+					todo!("on error, skip to newline");
+				}
+				let (src,dst) = data.match_reg_args()?;
+				add_to_section(&mut section_table, skey, Ins::EXTU(size,src,dst));
+			}
 			GE => eprintln!("unexpected GE"),
 			GT => eprintln!("unexpected GT"),
 			HI => eprintln!("unexpected HI"),
