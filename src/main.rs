@@ -1021,8 +1021,82 @@ fn parser(
 				let reg = data.match_reg()?;
 				add_to_section(&mut section_table, skey, Ins::JSR(reg));
 			}
-			LDC => eprintln!("unexpected LDC"),
-			LDS => eprintln!("unexpected LDS"),
+			LDC => {
+				let nxt_tok = data.next();
+				let ins = match nxt_tok.get_type() {
+					Register => {
+						let reg = data.reg()?;
+						data.match_token(Comma);
+						match data.match_token(Identifier).to_string(&file).to_lowercase().as_str() {
+							"gbr" => Ins::LDC_GBR(reg),
+							"sr" => Ins::LDC_SR(reg),
+							"vbr" => Ins::LDC_VBR(reg),
+							_ => {
+								data.expected("Control Register (GBR,SR,VBR)");
+								todo!("on error, skip to newline");
+							}
+						}
+					}
+					Dot => {
+						data.match_token(Long);
+						data.match_token(Address);
+						let reg = data.match_reg()?;
+						data.match_token(Plus);
+						match data.match_token(Identifier).to_string(&file).to_lowercase().as_str() {
+							"gbr" => Ins::LDC_GBR_Inc(reg),
+							"sr" => Ins::LDC_SR_Inc(reg),
+							"vbr" => Ins::LDC_VBR_Inc(reg),
+							_ => {
+								data.expected("Control Register (GBR,SR,VBR)");
+								todo!("on error, skip to newline");
+							}
+						}
+					}
+					_ => {
+						data.expected("Valid LDC instruction");
+						todo!("on error, skip to newline");
+					}
+				};
+				add_to_section(&mut section_table, skey, ins);
+			}
+			LDS => {
+				let nxt_tok = data.next();
+				let ins = match nxt_tok.get_type() {
+					Register => {
+						let reg = data.reg()?;
+						data.match_token(Comma);
+						match data.match_token(Identifier).to_string(&file).to_lowercase().as_str() {
+							"mach" => Ins::LDS_MACH(reg),
+							"macl" => Ins::LDS_MACL(reg),
+							"pr" => Ins::LDS_PR(reg),
+							_ => {
+								data.expected("Special Register (MACH,MACL,PR)");
+								todo!("on error, skip to newline");
+							}
+						}
+					}
+					Dot => {
+						data.match_token(Long);
+						data.match_token(Address);
+						let reg = data.match_reg()?;
+						data.match_token(Plus);
+						match data.match_token(Identifier).to_string(&file).to_lowercase().as_str() {
+							"mach" => Ins::LDS_MACH_Inc(reg),
+							"macl" => Ins::LDS_MACL_Inc(reg),
+							"pr" => Ins::LDS_PR_Inc(reg),
+							_ => {
+								data.expected("Special Register (MACH,MACL,PR)");
+								todo!("on error, skip to newline");
+							}
+						}
+					}
+					_ => {
+						data.expected("Valid LDS instruction");
+						todo!("on error, skip to newline");
+					}
+				};
+				add_to_section(&mut section_table, skey, ins);
+			}
 			Long => eprintln!("unexpected size specifier"),
 			MAC => eprintln!("unexpected MAC"),
 			MOV => {
