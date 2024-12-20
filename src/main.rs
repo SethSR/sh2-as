@@ -141,311 +141,328 @@ enum Size {
 
 #[allow(non_camel_case_types)]
 #[derive(Debug,Clone)]
-//    | Instruction    | Bit Layout       | Operation          | Cycles  | T Bit  |
+//    | Instruction       | Bit Layout       | Operation          | Cycles  | T Bit  |
 pub(crate) enum Ins {
-	/// | #imm,Rn        | 0111nnnniiiiiiii | Rn+imm -> Rn       | 1       | -      |
+	/// | #imm,Rn           | 0111nnnniiiiiiii | Rn+imm -> Rn       | 1       | -      |
 	ADD_Imm(i8,Reg),
-	/// | Rm,Rn          | 0011nnnnmmmm1100 | Rn+Rm -> Rn        | 1       | -      |
+	/// | Rm,Rn             | 0011nnnnmmmm1100 | Rn+Rm -> Rn        | 1       | -      |
 	ADD_Reg(Reg,Reg),
-	/// | Rm,Rn          | 0011nnnnmmmm1110 | Rn+Rm+T -> Rn,     | 1       | Carry  |
-	/// |                |                  | Carry -> T         |         |        |
+	/// | Rm,Rn             | 0011nnnnmmmm1110 | Rn+Rm+T -> Rn,     | 1       | Carry  |
+	/// |                   |                  | Carry -> T         |         |        |
 	ADDC(Reg,Reg),
-	/// | Rm,Rn          | 0011nnnnmmmm1111 | Rn+Rm -> Rn,       | 1       | Over   |
-	/// |                |                  | Overflow -> T      |         |        |
+	/// | Rm,Rn             | 0011nnnnmmmm1111 | Rn+Rm -> Rn,       | 1       | Over   |
+	/// |                   |                  | Overflow -> T      |         |        |
 	ADDV(Reg,Reg),
-	/// | #imm,R0        | 11001001iiiiiiii | R0 & imm -> R0     | 1       | -      |
+	/// | #imm,R0           | 11001001iiiiiiii | R0 & imm -> R0     | 1       | -      |
 	AND_Imm(u8),
-	/// | Rm,Rn          | 0010nnnnmmmm1001 | Rn & Rm -> Rn      | 1       | -      |
+	/// | Rm,Rn             | 0010nnnnmmmm1001 | Rn & Rm -> Rn      | 1       | -      |
 	AND_Reg(Reg,Reg),
-	/// | #imm,@(R0,GBR) | 11001101iiiiiiii | (R0+GBR) & imm     | 3       | -      |
-	/// |                |                  | -> (R0+GBR)        |         |        |
+	/// | #imm,@(R0,GBR)    | 11001101iiiiiiii | (R0+GBR) & imm     | 3       | -      |
+	/// |                   |                  | -> (R0+GBR)        |         |        |
 	AND_Byte(u8),
-	/// | label          | 10011011dddddddd | if T = 0,          | 3/1     | -      |
-	/// |                |                  | dispx2+PC -> PC;   |         |        |
-	/// |                |                  | if T = 1, nop      |         |        |
+	/// | label             | 10011011dddddddd | if T = 0,          | 3/1     | -      |
+	/// |                   |                  | dispx2+PC -> PC;   |         |        |
+	/// |                   |                  | if T = 1, nop      |         |        |
 	BF(String),
-	/// | label          | 10001111dddddddd | if T = 0,          | 2/1     | -      |
-	/// |                |                  | dispx2+PC -> PC;   |         |        |
-	/// |                |                  | if T = 1, nop      |         |        |
+	/// | label             | 10001111dddddddd | if T = 0,          | 2/1     | -      |
+	/// |                   |                  | dispx2+PC -> PC;   |         |        |
+	/// |                   |                  | if T = 1, nop      |         |        |
 	BFS(String),
-	/// | label          | 1010dddddddddddd | Delayed branch,    | 2       | -      |
-	/// |                |                  | dispx2+PC -> PC    |         |        |
+	/// | label             | 1010dddddddddddd | Delayed branch,    | 2       | -      |
+	/// |                   |                  | dispx2+PC -> PC    |         |        |
 	BRA(String),
-	/// | Rm             | 0000mmmm00100011 | Delayed branch,    | 2       | -      |
-	/// |                |                  | Rm+PC -> PC        |         |        |
+	/// | Rm                | 0000mmmm00100011 | Delayed branch,    | 2       | -      |
+	/// |                   |                  | Rm+PC -> PC        |         |        |
 	BRAF(Reg),
-	/// | label          | 1011dddddddddddd | Delayed branch,    | 2       | -      |
-	/// |                |                  | PC -> PR,          |         |        |
-	/// |                |                  | dispx2+PC -> PC    |         |        |
+	/// | label             | 1011dddddddddddd | Delayed branch,    | 2       | -      |
+	/// |                   |                  | PC -> PR,          |         |        |
+	/// |                   |                  | dispx2+PC -> PC    |         |        |
 	BSR(String),
-	/// | Rm             | 0000mmmm00000011 | Delayed branch,    | 2       | -      |
-	/// |                |                  | PC -> PR,          |         |        |
-	/// |                |                  | Rm+PC -> PC        |         |        |
+	/// | Rm                | 0000mmmm00000011 | Delayed branch,    | 2       | -      |
+	/// |                   |                  | PC -> PR,          |         |        |
+	/// |                   |                  | Rm+PC -> PC        |         |        |
 	BSRF(Reg),
-	/// | label          | 10001001dddddddd | if T = 1,          | 3/1     | -      |
-	/// |                |                  | dispx2+PC -> PC;   |         |        |
-	/// |                |                  | if T = 0, nop      |         |        |
+	/// | label             | 10001001dddddddd | if T = 1,          | 3/1     | -      |
+	/// |                   |                  | dispx2+PC -> PC;   |         |        |
+	/// |                   |                  | if T = 0, nop      |         |        |
 	BT(String),
-	/// | label          | 10001101dddddddd | if T = 1,          | 2/1     | -      |
-	/// |                |                  | dispx2+PC -> PC;   |         |        |
-	/// |                |                  | if T = 0, nop      |         |        |
+	/// | label             | 10001101dddddddd | if T = 1,          | 2/1     | -      |
+	/// |                   |                  | dispx2+PC -> PC;   |         |        |
+	/// |                   |                  | if T = 0, nop      |         |        |
 	BTS(String),
-	/// |                | 0000000000101000 | 0 -> MACH, MACL    | 1       | -      |
+	/// |                   | 0000000000101000 | 0 -> MACH, MACL    | 1       | -      |
 	CLRMAC,
-	/// |                | 0000000000001000 | 0 -> T             | 1       | 0      |
+	/// |                   | 0000000000001000 | 0 -> T             | 1       | 0      |
 	CLRT,
-	/// | #imm,R0        | 10001000iiiiiiii | if R0 = imm,       | 1       | Result |
-	/// |                |                  | 1 -> T             |         |        |
+	/// | #imm,R0           | 10001000iiiiiiii | if R0 = imm,       | 1       | Result |
+	/// |                   |                  | 1 -> T             |         |        |
 	CMP_EQ_Imm(i8),
-	/// | Rm,Rn          | 0011nnnnmmmm0000 | if Rn = Rm,        | 1       | Result |
-	/// |                |                  | 1 -> T             |         |        |
+	/// | Rm,Rn             | 0011nnnnmmmm0000 | if Rn = Rm,        | 1       | Result |
+	/// |                   |                  | 1 -> T             |         |        |
 	CMP_EQ_Reg(Reg,Reg),
-	/// | Rm,Rn          | 0011nnnnmmmm0011 | if Rn >= Rm with   | 1       | Result |
-	/// |                |                  | signed data,       |         |        |
-	/// |                |                  | 1 -> T             |         |        |
+	/// | Rm,Rn             | 0011nnnnmmmm0011 | if Rn >= Rm with   | 1       | Result |
+	/// |                   |                  | signed data,       |         |        |
+	/// |                   |                  | 1 -> T             |         |        |
 	CMP_GE(Reg,Reg),
-	/// | Rm,Rn          | 0011nnnnmmmm0111 | if Rn > Rm with    | 1       | Result |
-	/// |                |                  | signed data,       |         |        |
-	/// |                |                  | 1 -> T             |         |        |
+	/// | Rm,Rn             | 0011nnnnmmmm0111 | if Rn > Rm with    | 1       | Result |
+	/// |                   |                  | signed data,       |         |        |
+	/// |                   |                  | 1 -> T             |         |        |
 	CMP_GT(Reg,Reg),
-	/// | Rm,Rn          | 0011nnnnmmmm0110 | if Rn > Rm with    | 1       | Result |
-	/// |                |                  | unsigned data,     |         |        |
-	/// |                |                  | 1 -> T             |         |        |
+	/// | Rm,Rn             | 0011nnnnmmmm0110 | if Rn > Rm with    | 1       | Result |
+	/// |                   |                  | unsigned data,     |         |        |
+	/// |                   |                  | 1 -> T             |         |        |
 	CMP_HI(Reg,Reg),
-	/// | Rm,Rn          | 0011nnnnmmmm0010 | if Rn >= Rm with   | 1       | Result |
-	/// |                |                  | unsigned data,     |         |        |
-	/// |                |                  | 1 -> T             |         |        |
+	/// | Rm,Rn             | 0011nnnnmmmm0010 | if Rn >= Rm with   | 1       | Result |
+	/// |                   |                  | unsigned data,     |         |        |
+	/// |                   |                  | 1 -> T             |         |        |
 	CMP_HS(Reg,Reg),
-	/// | Rn             | 0100nnnn00010101 | if Rn > 0,         | 1       | Result |
-	/// |                |                  | 1 -> T             |         |        |
+	/// | Rn                | 0100nnnn00010101 | if Rn > 0,         | 1       | Result |
+	/// |                   |                  | 1 -> T             |         |        |
 	CMP_PL(Reg),
-	/// | Rn             | 0100nnnn00010001 | if Rn > 0,         | 1       | Result |
-	/// |                |                  | 1 -> T             |         |        |
+	/// | Rn                | 0100nnnn00010001 | if Rn > 0,         | 1       | Result |
+	/// |                   |                  | 1 -> T             |         |        |
 	CMP_PZ(Reg),
-	/// | Rm,Rn          | 0010nnnnmmmm1100 | if Rn & Rm have    | 1       | Result |
-	/// |                |                  | an equivalent      |         |        |
-	/// |                |                  | byte, 1 -> T       |         |        |
+	/// | Rm,Rn             | 0010nnnnmmmm1100 | if Rn & Rm have    | 1       | Result |
+	/// |                   |                  | an equivalent      |         |        |
+	/// |                   |                  | byte, 1 -> T       |         |        |
 	CMP_STR(Reg,Reg),
-	/// | Rm,Rn          | 0010nnnnmmmm0111 | MSB of Rn -> Q,    | 1       | Result |
-	/// |                |                  | MSB of Rm -> M,    |         |        |
-	/// |                |                  | M ^ Q -> T         |         |        |
+	/// | Rm,Rn             | 0010nnnnmmmm0111 | MSB of Rn -> Q,    | 1       | Result |
+	/// |                   |                  | MSB of Rm -> M,    |         |        |
+	/// |                   |                  | M ^ Q -> T         |         |        |
 	DIV0S(Reg,Reg),
-	/// |                | 0000000000011001 | 0 -> M/Q/T         | 1       | 0      |
+	/// |                   | 0000000000011001 | 0 -> M/Q/T         | 1       | 0      |
 	DIV0U,
-	/// | Rm,Rn          | 0011nnnnmmmm0100 | Single-step        | 1       | Result |
-	/// |                |                  | division (Rn/Rm)   |         |        |
+	/// | Rm,Rn             | 0011nnnnmmmm0100 | Single-step        | 1       | Result |
+	/// |                   |                  | division (Rn/Rm)   |         |        |
 	DIV1(Reg,Reg),
-	/// | Rm,Rn          | 0011nnnnmmmm1101 | Signed operation   | 2 to 4  | -      |
-	/// |                |                  | of Rn x Rm ->      |         |        |
-	/// |                |                  | MACH, MACL         |         |        |
+	/// | Rm,Rn             | 0011nnnnmmmm1101 | Signed operation   | 2 to 4  | -      |
+	/// |                   |                  | of Rn x Rm ->      |         |        |
+	/// |                   |                  | MACH, MACL         |         |        |
 	DMULS(Reg,Reg),
-	/// | Rm,Rn          | 0011nnnnmmmm0101 | Unsigned operation | 2 to 4  | -      |
-	/// |                |                  | of Rn x Rm -> MACH |         |        |
-	/// |                |                  | MACL               |         |        |
+	/// | Rm,Rn             | 0011nnnnmmmm0101 | Unsigned operation | 2 to 4  | -      |
+	/// |                   |                  | of Rn x Rm -> MACH |         |        |
+	/// |                   |                  | MACL               |         |        |
 	DMULU(Reg,Reg),
-	/// | Rn             | 0100nnnn00010000 | Rn - 1 -> Rn, when | 1       | Result |
-	/// |                |                  | Rn is 0, 1 -> T.   |         |        |
-	/// |                |                  | When Rn is         |         |        |
-	/// |                |                  | nonzero, 0 -> T    |         |        |
+	/// | Rn                | 0100nnnn00010000 | Rn - 1 -> Rn, when | 1       | Result |
+	/// |                   |                  | Rn is 0, 1 -> T.   |         |        |
+	/// |                   |                  | When Rn is         |         |        |
+	/// |                   |                  | nonzero, 0 -> T    |         |        |
 	DT(Reg),
-	/// | Byte Rm,Rn     | 0110nnnnmmmm1110 | A byte in Rm is    | 1       | -      |
-	/// |                |                  | sign-extended ->   |         |        |
-	/// |                |                  | Rn                 |         |        |
-	/// | Word Rm,Rn     | 0110nnnnmmmm1111 | A word in Rm is    | 1       | -      |
-	/// |                |                  | sign-extended ->   |         |        |
-	/// |                |                  | Rn                 |         |        |
+	/// | .B Rm,Rn          | 0110nnnnmmmm1110 | A byte in Rm is    | 1       | -      |
+	/// |                   |                  | sign-extended ->   |         |        |
+	/// |                   |                  | Rn                 |         |        |
+	/// | .W Rm,Rn          | 0110nnnnmmmm1111 | A word in Rm is    | 1       | -      |
+	/// |                   |                  | sign-extended ->   |         |        |
+	/// |                   |                  | Rn                 |         |        |
 	EXTS(Size,Reg,Reg),
-	/// | Byte Rm,Rn     | 0110nnnnmmmm1100 | A byte in Rm is    | 1       | -      |
-	/// |                |                  | sign-extended ->   |         |        |
-	/// |                |                  | Rn                 |         |        |
-	/// | Word Rm,Rn     | 0110nnnnmmmm1101 | A word in Rm is    | 1       | -      |
-	/// |                |                  | sign-extended ->   |         |        |
-	/// |                |                  | Rn                 |         |        |
+	/// | .B Rm,Rn          | 0110nnnnmmmm1100 | A byte in Rm is    | 1       | -      |
+	/// |                   |                  | sign-extended ->   |         |        |
+	/// |                   |                  | Rn                 |         |        |
+	/// | .W Rm,Rn          | 0110nnnnmmmm1101 | A word in Rm is    | 1       | -      |
+	/// |                   |                  | sign-extended ->   |         |        |
+	/// |                   |                  | Rn                 |         |        |
 	EXTU(Size,Reg,Reg),
-	/// | @Rm            | 0100mmmm00101011 | Delayed branch,    | 2       | -      |
-	/// |                |                  | Rm -> PC           |         |        |
+	/// | @Rm               | 0100mmmm00101011 | Delayed branch,    | 2       | -      |
+	/// |                   |                  | Rm -> PC           |         |        |
 	JMP(Reg),
-	/// | @Rm            | 0100mmmm00001011 | Delayed branch,    | 2       | -      |
-	/// |                |                  | PC -> PR,          |         |        |
-	/// |                |                  | Rm -> PC           |         |        |
+	/// | @Rm               | 0100mmmm00001011 | Delayed branch,    | 2       | -      |
+	/// |                   |                  | PC -> PR,          |         |        |
+	/// |                   |                  | Rm -> PC           |         |        |
 	JSR(Reg),
-	/// | Rm,GBR         | 0100mmmm00011110 | Rm -> GBR          | 1       | -      |
+	/// | Rm,GBR            | 0100mmmm00011110 | Rm -> GBR          | 1       | -      |
 	LDC_GBR(Reg),
-	/// | Rm,SR          | 0100mmmm00001110 | Rm -> SR           | 1       | LSB    |
+	/// | Rm,SR             | 0100mmmm00001110 | Rm -> SR           | 1       | LSB    |
 	LDC_SR(Reg),
-	/// | Rm,VBR         | 0100mmmm00101110 | Rm -> VBR          | 1       | -      |
+	/// | Rm,VBR            | 0100mmmm00101110 | Rm -> VBR          | 1       | -      |
 	LDC_VBR(Reg),
-	/// | @Rm+,GBR       | 0100mmmm00010111 | (Rm) -> GBR,       | 3       | -      |
-	/// |                |                  | Rm + 4 -> Rm       |         |        |
+	/// | @Rm+,GBR          | 0100mmmm00010111 | (Rm) -> GBR,       | 3       | -      |
+	/// |                   |                  | Rm + 4 -> Rm       |         |        |
 	LDC_GBR_Inc(Reg),
-	/// | @Rm+,SR        | 0100mmmm00000111 | (Rm) -> SR,        | 3       | LSB    |
-	/// |                |                  | Rm + 4 -> Rm       |         |        |
+	/// | @Rm+,SR           | 0100mmmm00000111 | (Rm) -> SR,        | 3       | LSB    |
+	/// |                   |                  | Rm + 4 -> Rm       |         |        |
 	LDC_SR_Inc(Reg),
-	/// | @Rm+,VBR       | 0100mmmm00100111 | (Rm) -> VBR,       | 3       | -      |
-	/// |                |                  | Rm + 4 -> Rm       |         |        |
+	/// | @Rm+,VBR          | 0100mmmm00100111 | (Rm) -> VBR,       | 3       | -      |
+	/// |                   |                  | Rm + 4 -> Rm       |         |        |
 	LDC_VBR_Inc(Reg),
-	/// | Rm,MACH        | 0100mmmm00001010 | Rm -> MACH         | 1       | -      |
+	/// | Rm,MACH           | 0100mmmm00001010 | Rm -> MACH         | 1       | -      |
 	LDS_MACH(Reg),
-	/// | Rm,MACL        | 0100mmmm00011010 | Rm -> MACL         | 1       | -      |
+	/// | Rm,MACL           | 0100mmmm00011010 | Rm -> MACL         | 1       | -      |
 	LDS_MACL(Reg),
-	/// | Rm,PR          | 0100mmmm00101010 | Rm -> PR           | 1       | -      |
+	/// | Rm,PR             | 0100mmmm00101010 | Rm -> PR           | 1       | -      |
 	LDS_PR(Reg),
-	/// | @Rm+,MACH      | 0100mmmm00000110 | (Rm) -> MACH,      | 1       | -      |
-	/// |                |                  | Rm + 4 -> Rm       |         |        |
+	/// | @Rm+,MACH         | 0100mmmm00000110 | (Rm) -> MACH,      | 1       | -      |
+	/// |                   |                  | Rm + 4 -> Rm       |         |        |
 	LDS_MACH_Inc(Reg),
-	/// | @Rm+,MACL      | 0100mmmm00010110 | (Rm) -> MACL,      | 1       | -      |
-	/// |                |                  | Rm + 4 -> Rm       |         |        |
+	/// | @Rm+,MACL         | 0100mmmm00010110 | (Rm) -> MACL,      | 1       | -      |
+	/// |                   |                  | Rm + 4 -> Rm       |         |        |
 	LDS_MACL_Inc(Reg),
-	/// | @Rm+,PR        | 0100mmmm00100110 | (Rm) -> PR,        | 1       | -      |
-	/// |                |                  | Rm + 4 -> Rm       |         |        |
+	/// | @Rm+,PR           | 0100mmmm00100110 | (Rm) -> PR,        | 1       | -      |
+	/// |                   |                  | Rm + 4 -> Rm       |         |        |
 	LDS_PR_Inc(Reg),
-	/// | @Rm+,@Rn+      | 0000nnnnmmmm1111 | Signed operation   | 3/(2-4) | -      |
-	/// |                |                  | of (Rn) x (Rm) +   |         |        |
-	/// |                |                  | MAC -> MAC         |         |        |
+	/// | @Rm+,@Rn+         | 0000nnnnmmmm1111 | Signed operation   | 3/(2-4) | -      |
+	/// |                   |                  | of (Rn) x (Rm) +   |         |        |
+	/// |                   |                  | MAC -> MAC         |         |        |
 	MAC_Long(Reg,Reg),
-	/// | @Rm+,@Rn+      | 0100nnnnmmmm1111 | Signed operation   | 3/(2)   | -      |
-	/// |                |                  | of (Rn) x (Rm) +   |         |        |
-	/// |                |                  | MAC -> MAC         |         |        |
+	/// | @Rm+,@Rn+         | 0100nnnnmmmm1111 | Signed operation   | 3/(2)   | -      |
+	/// |                   |                  | of (Rn) x (Rm) +   |         |        |
+	/// |                   |                  | MAC -> MAC         |         |        |
 	MAC_Word(Reg,Reg),
+	/// | #imm,Rn           | 1110nnnniiiiiiii | imm -> Sign        | 1       | -      |
+	/// |                   |                  | extension -> Rn    |         |        |
+	MOV_Imm(i8,Reg),
+	/// | Rm,Rn             | 0110nnnnmmmm0011 | Rm -> Rn           | 1       | -      |
+	/// |                   |                  |                    |         |        |
+	MOV_Reg(Reg,Reg),
+	/// | .B @(disp,GBR),R0 | 11000100dddddddd | (disp+GBR) -> Sign | 1       | -      |
+	/// |                   |                  | extension -> R0    |         |        |
+	/// | .B @(disp,Rm),R0  | 10000100mmmmdddd | (disp+Rm) -> Sign  | 1       | -      |
+	/// |                   |                  | extension -> R0    |         |        |
+	/// | .B @(R0,Rm),Rn    | 0000nnnnmmmm1100 | (R0+Rm) -> Sign    | 1       | -      |
+	/// |                   |                  | extension -> Rn    |         |        |
+	/// | .B @Rm+,Rn        | 0110nnnnmmmm0100 | (Rm) -> Sign       | 1       | -      |
+	/// |                   |                  | extension -> Rn,   |         |        |
+	/// |                   |                  | Rm + 1 -> Rm       |         |        |
+	/// | .B @Rm,Rn         | 0110nnnnmmmm0000 | (Rm) -> Sign       | 1       | -      |
+	/// |                   |                  | extension -> Rn,   |         |        |
 	MOV(Size,Arg,Arg),
-	/// | @(disp,PC),R0  | 11000111dddddddd | disp x 4+PC -> R0  | 1       | -      |
+	/// | @(disp,PC),R0     | 11000111dddddddd | disp x 4+PC -> R0  | 1       | -      |
 	MOVA(i8),
-	/// | Rn             | 0000nnnn00101001 | T -> Rn            | 1       | -      |
+	/// | Rn                | 0000nnnn00101001 | T -> Rn            | 1       | -      |
 	MOVT(Reg),
-	/// | Rm,Rn          | 0000nnnnmmmm0111 | Rn x Rm -> MACL    | 2 to 4  | -      |
+	/// | Rm,Rn             | 0000nnnnmmmm0111 | Rn x Rm -> MACL    | 2 to 4  | -      |
 	MUL(Size,Reg,Reg),
-	/// | Rm,Rn          | 0010nnnnmmmm1111 | Signed operation   | 1 to 3  | -      |
-	/// |                |                  | of Rn x Rm -> MAC  |         |        |
+	/// | Rm,Rn             | 0010nnnnmmmm1111 | Signed operation   | 1 to 3  | -      |
+	/// |                   |                  | of Rn x Rm -> MAC  |         |        |
 	MULS(Reg,Reg),
-	/// | Rm,Rn          | 0010nnnnmmmm1110 | Unsigned operation | 1 to 3  | -      |
-	/// |                |                  | of Rn x Rm -> MAC  |         |        |
+	/// | Rm,Rn             | 0010nnnnmmmm1110 | Unsigned operation | 1 to 3  | -      |
+	/// |                   |                  | of Rn x Rm -> MAC  |         |        |
 	MULU(Reg,Reg),
-	/// | Rm,Rn          | 0110nnnnmmmm1011 | 0 - Rm -> Rn       | 1       | -      |
+	/// | Rm,Rn             | 0110nnnnmmmm1011 | 0 - Rm -> Rn       | 1       | -      |
 	NEG(Reg,Reg),
-	/// | Rm,Rn          | 0110nnnnmmmm1010 | 0 - Rm - T -> Rn,  | 1       | Borrow |
-	/// |                |                  | Borrow -> T        |         |        |
+	/// | Rm,Rn             | 0110nnnnmmmm1010 | 0 - Rm - T -> Rn,  | 1       | Borrow |
+	/// |                   |                  | Borrow -> T        |         |        |
 	NEGC(Reg,Reg),
-	/// |                | 0000000000001001 | No operation       | 1       | -      |
+	/// |                   | 0000000000001001 | No operation       | 1       | -      |
 	NOP,
-	/// | Rm,Rn          | 0110nnnnmmmm0111 | ~Rm -> Rn          | 1       | -      |
+	/// | Rm,Rn             | 0110nnnnmmmm0111 | ~Rm -> Rn          | 1       | -      |
 	NOT(Reg,Reg),
-	/// | #imm,R0        | 11001011iiiiiiii | R0|imm -> R0       | 1       | -      |
+	/// | #imm,R0           | 11001011iiiiiiii | R0|imm -> R0       | 1       | -      |
 	OR_Imm(i8),
-	/// | Rm,Rn          | 0010nnnnmmmm1011 | Rn|Rm -> Rn        | 1       | -      |
+	/// | Rm,Rn             | 0010nnnnmmmm1011 | Rn|Rm -> Rn        | 1       | -      |
 	OR_Reg(Reg,Reg),
-	/// | #imm,@(R0,GBR) | 11001111iiiiiiii | (R0+GBR)|imm ->    | 3       | -      |
-	/// |                |                  | (R0+GBR)           |         |        |
+	/// | #imm,@(R0,GBR)    | 11001111iiiiiiii | (R0+GBR)|imm ->    | 3       | -      |
+	/// |                   |                  | (R0+GBR)           |         |        |
 	OR_Byte(i8),
-	/// | Rn             | 0100nnnn00100100 | T <- Rn <- T       | 1       | MSB    |
+	/// | Rn                | 0100nnnn00100100 | T <- Rn <- T       | 1       | MSB    |
 	ROTCL(Reg),
-	/// | Rn             | 0100nnnn00100101 | T -> Rn -> T       | 1       | LSB    |
+	/// | Rn                | 0100nnnn00100101 | T -> Rn -> T       | 1       | LSB    |
 	ROTCR(Reg),
-	/// | Rn             | 0100nnnn00000100 | T <- Rn <- MSB     | 1       | MSB    |
+	/// | Rn                | 0100nnnn00000100 | T <- Rn <- MSB     | 1       | MSB    |
 	ROTL(Reg),
-	/// | Rn             | 0100nnnn00000101 | LSB -> Rn -> T     | 1       | LSB    |
+	/// | Rn                | 0100nnnn00000101 | LSB -> Rn -> T     | 1       | LSB    |
 	ROTR(Reg),
-	/// |                | 0000000000101011 | Delayed branch,    | 4       | LSB    |
-	/// |                |                  | stack area -> PC/SR |        |        |
+	/// |                   | 0000000000101011 | Delayed branch,    | 4       | LSB    |
+	/// |                   |                  | stack area -> PC/SR |        |        |
 	RTE,
-	/// |                | 0000000000001011 | Delayed branch,    | 2       | -      |
-	/// |                |                  | PR -> PC           |         |        |
+	/// |                   | 0000000000001011 | Delayed branch,    | 2       | -      |
+	/// |                   |                  | PR -> PC           |         |        |
 	RTS,
-	/// |                | 0000000000011000 | 1 -> T             | 1       | 1      |
+	/// |                   | 0000000000011000 | 1 -> T             | 1       | 1      |
 	SETT,
-	/// | Rn             | 0100nnnn00100000 | T <- Rn <- 0       | 1       | MSB    |
+	/// | Rn                | 0100nnnn00100000 | T <- Rn <- 0       | 1       | MSB    |
 	SHAL(Reg),
-	/// | Rn             | 0100nnnn00100001 | MSB -> Rn -> T     | 1       | LSB    |
+	/// | Rn                | 0100nnnn00100001 | MSB -> Rn -> T     | 1       | LSB    |
 	SHAR(Reg),
-	/// | Rn             | 0100nnnn00000000 | T <- Rn <- 0       | 1       | MSB    |
+	/// | Rn                | 0100nnnn00000000 | T <- Rn <- 0       | 1       | MSB    |
 	SHLL(Reg),
-	/// | Rn             | 0100nnnn00001000 | Rn << 2 -> Rn      | 1       | -      |
+	/// | Rn                | 0100nnnn00001000 | Rn << 2 -> Rn      | 1       | -      |
 	SHLL2(Reg),
-	/// | Rn             | 0100nnnn00011000 | Rn << 8 -> Rn      | 1       | -      |
+	/// | Rn                | 0100nnnn00011000 | Rn << 8 -> Rn      | 1       | -      |
 	SHLL8(Reg),
-	/// | Rn             | 0100nnnn00101000 | Rn << 16 -> Rn     | 1       | -      |
+	/// | Rn                | 0100nnnn00101000 | Rn << 16 -> Rn     | 1       | -      |
 	SHLL16(Reg),
-	/// | Rn             | 0100nnnn00000001 | 0 -> Rn -> T       | 1       | LSB    |
+	/// | Rn                | 0100nnnn00000001 | 0 -> Rn -> T       | 1       | LSB    |
 	SHLR(Reg),
-	/// | Rn             | 0100nnnn00001001 | Rn >> 2 -> Rn      | 1       | -      |
+	/// | Rn                | 0100nnnn00001001 | Rn >> 2 -> Rn      | 1       | -      |
 	SHLR2(Reg),
-	/// | Rn             | 0100nnnn00011001 | Rn >> 8 -> Rn      | 1       | -      |
+	/// | Rn                | 0100nnnn00011001 | Rn >> 8 -> Rn      | 1       | -      |
 	SHLR8(Reg),
-	/// | Rn             | 0100nnnn00101001 | Rn >> 16 -> Rn     | 1       | -      |
+	/// | Rn                | 0100nnnn00101001 | Rn >> 16 -> Rn     | 1       | -      |
 	SHLR16(Reg),
-	/// |                | 0000000000011011 | Sleep              | 3       | -      |
+	/// |                   | 0000000000011011 | Sleep              | 3       | -      |
 	SLEEP,
-	/// | GBR,Rn         | 0000nnnn00010010 | GBR -> Rn          | 1       | -      |
+	/// | GBR,Rn            | 0000nnnn00010010 | GBR -> Rn          | 1       | -      |
 	STC_GBR(Reg),
-	/// | SR,Rn          | 0000nnnn00000010 | SR -> Rn           | 1       | -      |
+	/// | SR,Rn             | 0000nnnn00000010 | SR -> Rn           | 1       | -      |
 	STC_SR(Reg),
-	/// | VBR,Rn         | 0000nnnn00100010 | VBR -> Rn          | 1       | -      |
+	/// | VBR,Rn            | 0000nnnn00100010 | VBR -> Rn          | 1       | -      |
 	STC_VBR(Reg),
-	/// | GBR,@-Rn       | 0100nnnn00010011 | Rn - 4 -> Rn,      | 2       | -      |
-	/// |                |                  | GBR -> (Rn)        |         |        |
+	/// | GBR,@-Rn          | 0100nnnn00010011 | Rn - 4 -> Rn,      | 2       | -      |
+	/// |                   |                  | GBR -> (Rn)        |         |        |
 	STC_GBR_Dec(Reg),
-	/// | SR,@-Rn        | 0100nnnn00000011 | Rn - 4 -> Rn,      | 2       | -      |
-	/// |                |                  | SR -> (Rn)         |         |        |
+	/// | SR,@-Rn           | 0100nnnn00000011 | Rn - 4 -> Rn,      | 2       | -      |
+	/// |                   |                  | SR -> (Rn)         |         |        |
 	STC_SR_Dec(Reg),
-	/// | VBR,@-Rn       | 0100nnnn00100011 | Rn - 4 -> Rn,      | 2       | -      |
-	/// |                |                  | VBR -> (Rn)        |         |        |
+	/// | VBR,@-Rn          | 0100nnnn00100011 | Rn - 4 -> Rn,      | 2       | -      |
+	/// |                   |                  | VBR -> (Rn)        |         |        |
 	STC_VBR_Dec(Reg),
-	/// | MACH,Rn        | 0000nnnn00001010 | MACH -> Rn         | 1       | -      |
+	/// | MACH,Rn           | 0000nnnn00001010 | MACH -> Rn         | 1       | -      |
 	STS_MACH(Reg),
-	/// | MACL,Rn        | 0000nnnn00011010 | MACL -> Rn         | 1       | -      |
+	/// | MACL,Rn           | 0000nnnn00011010 | MACL -> Rn         | 1       | -      |
 	STS_MACL(Reg),
-	/// | PR,Rn          | 0000nnnn00101010 | PR -> Rn           | 1       | -      |
+	/// | PR,Rn             | 0000nnnn00101010 | PR -> Rn           | 1       | -      |
 	STS_PR(Reg),
-	/// | MACH,@-Rn      | 0100nnnn00000010 | Rn - 4 -> Rn,      | 1       | -      |
-	/// |                |                  | MACH -> (Rn)       |         |        |
+	/// | MACH,@-Rn         | 0100nnnn00000010 | Rn - 4 -> Rn,      | 1       | -      |
+	/// |                   |                  | MACH -> (Rn)       |         |        |
 	STS_MACH_Dec(Reg),
-	/// | MACL,@-Rn      | 0100nnnn00010010 | Rn - 4 -> Rn,      | 1       | -      |
-	/// |                |                  | MACL -> (Rn)       |         |        |
+	/// | MACL,@-Rn         | 0100nnnn00010010 | Rn - 4 -> Rn,      | 1       | -      |
+	/// |                   |                  | MACL -> (Rn)       |         |        |
 	STS_MACL_Dec(Reg),
-	/// | PR,@-Rn        | 0100nnnn00100010 | Rn - 4 -> Rn,      | 1       | -      |
-	/// |                |                  | PR -> (Rn)         |         |        |
+	/// | PR,@-Rn           | 0100nnnn00100010 | Rn - 4 -> Rn,      | 1       | -      |
+	/// |                   |                  | PR -> (Rn)         |         |        |
 	STS_PR_Dec(Reg),
-	/// | Rm,Rn          | 0011nnnnmmmm1000 | Rn - Rm -> Rn      | 1       | -      |
+	/// | Rm,Rn             | 0011nnnnmmmm1000 | Rn - Rm -> Rn      | 1       | -      |
 	SUB(Reg,Reg),
-	/// | Rm,Rn          | 0011nnnnmmmm1010 | Rn - Rm - T -> Rn, | 1       | Borrow |
-	/// |                |                  | Borrow -> T        |         |        |
+	/// | Rm,Rn             | 0011nnnnmmmm1010 | Rn - Rm - T -> Rn, | 1       | Borrow |
+	/// |                   |                  | Borrow -> T        |         |        |
 	SUBC(Reg,Reg),
-	/// | Rm,Rn          | 0011nnnnmmmm1011 | Rn - Rm -> Rn,     | 1       | Under  |
-	/// |                |                  | Underflow -> T     |         |        |
+	/// | Rm,Rn             | 0011nnnnmmmm1011 | Rn - Rm -> Rn,     | 1       | Under  |
+	/// |                   |                  | Underflow -> T     |         |        |
 	SUBV(Reg,Reg),
-	/// | Rm,Rn          | 0110nnnnmmmm1000 | Rm -> Swap upper   | 1       | -      |
-	/// |                |                  | and lower 2 bytes  |         |        |
-	/// |                |                  | -> Rn              |         |        |
+	/// | Rm,Rn             | 0110nnnnmmmm1000 | Rm -> Swap upper   | 1       | -      |
+	/// |                   |                  | and lower 2 bytes  |         |        |
+	/// |                   |                  | -> Rn              |         |        |
 	SWAP_Byte(Reg,Reg),
-	/// | Rm,Rn          | 0110nnnnmmmm1001 | Rm -> Swap upper   | 1       | -      |
-	/// |                |                  | and lower word ->  |         |        |
-	/// |                |                  | Rn                 |         |        |
+	/// | Rm,Rn             | 0110nnnnmmmm1001 | Rm -> Swap upper   | 1       | -      |
+	/// |                   |                  | and lower word ->  |         |        |
+	/// |                   |                  | Rn                 |         |        |
 	SWAP_Word(Reg,Reg),
-	/// | @Rn            | 0100nnnn00011011 | if (Rn) is 0, 1->T | 4       | Result |
-	/// |                |                  | 1 -> MSB of (Rn)   |         |        |
+	/// | @Rn               | 0100nnnn00011011 | if (Rn) is 0, 1->T | 4       | Result |
+	/// |                   |                  | 1 -> MSB of (Rn)   |         |        |
 	TAS(Reg),
-	/// | #imm           | 11000011iiiiiiii | PC/SR -> stack     | 8       | -      |
-	/// |                |                  | area, (imm x 4 +   |         |        |
-	/// |                |                  | VBR) -> PC         |         |        |
+	/// | #imm              | 11000011iiiiiiii | PC/SR -> stack     | 8       | -      |
+	/// |                   |                  | area, (imm x 4 +   |         |        |
+	/// |                   |                  | VBR) -> PC         |         |        |
 	TRAPA(i8),
-	/// | #imm,R0        | 11001000iiiiiiii | R0 & imm; if the   | 1       | Result |
-	/// |                |                  | result is 0, 1->T  |         |        |
+	/// | #imm,R0           | 11001000iiiiiiii | R0 & imm; if the   | 1       | Result |
+	/// |                   |                  | result is 0, 1->T  |         |        |
 	TST_Imm(i8),
-	/// | Rm,Rn          | 0010nnnnmmmm1000 | Rn & Rm; if the    | 1       | Result |
-	/// |                |                  | result is 0, 1->T  |         |        |
+	/// | Rm,Rn             | 0010nnnnmmmm1000 | Rn & Rm; if the    | 1       | Result |
+	/// |                   |                  | result is 0, 1->T  |         |        |
 	TST_Reg(Reg,Reg),
-	/// | #imm,@(R0,GBR) | 11001100iiiiiiii | (R0+GBR) & imm; if | 3       | Result |
-	/// |                |                  | the result is 0,   |         |        |
-	/// |                |                  | 1 -> T             |         |        |
+	/// | #imm,@(R0,GBR)    | 11001100iiiiiiii | (R0+GBR) & imm; if | 3       | Result |
+	/// |                   |                  | the result is 0,   |         |        |
+	/// |                   |                  | 1 -> T             |         |        |
 	TST_Byte(i8),
-	/// | #imm,R0        | 11001010iiiiiiii | R0 ^ imm -> R0     | 1       | -      |
+	/// | #imm,R0           | 11001010iiiiiiii | R0 ^ imm -> R0     | 1       | -      |
 	XOR_Imm(i8),
-	/// | Rm,Rn          | 0010nnnnmmmm1010 | Rn ^ Rm -> Rn      | 1       | -      |
+	/// | Rm,Rn             | 0010nnnnmmmm1010 | Rn ^ Rm -> Rn      | 1       | -      |
 	XOR_Reg(Reg,Reg),
-	/// | #imm,@(R0,GBR) | 11001110iiiiiiii | (R0+GBR) ^ imm ->  | 3       | -      |
-	/// |                |                  | (R0+GBR)           |         |        |
+	/// | #imm,@(R0,GBR)    | 11001110iiiiiiii | (R0+GBR) ^ imm ->  | 3       | -      |
+	/// |                   |                  | (R0+GBR)           |         |        |
 	XOR_Byte(i8),
-	/// | Rm,Rn          | 0010nnnnmmmm1101 | Center 32 bits of  | 1       | -      |
-	/// |                |                  | Rm and Rn -> Rn    |         |        |
+	/// | Rm,Rn             | 0010nnnnmmmm1101 | Center 32 bits of  | 1       | -      |
+	/// |                   |                  | Rm and Rn -> Rn    |         |        |
 	XTRCT(Reg,Reg),
 
 	/*** Directives ***/
@@ -490,8 +507,11 @@ impl Parser<'_,'_> {
 		self.index >= self.tokens.len()
 	}
 
+	fn peek(&self, i: usize) -> &Token {
+		&self.tokens[self.index + i]
+	}
 	fn curr(&self) -> &Token {
-		&self.tokens[self.index]
+		self.peek(0)
 	}
 
 	fn expected(&self, msg: &str) -> String {
