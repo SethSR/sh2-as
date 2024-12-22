@@ -434,14 +434,13 @@ pub(crate) enum Ins {
 	/// | Rm,Rn             | 0011nnnnmmmm1011 | Rn - Rm -> Rn,     | 1       | Under  |
 	/// |                   |                  | Underflow -> T     |         |        |
 	SUBV(Reg,Reg),
-	/// | Rm,Rn             | 0110nnnnmmmm1000 | Rm -> Swap upper   | 1       | -      |
+	/// | .B Rm,Rn          | 0110nnnnmmmm1000 | Rm -> Swap upper   | 1       | -      |
 	/// |                   |                  | and lower 2 bytes  |         |        |
 	/// |                   |                  | -> Rn              |         |        |
-	SWAP_Byte(Reg,Reg),
-	/// | Rm,Rn             | 0110nnnnmmmm1001 | Rm -> Swap upper   | 1       | -      |
+	/// | .W Rm,Rn          | 0110nnnnmmmm1001 | Rm -> Swap upper   | 1       | -      |
 	/// |                   |                  | and lower word ->  |         |        |
 	/// |                   |                  | Rn                 |         |        |
-	SWAP_Word(Reg,Reg),
+	SWAP(Size,Reg,Reg),
 	/// | @Rn               | 0100nnnn00011011 | if (Rn) is 0, 1->T | 4       | Result |
 	/// |                   |                  | 1 -> MSB of (Rn)   |         |        |
 	TAS(Reg),
@@ -1287,7 +1286,6 @@ fn parser(
 			SLEEP => add_to_section(&mut section_table, skey, Ins::SLEEP),
 			STC => eprintln!("unimplemented STC"),
 			STS => eprintln!("unimplemented STS"),
-			STR => eprintln!("unimplemented STR"),
 			SUB => data.match_reg_args()
 				.map(|(src,dst)| add_to_section(&mut section_table, skey, Ins::SUB(src,dst)))
 				.unwrap_or_default(),
@@ -1297,9 +1295,22 @@ fn parser(
 			SUBV => data.match_reg_args()
 				.map(|(src,dst)| add_to_section(&mut section_table, skey, Ins::SUB(src,dst)))
 				.unwrap_or_default(),
-			SWAP => eprintln!("unimplemented SWAP"),
-			TAS => eprintln!("unimplemented TAS"),
-			TRAPA => eprintln!("unimplemented TRAPA"),
+			SWAP => || -> Option<()> {
+				data.match_token(Dot)?;
+				let sz = data.match_size()?;
+				let (src,dst) = data.match_reg_args()?;
+				Some(add_to_section(&mut section_table, skey, Ins::SWAP(sz,src,dst)))
+			}().unwrap_or_default(),
+			TAS => data.match_tokens(&[Dot, Byte, Address])
+				.and_then(|_| data.match_reg())
+				.map(Ins::TAS)
+				.map(|ins| add_to_section(&mut section_table, skey, ins))
+				.unwrap_or_default(),
+			TRAPA => data.match_number()
+				.and_then(|num| assert_within_u8(&mut data, num))
+				.map(Ins::TRAPA)
+				.map(|ins| add_to_section(&mut section_table, skey, ins))
+				.unwrap_or_default(),
 			TST => match data.next().get_type() {
 				Number => data.number_pos()
 					.and_then(|num| assert_within_u8(&mut data, num))
