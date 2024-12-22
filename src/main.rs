@@ -335,7 +335,7 @@ pub(crate) enum Ins {
 	/// | Rn                | 0000nnnn00101001 | T -> Rn            | 1       | -      |
 	MOVT(Reg),
 	/// | Rm,Rn             | 0000nnnnmmmm0111 | Rn x Rm -> MACL    | 2 to 4  | -      |
-	MUL(Size,Reg,Reg),
+	MUL(Reg,Reg),
 	/// | Rm,Rn             | 0010nnnnmmmm1111 | Signed operation   | 1 to 3  | -      |
 	/// |                   |                  | of Rn x Rm -> MAC  |         |        |
 	MULS(Reg,Reg),
@@ -1185,9 +1185,24 @@ fn parser(
 				.map(|num| add_to_section(&mut section_table, skey, Ins::MOVA(num)))
 				.unwrap_or_default(),
 			MOVT => eprintln!("unimplemented MOVT"),
-			MUL => eprintln!("unimplemented MUL"),
-			MULS => eprintln!("unimplemented MULS"),
-			MULU => eprintln!("unimplemented MULU"),
+			MUL => data.match_tokens(&[Dot,Long])
+				.and_then(|_| data.match_reg())
+				.and_then(|src| data.match_token(Comma).map(|_| src))
+				.zip(data.match_reg())
+				.map(|(src,dst)| add_to_section(&mut section_table, skey, Ins::MUL(src,dst)))
+				.unwrap_or_default(),
+			MULS => data.match_tokens(&[Dot,Word])
+				.and_then(|_| data.match_reg())
+				.and_then(|src| data.match_token(Comma).map(|_| src))
+				.zip(data.match_reg())
+				.map(|(src,dst)| add_to_section(&mut section_table, skey, Ins::MULS(src,dst)))
+				.unwrap_or_default(),
+			MULU => data.match_tokens(&[Dot,Word])
+				.and_then(|_| data.match_reg())
+				.and_then(|src| data.match_token(Comma).map(|_| src))
+				.zip(data.match_reg())
+				.map(|(src,dst)| add_to_section(&mut section_table, skey, Ins::MULU(src,dst)))
+				.unwrap_or_default(),
 			NEG => eprintln!("unimplemented NEG"),
 			NEGC => eprintln!("unimplemented NEGC"),
 			Newline => {} // skip newlines
