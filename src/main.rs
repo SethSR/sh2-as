@@ -1175,7 +1175,15 @@ fn parser(
 					None
 				}
 			}.map(|ins| add_to_section(&mut section_table, skey, ins)).unwrap_or_default(),
-			MOVA => eprintln!("unimplemented MOVA"),
+			MOVA => data.match_tokens(&[Address, OParen])
+				.and_then(|_| data.match_number())
+				.and_then(|num| assert_within_i8(&mut data, num))
+				.and_then(|num| data.match_token(Comma).map(|_| num))
+				.and_then(|num| data.match_ident("pc").map(|_| num))
+				.and_then(|num| data.match_tokens(&[CParen, Comma]).map(|_| num))
+				.and_then(|num| data.match_r0().map(|_| num))
+				.map(|num| add_to_section(&mut section_table, skey, Ins::MOVA(num)))
+				.unwrap_or_default(),
 			MOVT => eprintln!("unimplemented MOVT"),
 			MUL => eprintln!("unimplemented MUL"),
 			MULS => eprintln!("unimplemented MULS"),
