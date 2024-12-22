@@ -1199,48 +1199,89 @@ fn parser(
 				.and_then(|_| data.match_reg_args())
 				.map(|(src,dst)| add_to_section(&mut section_table, skey, Ins::MULU(src,dst)))
 				.unwrap_or_default(),
-			NEG => eprintln!("unimplemented NEG"),
-			NEGC => eprintln!("unimplemented NEGC"),
+			NEG => data.match_reg_args()
+				.map(|(src,dst)| add_to_section(&mut section_table, skey, Ins::NEG(src,dst)))
+				.unwrap_or_default(),
+			NEGC => data.match_reg_args()
+				.map(|(src,dst)| add_to_section(&mut section_table, skey, Ins::NEGC(src,dst)))
+				.unwrap_or_default(),
 			Newline => {} // skip newlines
-			NOP => eprintln!("unimplemented NOP"),
-			NOT => eprintln!("unimplemented NOT"),
+			NOP => add_to_section(&mut section_table, skey, Ins::NOP),
+			NOT => data.match_reg_args()
+				.map(|(src,dst)| add_to_section(&mut section_table, skey, Ins::NOT(src,dst)))
+				.unwrap_or_default(),
 			OR => eprintln!("unimplemented OR"),
 			Org => data.match_number_pos()
 				.map(|addr| skey = addr as u64)
 				.unwrap_or_default(),
-			PL => eprintln!("unimplemented PL"),
-			PZ => eprintln!("unimplemented PZ"),
-			ROTCL => eprintln!("unimplemented ROTCL"),
-			ROTCR => eprintln!("unimplemented ROTCR"),
-			ROTL => eprintln!("unimplemented ROTL"),
-			ROTR => eprintln!("unimplemented ROTR"),
-			RTE => eprintln!("unimplemented RTE"),
-			RTS => eprintln!("unimplemented RTS"),
-			SETT => eprintln!("unimplemented SETT"),
-			SHAL => eprintln!("unimplemented SHAL"),
-			SHAR => eprintln!("unimplemented SHAR"),
-			SHLL => eprintln!("unimplemented SHLL"),
-			SHLL2 => eprintln!("unimplemented SHLL2"),
-			SHLL8 => eprintln!("unimplemented SHLL8"),
-			SHLL16 => eprintln!("unimplemented SHLL16"),
-			SHLR => eprintln!("unimplemented SHLR"),
-			SHLR2 => eprintln!("unimplemented SHLR2"),
-			SHLR8 => eprintln!("unimplemented SHLR8"),
-			SHLR16 => eprintln!("unimplemented SHLR16"),
-			Slash => eprintln!("unimplemented Slash"),
-			SLEEP => eprintln!("unimplemented SLEEP"),
+			ROTCL => data.match_reg()
+				.map(|reg| add_to_section(&mut section_table, skey, Ins::ROTCL(reg)))
+				.unwrap_or_default(),
+			ROTCR => data.match_reg()
+				.map(|reg| add_to_section(&mut section_table, skey, Ins::ROTCR(reg)))
+				.unwrap_or_default(),
+			ROTL => data.match_reg()
+				.map(|reg| add_to_section(&mut section_table, skey, Ins::ROTL(reg)))
+				.unwrap_or_default(),
+			ROTR => data.match_reg()
+				.map(|reg| add_to_section(&mut section_table, skey, Ins::ROTR(reg)))
+				.unwrap_or_default(),
+			RTE => add_to_section(&mut section_table, skey, Ins::RTE),
+			RTS => add_to_section(&mut section_table, skey, Ins::RTS),
+			SETT => add_to_section(&mut section_table, skey, Ins::SETT),
+			SHAL => data.match_reg()
+				.map(|reg| add_to_section(&mut section_table, skey, Ins::SHAL(reg)))
+				.unwrap_or_default(),
+			SHAR => data.match_reg()
+				.map(|reg| add_to_section(&mut section_table, skey, Ins::SHAR(reg)))
+				.unwrap_or_default(),
+			SHLL => data.match_reg()
+				.map(|reg| add_to_section(&mut section_table, skey, Ins::SHLL(reg)))
+				.unwrap_or_default(),
+			SHLL2 => data.match_reg()
+				.map(|reg| add_to_section(&mut section_table, skey, Ins::SHLL2(reg)))
+				.unwrap_or_default(),
+			SHLL8 => data.match_reg()
+				.map(|reg| add_to_section(&mut section_table, skey, Ins::SHLL8(reg)))
+				.unwrap_or_default(),
+			SHLL16 => data.match_reg()
+				.map(|reg| add_to_section(&mut section_table, skey, Ins::SHLL16(reg)))
+				.unwrap_or_default(),
+			SHLR => data.match_reg()
+				.map(|reg| add_to_section(&mut section_table, skey, Ins::SHLR(reg)))
+				.unwrap_or_default(),
+			SHLR2 => data.match_reg()
+				.map(|reg| add_to_section(&mut section_table, skey, Ins::SHLR2(reg)))
+				.unwrap_or_default(),
+			SHLR8 => data.match_reg()
+				.map(|reg| add_to_section(&mut section_table, skey, Ins::SHLR8(reg)))
+				.unwrap_or_default(),
+			SHLR16 => data.match_reg()
+				.map(|reg| add_to_section(&mut section_table, skey, Ins::SHLR16(reg)))
+				.unwrap_or_default(),
+			SLEEP => add_to_section(&mut section_table, skey, Ins::SLEEP),
 			STC => eprintln!("unimplemented STC"),
 			STS => eprintln!("unimplemented STS"),
 			STR => eprintln!("unimplemented STR"),
-			SUB => eprintln!("unimplemented SUB"),
-			SUBC => eprintln!("unimplemented SUBC"),
-			SUBV => eprintln!("unimplemented SUBV"),
+			SUB => data.match_reg_args()
+				.map(|(src,dst)| add_to_section(&mut section_table, skey, Ins::SUB(src,dst)))
+				.unwrap_or_default(),
+			SUBC => data.match_reg_args()
+				.map(|(src,dst)| add_to_section(&mut section_table, skey, Ins::SUB(src,dst)))
+				.unwrap_or_default(),
+			SUBV => data.match_reg_args()
+				.map(|(src,dst)| add_to_section(&mut section_table, skey, Ins::SUB(src,dst)))
+				.unwrap_or_default(),
 			SWAP => eprintln!("unimplemented SWAP"),
 			TAS => eprintln!("unimplemented TAS"),
 			TRAPA => eprintln!("unimplemented TRAPA"),
-			TST => eprintln!("unimplemented TST"),
+			TST => data.match_reg_args()
+				.map(|(src,dst)| add_to_section(&mut section_table, skey, Ins::SUB(src,dst)))
+				.unwrap_or_default(),
 			XOR => eprintln!("unimplemented XOR"),
-			XTRCT => eprintln!("unimplemented XTRCT"),
+			XTRCT => data.match_reg_args()
+				.map(|(src,dst)| add_to_section(&mut section_table, skey, Ins::SUB(src,dst)))
+				.unwrap_or_default(),
 			Unknown => {
 				let txt = cur_tok.to_string(&file);
 				let (line,pos) = cur_tok.pos();
