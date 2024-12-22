@@ -1285,37 +1285,86 @@ fn parser(
 				.unwrap_or_default(),
 			SLEEP => add_to_section(&mut section_table, skey, Ins::SLEEP),
 			STC => || -> Option<()> {
-				let id = data.match_token(Identifier)
-					.map(|tok| tok.to_string(&file).to_lowercase())?;
-				data.match_token(Comma)?;
-				let reg = data.match_reg()?;
-				let ins = match id.as_str() {
-					"gbr" => Some(Ins::STC_GBR(reg)),
-					"sr" => Some(Ins::STC_SR(reg)),
-					"vbr" => Some(Ins::STC_VBR(reg)),
+				match data.peek(1).get_type() {
+					Identifier => {
+						let id = data.match_token(Identifier)
+							.map(|tok| tok.to_string(&file).to_lowercase())?;
+						data.match_token(Comma)?;
+						let reg = data.match_reg()?;
+						let ins = match id.as_str() {
+							"gbr" => Some(Ins::STC_GBR(reg)),
+							"sr" => Some(Ins::STC_SR(reg)),
+							"vbr" => Some(Ins::STC_VBR(reg)),
+							_ => {
+								data.error("Control Register (GBR,SR,VBR)");
+								None
+							}
+						}?;
+						Some(add_to_section(&mut section_table, skey, ins))
+					}
+					Dot => {
+						data.match_tokens(&[Dot, Long])?;
+						let id = data.match_token(Identifier)
+							.map(|tok| tok.to_string(&file).to_lowercase())?;
+						data.match_tokens(&[Comma, Address, Dash])?;
+						let reg = data.match_reg()?;
+						let ins = match id.as_str() {
+							"gbr" => Some(Ins::STC_GBR_Dec(reg)),
+							"sr" => Some(Ins::STC_SR_Dec(reg)),
+							"vbr" => Some(Ins::STC_VBR_Dec(reg)),
+							_ => {
+								data.error("Control Register (GBR,SR,VBR)");
+								None
+							}
+						}?;
+						Some(add_to_section(&mut section_table, skey, ins))
+					}
 					_ => {
-						data.error("Control Register (GBR,SR,VBR)");
+						data.error("Valid STC instruction");
 						None
 					}
-				}?;
-				Some(add_to_section(&mut section_table, skey, ins))
+				}
 			}().unwrap_or_default(),
 			STS => || -> Option<()> {
-				data.match_tokens(&[Dot, Long])?;
-				let id = data.match_token(Identifier)
-					.map(|tok| tok.to_string(&file).to_lowercase())?;
-				data.match_tokens(&[Comma, Address, Dash])?;
-				let reg = data.match_reg()?;
-				let ins = match id.as_str() {
-					"gbr" => Some(Ins::STC_GBR_Dec(reg)),
-					"sr" => Some(Ins::STC_SR_Dec(reg)),
-					"vbr" => Some(Ins::STC_VBR_Dec(reg)),
+				match data.peek(1).get_type() {
+					Identifier => {
+						let id = data.match_token(Identifier)
+							.map(|tok| tok.to_string(&file).to_lowercase())?;
+						data.match_token(Comma)?;
+						let reg = data.match_reg()?;
+						let ins = match id.as_str() {
+							"mach" => Some(Ins::STS_MACH(reg)),
+							"macl" => Some(Ins::STS_MACL(reg)),
+							"pr" => Some(Ins::STS_PR(reg)),
+							_ => {
+								data.error("Special Register (MACH,MACL,PR)");
+								None
+							}
+						}?;
+						Some(add_to_section(&mut section_table, skey, ins))
+					}
+					Dot => {
+						data.match_tokens(&[Dot, Long])?;
+						let id = data.match_token(Identifier)
+							.map(|tok| tok.to_string(&file).to_lowercase())?;
+						data.match_tokens(&[Comma, Address, Dash])?;
+						let reg = data.match_reg()?;
+						let ins = match id.as_str() {
+							"mach" => Some(Ins::STS_MACH_Dec(reg)),
+							"macl" => Some(Ins::STS_MACL_Dec(reg)),
+							"pr" => Some(Ins::STS_PR_Dec(reg)),
+							_ => {
+								data.error("Special Register (MACH,MACL,PR)");
+								None
+							}
+						}?;
+						Some(add_to_section(&mut section_table, skey, ins))
+					}
 					_ => {
-						data.error("Control Register (GBR,SR,VBR)");
+						data.error("Valid STS instruction");
 						None
 					}
-				}?;
-				Some(add_to_section(&mut section_table, skey, ins))
+				}
 			}().unwrap_or_default(),
 			SUB => data.match_reg_args()
 				.map(|(src,dst)| add_to_section(&mut section_table, skey, Ins::SUB(src,dst)))
