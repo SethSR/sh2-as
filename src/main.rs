@@ -1284,8 +1284,39 @@ fn parser(
 				.map(|reg| add_to_section(&mut section_table, skey, Ins::SHLR16(reg)))
 				.unwrap_or_default(),
 			SLEEP => add_to_section(&mut section_table, skey, Ins::SLEEP),
-			STC => eprintln!("unimplemented STC"),
-			STS => eprintln!("unimplemented STS"),
+			STC => || -> Option<()> {
+				let id = data.match_token(Identifier)
+					.map(|tok| tok.to_string(&file).to_lowercase())?;
+				data.match_token(Comma)?;
+				let reg = data.match_reg()?;
+				let ins = match id.as_str() {
+					"gbr" => Some(Ins::STC_GBR(reg)),
+					"sr" => Some(Ins::STC_SR(reg)),
+					"vbr" => Some(Ins::STC_VBR(reg)),
+					_ => {
+						data.error("Control Register (GBR,SR,VBR)");
+						None
+					}
+				}?;
+				Some(add_to_section(&mut section_table, skey, ins))
+			}().unwrap_or_default(),
+			STS => || -> Option<()> {
+				data.match_tokens(&[Dot, Long])?;
+				let id = data.match_token(Identifier)
+					.map(|tok| tok.to_string(&file).to_lowercase())?;
+				data.match_tokens(&[Comma, Address, Dash])?;
+				let reg = data.match_reg()?;
+				let ins = match id.as_str() {
+					"gbr" => Some(Ins::STC_GBR_Dec(reg)),
+					"sr" => Some(Ins::STC_SR_Dec(reg)),
+					"vbr" => Some(Ins::STC_VBR_Dec(reg)),
+					_ => {
+						data.error("Control Register (GBR,SR,VBR)");
+						None
+					}
+				}?;
+				Some(add_to_section(&mut section_table, skey, ins))
+			}().unwrap_or_default(),
 			SUB => data.match_reg_args()
 				.map(|(src,dst)| add_to_section(&mut section_table, skey, Ins::SUB(src,dst)))
 				.unwrap_or_default(),
