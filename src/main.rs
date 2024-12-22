@@ -1184,23 +1184,19 @@ fn parser(
 				.and_then(|num| data.match_r0().map(|_| num))
 				.map(|num| add_to_section(&mut section_table, skey, Ins::MOVA(num)))
 				.unwrap_or_default(),
-			MOVT => eprintln!("unimplemented MOVT"),
+			MOVT => data.match_reg()
+				.map(|dst| add_to_section(&mut section_table, skey, Ins::MOVT(dst)))
+				.unwrap_or_default(),
 			MUL => data.match_tokens(&[Dot,Long])
-				.and_then(|_| data.match_reg())
-				.and_then(|src| data.match_token(Comma).map(|_| src))
-				.zip(data.match_reg())
+				.and_then(|_| data.match_reg_args())
 				.map(|(src,dst)| add_to_section(&mut section_table, skey, Ins::MUL(src,dst)))
 				.unwrap_or_default(),
 			MULS => data.match_tokens(&[Dot,Word])
-				.and_then(|_| data.match_reg())
-				.and_then(|src| data.match_token(Comma).map(|_| src))
-				.zip(data.match_reg())
+				.and_then(|_| data.match_reg_args())
 				.map(|(src,dst)| add_to_section(&mut section_table, skey, Ins::MULS(src,dst)))
 				.unwrap_or_default(),
 			MULU => data.match_tokens(&[Dot,Word])
-				.and_then(|_| data.match_reg())
-				.and_then(|src| data.match_token(Comma).map(|_| src))
-				.zip(data.match_reg())
+				.and_then(|_| data.match_reg_args())
 				.map(|(src,dst)| add_to_section(&mut section_table, skey, Ins::MULU(src,dst)))
 				.unwrap_or_default(),
 			NEG => eprintln!("unimplemented NEG"),
