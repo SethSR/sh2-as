@@ -31,7 +31,15 @@ fn main() -> miette::Result<()> {
 		}
 	}
 
-	let (mut section_table, mut label_table) = parser(&file, &tokens)?;
+	let (mut section_table, mut label_table) = match parser(&file, &tokens) {
+		Ok(tables) => tables,
+		Err(errors) => {
+			for error in errors {
+				eprintln!("{error}");
+			}
+			return Ok(());
+		}
+	};
 
 	if !is_silent {
 		for (address, section) in &section_table {
@@ -88,7 +96,6 @@ type Reg = u8;
 
 #[derive(Clone)]
 enum Arg {
-	DirImm(i64),
 	DirReg(Reg),
 	DispR0(Reg),
 	DispReg(i8,Reg),
@@ -106,8 +113,6 @@ impl std::fmt::Debug for Arg {
 		fmt: &mut std::fmt::Formatter,
 	) -> std::fmt::Result {
 		match self {
-			Arg::DirImm(imm) =>
-				write!(fmt, "DirImm(${imm:08X})"),
 			Arg::DirReg(reg) =>
 				write!(fmt, "DirReg(R{reg})"),
 			Arg::DispR0(reg) =>
@@ -490,16 +495,12 @@ impl std::fmt::Debug for State {
 
 type SectionTable = HashMap<u64, Vec<State>>;
 type LabelTable = HashMap<String,Option<u32>>;
-type ErrFlag = usize;
-
-fn p_error(msg: &str) -> String {
-	format!("ERROR: {msg}")
-}
 
 struct Parser<'input, 'tok> {
 	file: &'input str,
 	index: usize,
 	tokens: &'tok [Token],
+	errors: Vec<String>,
 }
 
 impl Parser<'_,'_> {
@@ -514,11 +515,19 @@ impl Parser<'_,'_> {
 		self.peek(0)
 	}
 
-	fn expected(&self, msg: &str) -> String {
+	fn expected(&mut self, msg: &str) {
 		let tok = self.curr();
 		let txt = tok.to_string(self.file);
 		let (line,pos) = tok.pos();
-		p_error(&format!("Expected {msg}, Found '{txt}' @ ({line}:{pos})"))
+		self.errors.push(format!("ERROR: Expected {msg}, Found '{txt}' @ ({line}:{pos})"));
+	}
+
+	fn error(&mut self, msg: &str) {
+		self.expected(msg);
+		while self.peek(1).get_type() != TokenType::Newline {
+			self.next();
+		}
+		self.next();
 	}
 
 	fn next(&mut self) -> &Token {
@@ -526,144 +535,259 @@ impl Parser<'_,'_> {
 		self.curr()
 	}
 
-	fn number(&self) -> miette::Result<i64> {
+	fn number_pos(&self) -> Option<i64> {
 		let txt = self.curr().to_string(self.file);
 		match txt.chars().next() {
 			Some('%') => {
-				i64::from_str_radix(&txt[1..].replace('_',""), 2)
+				i64::from_str_radix(&txt[1..].replace('_',""), 2).ok()
 			}
 			Some('$') => {
-				i64::from_str_radix(&txt[1..].replace('_',""), 16)
+				i64::from_str_radix(&txt[1..].replace('_',""), 16).ok()
 			}
 			Some(c) if c.is_numeric() => {
-				i64::from_str_radix(&txt.replace('_',""), 10)
+				i64::from_str_radix(&txt.replace('_',""), 10).ok()
 			}
 			_ => unreachable!("number tokens should only have valid binary, decimal, or hexadecimal values"),
-		}.into_diagnostic()
+		}
 	}
 
-	fn reg(&self) -> miette::Result<Reg> {
+	fn number(&mut self) -> Option<i64> {
+		let mut is_neg = false;
+		if self.curr().get_type() == TokenType::Dash {
+			self.match_token_or_err(TokenType::Number, "Number after unary minus")?;
+			is_neg = true;
+		}
+		let num = self.number_pos()?;
+		Some(if is_neg { -num } else { num })
+	}
+
+	fn reg(&self) -> Option<Reg> {
 		let txt = self.curr().to_string(self.file);
-		u8::from_str_radix(&txt[1..], 10)
-			.into_diagnostic()
+		u8::from_str_radix(&txt[1..], 10).ok()
 	}
 
-	fn address(&mut self) -> miette::Result<Arg> {
-		let nxt_tok = self.next();
-		if nxt_tok.get_type() == TokenType::Dash {
-			let nxt_tok = self.next();
-			if nxt_tok.get_type() == TokenType::Register {
-				let reg = self.reg()?;
-				Ok(Arg::PreDec(reg))
-			} else {
-				eprintln!("{}", self.expected("Register"));
-				todo!("on error, skip to next newline");
-			}
-		} else if nxt_tok.get_type() == TokenType::Register {
-			let reg = self.reg()?;
-
-			let nxt_tok = self.next();
-			if nxt_tok.get_type() == TokenType::Plus {
-				Ok(Arg::PostInc(reg))
-			} else {
-				self.index -= 1;
-				Ok(Arg::IndReg(reg))
-			}
-		} else {
-			eprintln!("{}", self.expected("Address specifier (@r_/ @-r_ / @r_+)"));
-			todo!("on error, skip to next newline");
-		}
-	}
-
-	fn size(&mut self) -> Result<Size, (ErrFlag,String)> {
-		let nxt_tok = self.next();
-		if nxt_tok.get_type() != TokenType::Dot {
-			return Err((0,self.expected("'.'")));
-		}
-
+	fn address(&mut self) -> Option<Arg> {
 		let nxt_tok = self.next();
 		match nxt_tok.get_type() {
-			TokenType::Byte => Ok(Size::Byte),
-			TokenType::Word => Ok(Size::Word),
-			TokenType::Long => Ok(Size::Long),
-			_ => Err((1,self.expected("size specifier"))),
+			TokenType::Dash => {
+				let reg = self.match_reg()?;
+				Some(Arg::PreDec(reg))
+			}
+			TokenType::Register => {
+				let reg = self.reg()?;
+				if self.try_match_token(TokenType::Plus).is_some() {
+					Some(Arg::PostInc(reg))
+				} else {
+					Some(Arg::IndReg(reg))
+				}
+			}
+			TokenType::OParen => {
+				fn parse_num(data: &mut Parser, num: i64) -> Option<Arg> {
+					data.assert_token_with_offset(1, TokenType::Comma)?;
+					match data.peek(2).get_type() {
+						TokenType::Identifier if data.peek(2).to_string(&data.file).to_lowercase() == "gbr" => {
+							let imm = assert_within_i8(data, num)?;
+							data.next(); // Comma
+							data.next(); // GBR
+							data.match_token(TokenType::CParen);
+							Some(Arg::DispGBR(imm))
+						}
+						TokenType::Identifier if data.peek(2).to_string(&data.file).to_lowercase() == "pc" => {
+							let imm = assert_within_i8(data, num)?;
+							data.next(); // Comma
+							data.next(); // PC
+							data.match_token(TokenType::CParen);
+							Some(Arg::DispPC(imm))
+						}
+						TokenType::Register => {
+							let imm = assert_within_i4(data, num)?;
+							let src = data.reg()?;
+							data.next(); // Comma
+							data.next(); // Register
+							data.match_token(TokenType::CParen);
+							Some(Arg::DispReg(imm,src))
+						}
+						_ => {
+							data.error("GBR or Register");
+							None
+						}
+					}
+				}
+
+				match self.next().get_type() {
+					TokenType::Dash | TokenType::Number => {
+						let num = self.number()?;
+						parse_num(self, num)
+					}
+					TokenType::Register => {
+						let disp = self.reg()?;
+						self.assert_r0(disp);
+						self.match_token(TokenType::Comma);
+						let src = self.match_reg()?;
+						self.match_token(TokenType::CParen);
+						Some(Arg::DispR0(src))
+					}
+					_ => {
+						self.error("Number or R0");
+						None
+					}
+				}
+			}
+			_ => {
+				self.error("Address specifier (@r_/ @-r_ / @r_+)");
+				None
+			}
 		}
 	}
 
-	fn match_token_or_err<'a>(&'a mut self,
-		tt: TokenType,
-		msg: &'_ str,
-	) -> &'a Token {
-		if self.next().get_type() != tt {
-			self.expected(msg);
-			todo!("on error, skip to next newline");
+	fn match_size(&mut self) -> Option<Size> {
+		match self.next().get_type() {
+			TokenType::Byte => Some(Size::Byte),
+			TokenType::Word => Some(Size::Word),
+			TokenType::Long => Some(Size::Long),
+			_ => {
+				self.error("size specifier");
+				None
+			}
 		}
-		self.curr()
 	}
 
-	fn match_token(&mut self,
-		tt: TokenType,
-	) -> &Token {
+	fn size(&mut self) -> Option<Size> {
+		self.match_token(TokenType::Dot)?;
+		self.match_size()
+	}
+
+	fn try_match_token(&mut self, tt: TokenType) -> Option<&Token> {
+		if self.peek(1).get_type() == tt {
+			Some(self.next())
+		} else {
+			None
+		}
+	}
+
+	fn assert_token_with_offset_or_err(&mut self, offset: usize, tt: TokenType, msg: &str) -> Option<()> {
+		if self.peek(offset).get_type() != tt {
+			self.error(msg);
+			None
+		} else {
+			Some(())
+		}
+	}
+
+	fn assert_token_with_offset(&mut self, offset: usize, tt: TokenType) -> Option<()> {
+		self.assert_token_with_offset_or_err(offset, tt, &tt.to_string())
+	}
+
+	fn match_token_or_err<'a>(&'a mut self, tt: TokenType, msg: &'_ str) -> Option<&'a Token> {
+		self.assert_token_with_offset_or_err(1, tt, msg)?;
+		Some(self.next())
+	}
+
+	fn match_token(&mut self, tt: TokenType) -> Option<&Token> {
 		self.match_token_or_err(tt, &tt.to_string())
 	}
 
-	fn match_number(&mut self) -> miette::Result<i64> {
-		self.match_token(TokenType::Number);
-		self.number()
+	fn match_tokens(&mut self, tts: &[TokenType]) -> Option<()> {
+		for tt in tts {
+			self.match_token(*tt)?;
+		}
+		Some(())
 	}
 
-	fn match_reg(&mut self) -> miette::Result<Reg> {
-		self.match_token(TokenType::Register);
+	fn match_ident<'a>(&'a mut self, id: &'_ str) -> Option<&'a Token> {
+		let file = self.file;
+		self.match_token(TokenType::Identifier)
+			.filter(|&tok| tok.to_string(&file).to_lowercase() == id)
+	}
+
+	fn match_number_pos(&mut self) -> Option<i64> {
+		self.match_token(TokenType::Number)?;
+		self.number_pos()
+	}
+
+	fn match_number(&mut self) -> Option<i64> {
+		let mut is_neg = false;
+		let num = if self.peek(1).get_type() == TokenType::Dash {
+			is_neg = true;
+			self.match_token_or_err(TokenType::Number, "Number after unary minus")?;
+			self.number_pos()?
+		} else {
+			self.match_number_pos()?
+		};
+		Some(if is_neg { -num } else { num })
+	}
+
+	fn match_reg(&mut self) -> Option<Reg> {
+		self.match_token(TokenType::Register)?;
 		self.reg()
 	}
 
-	fn match_r0(&mut self) -> miette::Result<()> {
-		let reg = self.match_reg()?;
-		if reg != 0 {
-			self.expected("R0");
-			todo!("on error, skip to newline");
+	fn assert_r0(&mut self, reg: u8) -> Option<()> {
+		if reg == 0 {
+			Some(())
+		} else {
+			self.error("R0");
+			None
 		}
-		Ok(())
 	}
 
-	fn match_reg_args(&mut self) -> miette::Result<(Reg,Reg)> {
+	fn match_r0(&mut self) -> Option<()> {
+		let reg = self.match_reg()?;
+		self.assert_r0(reg);
+		Some(())
+	}
+
+	fn match_reg_args(&mut self) -> Option<(Reg,Reg)> {
 		let src = self.match_reg()?;
 		self.match_token(TokenType::Comma);
 		let dst = self.match_reg()?;
-		Ok((src,dst))
+		Some((src,dst))
 	}
 }
 
-fn assert_within_i8(data: &Parser, value: i64) -> i8 {
+fn assert_within_i4(data: &mut Parser, value: i64) -> Option<i8> {
+	if !(-8..7).contains(&value) {
+		data.error("immediate value between -8 & 7");
+		None
+	} else {
+		Some(((value as u8) & 0x0F) as i8)
+	}
+}
+
+fn assert_within_i8(data: &mut Parser, value: i64) -> Option<i8> {
 	if !(i8::MIN as i64..i8::MAX as i64).contains(&value) {
-		data.expected("immediate value between -128 & 127");
-		todo!("on error, skip to next newline");
+		data.error("immediate value between -128 & 127");
+		None
+	} else {
+		Some(value as i8)
 	}
-	value as i8
 }
 
-fn assert_within_i16(data: &Parser, value: i64) -> i16 {
+fn assert_within_i16(data: &mut Parser, value: i64) -> Option<i16> {
 	if !(i16::MIN as i64..i16::MAX as i64).contains(&value) {
-		data.expected("immediate value between -32768 & 32767");
-		todo!("on error, skip to next newline");
+		data.error("immediate value between -32768 & 32767");
+		None
+	} else {
+		Some(value as i16)
 	}
-	value as i16
 }
 
-fn assert_within_i32(data: &Parser, value: i64) -> i32 {
+fn assert_within_i32(data: &mut Parser, value: i64) -> Option<i32> {
 	if !(i32::MIN as i64..i32::MAX as i64).contains(&value) {
-		data.expected("immediate value between -2147483648 & 2147483647");
-		todo!("on error, skip to next newline");
+		data.error("immediate value between -2147483648 & 2147483647");
+		None
+	} else {
+		Some(value as i32)
 	}
-	value as i32
 }
 
-fn assert_within_u8(data: &Parser, value: i64) -> u8 {
+fn assert_within_u8(data: &mut Parser, value: i64) -> Option<u8> {
 	if !(u8::MIN as i64..u8::MAX as i64).contains(&value) {
-		data.expected("immediate value between 0 & 255");
-		todo!("on error, skip to next newline");
+		data.error("immediate value between 0 & 255");
+		None
+	} else {
+		Some(value as u8)
 	}
-	value as u8
 }
 
 fn add_to_section(table: &mut SectionTable, section_key: u64, ins: Ins) {
@@ -680,580 +804,433 @@ fn add_to_section(table: &mut SectionTable, section_key: u64, ins: Ins) {
 fn parser(
 	file: &str,
 	tokens: &[Token],
-) -> miette::Result<(SectionTable, LabelTable)> {
+) -> Result<(SectionTable, LabelTable), Vec<String>> {
 	let mut skey = 0;
 	let mut section_table = SectionTable::new();
 	let mut label_table = LabelTable::new();
 
-	let mut data = Parser { file, tokens, index: 0 };
+	let mut data = Parser { file, tokens, index: 0, errors: Vec::new() };
 
 	while !data.is_done() {
 		use TokenType::*;
 		let cur_tok = data.curr();
 		match cur_tok.get_type() {
-			ADD => {
-				let nxt_tok = data.next();
-				let ins = match nxt_tok.get_type() {
-					Dash => {
-						data.match_token_or_err(Number, "Number after unary minus");
-						let num = data.number()?;
-						let imm = assert_within_i8(&data, -num);
-						data.match_token(Comma);
-						let reg = data.match_reg()?;
-						Ins::ADD_Imm(imm, reg)
-					}
-					Number => {
-						let num = data.number()?;
-						let imm = assert_within_i8(&data, num);
-						data.match_token(Comma);
-						let reg = data.match_reg()?;
-						Ins::ADD_Imm(imm, reg)
-					}
-					Register => {
-						let src = data.reg()?;
-						data.match_token(Comma);
-						let dst = data.match_reg()?;
-						Ins::ADD_Reg(src,dst)
-					}
-					_ => {
-						data.expected("Valid ADD source argument: Number or Register");
-						todo!("on error, skip to next newline");
-					}
-				};
-				add_to_section(&mut section_table, skey, ins);
-			}
-			ADDC => {
-				let (src,dst) = data.match_reg_args()?;
-				add_to_section(&mut section_table, skey, Ins::ADDC(src,dst));
-			}
-			ADDV => {
-				let (src,dst) = data.match_reg_args()?;
-				add_to_section(&mut section_table, skey, Ins::ADDV(src,dst));
-			}
-			AND => {
-				let nxt_tok = data.next();
-				let ins = match nxt_tok.get_type() {
-					Number => {
-						let num = data.number()?;
-						let imm = assert_within_u8(&data, num);
-						data.match_token(Comma);
-						data.match_r0()?;
-						Ins::AND_Imm(imm)
-					}
-					Register => {
-						let src = data.reg()?;
-						data.match_token(Comma);
-						let dst = data.match_reg()?;
-						Ins::AND_Reg(src,dst)
-					}
-					Dot => {
-						data.match_token(Byte);
-						let num = data.match_number()?;
-						let imm = assert_within_u8(&data, num);
-						data.match_token(Comma);
-						data.match_token(Address);
-						data.match_token(OParen);
-						data.match_r0()?;
-						data.match_token(Comma);
-						let nxt_tok = data.next();
-						if nxt_tok.to_string(&file).to_lowercase() != "gbr" {
-							data.expected("AND.B must have @(R0,GBR) as the destination");
-							todo!("on error, skip to newline");
-						}
-						data.match_token(CParen);
-						Ins::AND_Byte(imm)
-					}
-					_ => {
-						data.expected("Valid AND source argument: Number or Register");
-						todo!("on error, skip to next newline");
-					}
-				};
-				add_to_section(&mut section_table, skey, ins);
-			}
-			Address => eprintln!("unexpected Address"),
-			BF => {
-				let nxt_tok = data.next();
-				let ins = match nxt_tok.get_type() {
-					Identifier => {
-						let lbl = nxt_tok.to_string(&file);
-						Ins::BF(lbl)
-					}
-					Slash => {
-						data.match_token(Delay);
-						let lbl_tok = data.match_token_or_err(Identifier, "Label");
-						let lbl = lbl_tok.to_string(&file);
-						Ins::BFS(lbl)
-					}
-					_ => {
-						data.expected("Label");
-						todo!("on error, skip to newline");
-					}
-				};
-				add_to_section(&mut section_table, skey, ins);
-			}
-			BRA => {
-				let lbl_tok = data.match_token_or_err(Identifier, "Label");
-				let lbl = lbl_tok.to_string(&file);
-				add_to_section(&mut section_table, skey, Ins::BRA(lbl));
-			}
-			BRAF => {
-				let reg = data.match_reg()?;
-				add_to_section(&mut section_table, skey, Ins::BRAF(reg));
-			}
-			BSR => {
-				let lbl_tok = data.match_token_or_err(Identifier, "Label");
-				let lbl = lbl_tok.to_string(&file);
-				add_to_section(&mut section_table, skey, Ins::BSR(lbl));
-			}
-			BSRF => {
-				let reg = data.match_reg()?;
-				add_to_section(&mut section_table, skey, Ins::BSRF(reg));
-			}
-			BT => {
-				let nxt_tok = data.next();
-				let ins = match nxt_tok.get_type() {
-					Identifier => {
-						let lbl = nxt_tok.to_string(&file);
-						Ins::BT(lbl)
-					}
-					Slash => {
-						data.match_token(Delay);
-						let lbl_tok = data.match_token_or_err(Identifier, "Label");
-						let lbl = lbl_tok.to_string(&file);
-						Ins::BTS(lbl)
-					}
-					_ => {
-						data.expected("Label");
-						todo!("on error, skip to newline");
-					}
-				};
-				add_to_section(&mut section_table, skey, ins);
-			}
-			Byte => eprintln!("unexpected size specifier"),
+			ADD => match data.next().get_type() {
+				Dash | Number => data.number()
+					.and_then(|num| assert_within_i8(&mut data, num))
+					.and_then(|imm| data.match_token(Comma).map(|_| imm))
+					.zip(data.match_reg())
+					.map(|(imm,reg)| Ins::ADD_Imm(imm,reg)),
+				Register => data.reg()
+					.and_then(|src| data.match_token(Comma).map(|_| src))
+					.zip(data.match_reg())
+					.map(|(src,dst)| Ins::ADD_Reg(src,dst)),
+				_ => {
+					data.error("Valid ADD source argument: Number or Register");
+					None
+				}
+			}.map(|ins| add_to_section(&mut section_table, skey, ins)).unwrap_or_default(),
+			ADDC => data.match_reg_args()
+				.map(|(src,dst)| add_to_section(&mut section_table, skey, Ins::ADDC(src,dst)))
+				.unwrap_or_default(),
+			ADDV => data.match_reg_args()
+				.map(|(src,dst)| add_to_section(&mut section_table, skey, Ins::ADDV(src,dst)))
+				.unwrap_or_default(),
+			AND => match data.next().get_type() {
+				Number => data.number_pos()
+					.and_then(|num| assert_within_u8(&mut data, num))
+					.and_then(|imm| data.match_token(Comma).map(|_| imm))
+					.and_then(|imm| data.match_r0().map(|_| imm))
+					.map(Ins::AND_Imm),
+				Register => data.reg()
+					.and_then(|src| data.match_token(Comma).map(|_| src))
+					.zip(data.match_reg())
+					.map(|(src,dst)| Ins::AND_Reg(src,dst)),
+				Dot => || -> Option<Ins> {
+					data.match_token(Byte)?;
+					let num = data.match_number()?;
+					let imm = assert_within_u8(&mut data, num)?;
+					data.match_tokens(&[Comma,Address,OParen])?;
+					data.match_r0()?;
+					data.match_token(Comma)?;
+					data.match_ident("gbr")?;
+					data.match_token(CParen)?;
+					Some(Ins::AND_Byte(imm))
+				}(),
+				_ => {
+					data.error("Valid AND source argument: Number or Register");
+					None
+				}
+			}.map(|ins| add_to_section(&mut section_table, skey, ins)).unwrap_or_default(),
+			BF => match data.next().get_type() {
+				Identifier => {
+					let lbl = data.curr().to_string(&file);
+					Some(Ins::BF(lbl))
+				}
+				Slash => || -> Option<Ins> {
+					data.match_token(Delay)?;
+					let lbl_tok = data.match_token_or_err(Identifier, "Label")?;
+					let lbl = lbl_tok.to_string(&file);
+					Some(Ins::BFS(lbl))
+				}(),
+				_ => {
+					data.error("Label");
+					None
+				}
+			}.map(|ins| add_to_section(&mut section_table, skey, ins)).unwrap_or_default(),
+			BRA => data.match_token_or_err(Identifier, "Label")
+				.map(|lbl_tok| lbl_tok.to_string(&file))
+				.map(|lbl| add_to_section(&mut section_table, skey, Ins::BRA(lbl)))
+				.unwrap_or_default(),
+			BRAF => data.match_reg()
+				.map(|reg| add_to_section(&mut section_table, skey, Ins::BRAF(reg)))
+				.unwrap_or_default(),
+			BSR => data.match_token_or_err(Identifier, "Label")
+				.map(|lbl_tok| lbl_tok.to_string(&file))
+				.map(|lbl| add_to_section(&mut section_table, skey, Ins::BSR(lbl)))
+				.unwrap_or_default(),
+			BSRF => data.match_reg()
+				.map(|reg| add_to_section(&mut section_table, skey, Ins::BSRF(reg)))
+				.unwrap_or_default(),
+			BT => match data.next().get_type() {
+				Identifier => {
+					let lbl = data.curr().to_string(&file);
+					Some(Ins::BT(lbl))
+				}
+				Slash => || -> Option<Ins> {
+					data.match_token(Delay)?;
+					let lbl_tok = data.match_token_or_err(Identifier, "Label")?;
+					let lbl = lbl_tok.to_string(&file);
+					Some(Ins::BTS(lbl))
+				}(),
+				_ => {
+					data.error("Label");
+					None
+				}
+			}.map(|ins| add_to_section(&mut section_table, skey, ins)).unwrap_or_default(),
 			CLRMAC => add_to_section(&mut section_table, skey, Ins::CLRMAC),
 			CLRT => add_to_section(&mut section_table, skey, Ins::CLRT),
 			CMP => {
-				data.match_token(Slash);
-				let nxt_tok = data.next();
-				let ins = match nxt_tok.get_type() {
-					EQ => {
-						let nxt_tok = data.next();
-						if nxt_tok.get_type() == Number {
+				let mut func = || -> Option<Ins> {
+					data.match_token(Slash)?;
+					match data.next().get_type() {
+						EQ => if data.next().get_type() == Number {
 							let num = data.number()?;
-							let imm = assert_within_i8(&data, num);
-							data.match_token(Comma);
+							let imm = assert_within_i8(&mut data, num)?;
+							data.match_token(Comma)?;
 							data.match_r0()?;
-							Ins::CMP_EQ_Imm(imm)
+							Some(Ins::CMP_EQ_Imm(imm))
 						} else {
-							let (src,dst) = data.match_reg_args()?;
-							Ins::CMP_EQ_Reg(src,dst)
+							data.match_reg_args().map(|(src,dst)| Ins::CMP_EQ_Reg(src,dst))
+						},
+						GE => data.match_reg_args().map(|(src,dst)| Ins::CMP_GE(src,dst)),
+						GT => data.match_reg_args().map(|(src,dst)| Ins::CMP_GT(src,dst)),
+						HI => data.match_reg_args().map(|(src,dst)| Ins::CMP_HI(src,dst)),
+						HS => data.match_reg_args().map(|(src,dst)| Ins::CMP_HS(src,dst)),
+						PL => data.match_reg().map(Ins::CMP_PL),
+						PZ => data.match_reg().map(Ins::CMP_PZ),
+						STR => data.match_reg_args().map(|(src,dst)| Ins::CMP_STR(src,dst)),
+						_ => {
+							data.error("Comparator type (EQ,GT,GE,HI,HS,PL,PZ,STR)");
+							None
 						}
 					}
-					GE => {
-						let (src,dst) = data.match_reg_args()?;
-						Ins::CMP_GE(src,dst)
-					}
-					GT => {
-						let (src,dst) = data.match_reg_args()?;
-						Ins::CMP_GT(src,dst)
-					}
-					HI => {
-						let (src,dst) = data.match_reg_args()?;
-						Ins::CMP_HI(src,dst)
-					}
-					HS => {
-						let (src,dst) = data.match_reg_args()?;
-						Ins::CMP_HS(src,dst)
-					}
-					PL => {
-						let reg = data.match_reg()?;
-						Ins::CMP_PL(reg)
-					}
-					PZ => {
-						let reg = data.match_reg()?;
-						Ins::CMP_PZ(reg)
-					}
-					STR => {
-						let (src,dst) = data.match_reg_args()?;
-						Ins::CMP_STR(src,dst)
-					}
-					_ => {
-						data.expected("Comparator type (EQ,GT,GE,HI,HS,PL,PZ,STR)");
-						todo!("on error, skip to newline");
-					}
 				};
-				add_to_section(&mut section_table, skey, ins);
+				if let Some(ins) = func() {
+					add_to_section(&mut section_table, skey, ins);
+				}
 			}
-			Colon => eprintln!("unexpected Colon"),
-			Comma => eprintln!("unexpected Comma"),
 			Comment => {} // skip comments
-			Const => {
-				let Ok(sz) = data.size() else {
-					todo!("on error, skip to newline");
-				};
-
-				let nxt_tok = data.next();
-				let ins = match nxt_tok.get_type() {
-					Number => {
-						let num = data.number()?;
-						let imm = match sz {
-							Size::Byte => assert_within_i8(&data, num) as i64,
-							Size::Word => assert_within_i16(&data, num) as i64,
-							Size::Long => assert_within_i32(&data, num) as i64,
-						};
-						Ins::Const_Imm(sz, imm)
-					}
+			Const => data.size()
+				.and_then(|sz| match data.next().get_type() {
+					Number => data.number()
+						.and_then(|num| match sz {
+							Size::Byte => assert_within_i8(&mut data, num).map(|n| n as i64),
+							Size::Word => assert_within_i16(&mut data, num).map(|n| n as i64),
+							Size::Long => assert_within_i32(&mut data, num).map(|n| n as i64),
+						})
+						.map(|imm| Ins::Const_Imm(sz, imm)),
 					Identifier => {
-						let txt = nxt_tok.to_string(&file);
-						Ins::Const_Label(sz, txt)
+						let txt = data.curr().to_string(&file);
+						Some(Ins::Const_Label(sz, txt))
 					}
 					_ => {
-						data.expected("integer literal or label");
-						todo!("on error, skip to next newline character");
+						data.error("integer literal or label");
+						None
 					}
-				};
-				add_to_section(&mut section_table, skey, ins);
-			}
-			CParen => eprintln!("unexpected close-parenthesis"),
-			Dash => eprintln!("unexpected Dash"),
-			Delay => eprintln!("unexpected Delay"),
-			DIV0S => {
-				let (src,dst) = data.match_reg_args()?;
-				add_to_section(&mut section_table, skey, Ins::DIV0S(src,dst));
-			}
+				})
+				.map(|ins| add_to_section(&mut section_table, skey, ins)).unwrap_or_default(),
+			DIV0S => data.match_reg_args()
+				.map(|(src,dst)| add_to_section(&mut section_table, skey, Ins::DIV0S(src,dst)))
+				.unwrap_or_default(),
 			DIV0U => add_to_section(&mut section_table, skey, Ins::DIV0U),
-			DIV1 => {
-				let (src,dst) = data.match_reg_args()?;
-				add_to_section(&mut section_table, skey, Ins::DIV1(src,dst));
-			}
-			DMULS => {
-				let size = match data.size() {
-					Ok(sz) => sz,
-					Err((0,msg)) => {
-						eprintln!("{}", &p_error(&msg));
-						todo!("on error, skip to newline");
-					}
-					Err((1,msg)) => {
-						eprintln!("{}", &p_error(&msg));
-						todo!("on error, skip to newline");
-					}
-					Err((_,_)) => unreachable!(),
-				};
-				if size != Size::Long {
-					data.expected("Size specifier Long('l')");
-					todo!("on error, skip to newline");
-				}
-				let (src,dst) = data.match_reg_args()?;
-				add_to_section(&mut section_table, skey, Ins::DMULS(src,dst));
-			}
-			DMULU => {
-				let size = match data.size() {
-					Ok(sz) => sz,
-					Err((0,msg)) => {
-						eprintln!("{}", &p_error(&msg));
-						todo!("on error, skip to newline");
-					}
-					Err((1,msg)) => {
-						eprintln!("{}", &p_error(&msg));
-						todo!("on error, skip to newline");
-					}
-					Err((_,_)) => unreachable!(),
-				};
-				if size != Size::Long {
-					data.expected("Size specifier Long('l')");
-					todo!("on error, skip to newline");
-				}
-				let (src,dst) = data.match_reg_args()?;
-				add_to_section(&mut section_table, skey, Ins::DMULS(src,dst));
-			}
-			DT => {
-				let reg = data.match_reg()?;
-				add_to_section(&mut section_table, skey, Ins::DT(reg));
-			}
-			Dot => eprintln!("unexpected Dot"),
-			EQ => eprintln!("unexpected EQ"),
-			Equal => eprintln!("unexpected Equal"),
-			EXTS => {
-				let size = match data.size() {
-					Ok(sz) => sz,
-					Err((0,msg)) => {
-						eprintln!("{}", &p_error(&msg));
-						todo!("on error, skip to newline");
-					}
-					Err((1,msg)) => {
-						eprintln!("{}", &p_error(&msg));
-						todo!("on error, skip to newline");
-					}
-					Err((_,_)) => unreachable!(),
-				};
-				if size == Size::Long {
-					data.expected("Size specifier Byte('b') or Word('w')");
-					todo!("on error, skip to newline");
-				}
-				let (src,dst) = data.match_reg_args()?;
-				add_to_section(&mut section_table, skey, Ins::EXTS(size,src,dst));
-			}
-			EXTU => {
-				let size = match data.size() {
-					Ok(sz) => sz,
-					Err((0,msg)) => {
-						eprintln!("{}", &p_error(&msg));
-						todo!("on error, skip to newline");
-					}
-					Err((1,msg)) => {
-						eprintln!("{}", &p_error(&msg));
-						todo!("on error, skip to newline");
-					}
-					Err((_,_)) => unreachable!(),
-				};
-				if size == Size::Long {
-					data.expected("Size specifier Byte('b') or Word('w')");
-					todo!("on error, skip to newline");
-				}
-				let (src,dst) = data.match_reg_args()?;
-				add_to_section(&mut section_table, skey, Ins::EXTU(size,src,dst));
-			}
-			GE => eprintln!("unexpected GE"),
-			GT => eprintln!("unexpected GT"),
-			HI => eprintln!("unexpected HI"),
-			HS => eprintln!("unexpected HS"),
+			DIV1 => data.match_reg_args()
+				.map(|(src,dst)| add_to_section(&mut section_table, skey, Ins::DIV1(src,dst)))
+				.unwrap_or_default(),
+			DMULS => data.size()
+				.and_then(|sz| if sz != Size::Long {
+					data.error("Size specifier Long('l')");
+					None
+				} else {
+					data.match_reg_args()
+				})
+				.map(|(src,dst)| add_to_section(&mut section_table, skey, Ins::DMULS(src,dst)))
+				.unwrap_or_default(),
+			DMULU => data.size()
+				.and_then(|sz| if sz != Size::Long {
+					data.error("Size specifier Long('l')");
+					None
+				} else {
+					data.match_reg_args()
+				})
+				.map(|(src,dst)| add_to_section(&mut section_table, skey, Ins::DMULS(src,dst)))
+				.unwrap_or_default(),
+			DT => data.match_reg()
+				.map(|reg| add_to_section(&mut section_table, skey, Ins::DT(reg)))
+				.unwrap_or_default(),
+			EXTS => data.size()
+				.and_then(|sz| if sz == Size::Long {
+					data.error("Size specifier Byte('b') or Word('w')");
+					None
+				} else {
+					data.match_reg_args().map(|(src,dst)| (sz,src,dst))
+				})
+				.map(|(sz,src,dst)| add_to_section(&mut section_table, skey, Ins::EXTS(sz,src,dst)))
+				.unwrap_or_default(),
+			EXTU => data.size()
+				.and_then(|sz| if sz == Size::Long {
+					data.error("Size specifier Byte('b') or Word('w')");
+					None
+				} else {
+					data.match_reg_args().map(|(src,dst)| (sz,src,dst))
+				})
+				.map(|(sz,src,dst)| add_to_section(&mut section_table, skey, Ins::EXTU(sz,src,dst)))
+				.unwrap_or_default(),
 			Identifier => {
 				let lbl = cur_tok.to_string(&file);
 
 				data.match_token_or_err(Colon, "End of label declaration (':')");
 
 				if label_table.contains_key(&lbl) {
-					eprintln!("{}", p_error("Label '{label}' already defined"));
-					todo!("on error, skip to newline");
+					eprintln!("ERROR: Label '{lbl}' already defined");
+					while data.peek(1).get_type() != Newline {
+						data.next();
+					}
+					data.next();
+					continue;
 				}
 				add_to_section(&mut section_table, skey, Ins::Label(lbl.clone()));
 				label_table.insert(lbl, None);
 			}
 			JMP => {
 				// TODO - srenshaw - Add label handling for JMP
-				data.match_token(Address);
-				let reg = data.match_reg()?;
-				add_to_section(&mut section_table, skey, Ins::JMP(reg));
+				let mut func = || -> Option<Ins> {
+					data.match_token(Address)?;
+					let reg = data.match_reg()?;
+					Some(Ins::JMP(reg))
+				};
+				if let Some(ins) = func() {
+					add_to_section(&mut section_table, skey, ins);
+				}
 			}
 			JSR => {
 				// TODO - srenshaw - Add label handling for JSR
-				data.match_token(Address);
-				let reg = data.match_reg()?;
-				add_to_section(&mut section_table, skey, Ins::JSR(reg));
+				let mut func = || -> Option<Ins> {
+					data.match_token(Address)?;
+					let reg = data.match_reg()?;
+					Some(Ins::JSR(reg))
+				};
+				if let Some(ins) = func() {
+					add_to_section(&mut section_table, skey, ins);
+				}
 			}
-			LDC => {
-				let nxt_tok = data.next();
-				let ins = match nxt_tok.get_type() {
-					Register => {
-						let reg = data.reg()?;
-						data.match_token(Comma);
-						match data.match_token(Identifier).to_string(&file).to_lowercase().as_str() {
-							"gbr" => Ins::LDC_GBR(reg),
-							"sr" => Ins::LDC_SR(reg),
-							"vbr" => Ins::LDC_VBR(reg),
-							_ => {
-								data.expected("Control Register (GBR,SR,VBR)");
-								todo!("on error, skip to newline");
-							}
+			LDC => match data.next().get_type() {
+				Register => || -> Option<Ins> {
+					let reg = data.reg()?;
+					data.match_tokens(&[Comma,Identifier])?;
+					match data.curr().to_string(&file).to_lowercase().as_str() {
+						"gbr" => Some(Ins::LDC_GBR(reg)),
+						"sr" => Some(Ins::LDC_SR(reg)),
+						"vbr" => Some(Ins::LDC_VBR(reg)),
+						_ => {
+							data.error("Control Register (GBR,SR,VBR)");
+							None
 						}
 					}
-					Dot => {
-						data.match_token(Long);
-						data.match_token(Address);
+				}(),
+				Dot => || -> Option<Ins> {
+					data.match_tokens(&[Long,Address])?;
+					let reg = data.match_reg()?;
+					data.match_tokens(&[Plus,Identifier])?;
+					match data.curr().to_string(&file).to_lowercase().as_str() {
+						"gbr" => Some(Ins::LDC_GBR_Inc(reg)),
+						"sr" => Some(Ins::LDC_SR_Inc(reg)),
+						"vbr" => Some(Ins::LDC_VBR_Inc(reg)),
+						_ => {
+							data.error("Control Register (GBR,SR,VBR)");
+							None
+						}
+					}
+				}(),
+				_ => {
+					data.error("Valid LDC instruction");
+					None
+				}
+			}.map(|ins| add_to_section(&mut section_table, skey, ins)).unwrap_or_default(),
+			LDS => match data.next().get_type() {
+					Register => data.reg()
+						.and_then(|reg| data.match_token(Comma).map(|_| reg))
+						.and_then(|reg| data.match_token(Identifier).map(|_| reg))
+						.and_then(|reg| match data.curr().to_string(&file).to_lowercase().as_str() {
+							"mach" => Some(Ins::LDS_MACH(reg)),
+							"macl" => Some(Ins::LDS_MACL(reg)),
+							"pr" => Some(Ins::LDS_PR(reg)),
+							_ => {
+								data.error("Special Register (MACH,MACL,PR)");
+								None
+							}
+						}),
+					Dot => || -> Option<Ins> {
+						data.match_tokens(&[Long,Address])?;
 						let reg = data.match_reg()?;
-						data.match_token(Plus);
-						match data.match_token(Identifier).to_string(&file).to_lowercase().as_str() {
-							"gbr" => Ins::LDC_GBR_Inc(reg),
-							"sr" => Ins::LDC_SR_Inc(reg),
-							"vbr" => Ins::LDC_VBR_Inc(reg),
+						data.match_tokens(&[Plus,Identifier])?;
+						match data.curr().to_string(&file).to_lowercase().as_str() {
+							"mach" => Some(Ins::LDS_MACH_Inc(reg)),
+							"macl" => Some(Ins::LDS_MACL_Inc(reg)),
+							"pr" => Some(Ins::LDS_PR_Inc(reg)),
 							_ => {
-								data.expected("Control Register (GBR,SR,VBR)");
-								todo!("on error, skip to newline");
+								data.error("Special Register (MACH,MACL,PR)");
+								None
 							}
 						}
-					}
+					}(),
 					_ => {
-						data.expected("Valid LDC instruction");
-						todo!("on error, skip to newline");
+						data.error("Valid LDS instruction");
+						None
 					}
+				}.map(|ins| add_to_section(&mut section_table, skey, ins)).unwrap_or_default(),
+			MAC => {
+				let ins_func = match data.size() {
+					Some(Size::Byte) => {
+						data.error("Size specifier Word('w') or Long('l')");
+						continue;
+					}
+					Some(Size::Word) => Ins::MAC_Word,
+					Some(Size::Long) => Ins::MAC_Long,
+					None => continue,
 				};
-				add_to_section(&mut section_table, skey, ins);
+				let ins = || -> Option<Ins> {
+					data.match_token(Address)?;
+					let src = data.match_reg()?;
+					data.match_tokens(&[Plus,Comma,Address])?;
+					let dst = data.match_reg()?;
+					data.match_token(Plus)?;
+					Some(ins_func(src,dst))
+				}();
+				if let Some(ins) = ins {
+					add_to_section(&mut section_table, skey, ins);
+				}
 			}
-			LDS => {
-				let nxt_tok = data.next();
-				let ins = match nxt_tok.get_type() {
-					Register => {
-						let reg = data.reg()?;
-						data.match_token(Comma);
-						match data.match_token(Identifier).to_string(&file).to_lowercase().as_str() {
-							"mach" => Ins::LDS_MACH(reg),
-							"macl" => Ins::LDS_MACL(reg),
-							"pr" => Ins::LDS_PR(reg),
-							_ => {
-								data.expected("Special Register (MACH,MACL,PR)");
-								todo!("on error, skip to newline");
-							}
-						}
-					}
-					Dot => {
-						data.match_token(Long);
-						data.match_token(Address);
-						let reg = data.match_reg()?;
-						data.match_token(Plus);
-						match data.match_token(Identifier).to_string(&file).to_lowercase().as_str() {
-							"mach" => Ins::LDS_MACH_Inc(reg),
-							"macl" => Ins::LDS_MACL_Inc(reg),
-							"pr" => Ins::LDS_PR_Inc(reg),
-							_ => {
-								data.expected("Special Register (MACH,MACL,PR)");
-								todo!("on error, skip to newline");
-							}
-						}
-					}
-					_ => {
-						data.expected("Valid LDS instruction");
-						todo!("on error, skip to newline");
-					}
-				};
-				add_to_section(&mut section_table, skey, ins);
-			}
-			Long => eprintln!("unexpected size specifier"),
-			MAC => eprintln!("unexpected MAC"),
-			MOV => {
-				let size = match data.size() {
-					Ok(size) => size,
-					Err((n,msg)) => if n == 0 {
-						data.index -= 1;
-						Size::Word
-					} else {
-						eprintln!("{msg}");
-						todo!("on error, skip to newline");
-					}
-				};
+			MOV => match data.next().get_type() {
+				Dash | Number => {
+					data.match_number()
+						.and_then(|num| assert_within_i8(&mut data, num))
+						.and_then(|imm| data.match_token(Comma).map(|_| imm))
+						.zip(data.match_reg())
+						.map(|(imm,reg)| Ins::MOV_Imm(imm,reg))
+				}
+				Register => {
+					data.reg()
+						.and_then(|src| data.match_token(Comma).map(|_| src))
+						.zip(data.match_reg())
+						.map(|(src,dst)| Ins::MOV_Reg(src,dst))
+				}
+				Dot => || -> Option<Ins> {
+					let size = data.match_size()?;
 
-				let nxt_tok = data.next();
-				let src = match nxt_tok.get_type() {
-					Identifier => {
-						let txt = nxt_tok.to_string(&file);
-						Arg::Label(txt)
-					}
-					Number => {
-						let imm = data.number()?;
-						Arg::DirImm(imm)
-					}
-					Register => {
-						let reg = data.reg()?;
-						Arg::DirReg(reg)
-					}
-					Address => {
-						let reg = data.match_reg()?;
-						if data.next().get_type() == Plus {
-							Arg::PostInc(reg)
-						} else {
-							data.index -= 1;
-							Arg::IndReg(reg)
+					let src = match data.next().get_type() {
+						Address => data.address(),
+						Register => data.reg().map(Arg::DirReg),
+						_ => {
+							data.error("Register, Displacement, or Address");
+							None
 						}
-					}
-					_ => {
-						eprintln!("{}", data.expected("A valid MOV source argument"));
-						todo!("on error, skip to newline");
-					}
-				};
+					}?;
 
-				data.match_token(Comma);
+					data.match_token(Comma)?;
 
-				let nxt_tok = data.next();
-				let dst = match nxt_tok.get_type() {
-					Register => {
-						let reg = data.reg()?;
-						Arg::DirReg(reg)
-					}
-					Address => {
-						let nxt_tok = data.next();
-						let is_pre_dec = nxt_tok.get_type() == Dash;
-						let nxt_tok = if is_pre_dec {
-							data.next()
-						} else {
-							nxt_tok
-						};
-
-						if nxt_tok.get_type() != Register {
-							eprintln!("{}", data.expected("Register"));
-							todo!("on error, skip to newline");
+					let dst = match data.next().get_type() {
+						Address => data.address(),
+						Register => data.reg().map(Arg::DirReg),
+						_ => {
+							data.error("Register, Displacement, or Address");
+							None
 						}
+					}?;
 
-						let reg = data.reg()?;
-						if is_pre_dec {
-							Arg::PreDec(reg)
-						} else {
-							Arg::IndReg(reg)
-						}
-					}
-					_ => {
-						eprintln!("{}", data.expected(
-							"A valid MOV destination argument"));
-						todo!("on error, skip to newline");
-					}
-				};
-				add_to_section(&mut section_table, skey, Ins::MOV(size,src,dst));
-			}
-			MOVA => eprintln!("unexpected MOVA"),
-			MOVT => eprintln!("unexpected MOVT"),
-			MUL => eprintln!("unexpected MUL"),
-			MULS => eprintln!("unexpected MULS"),
-			MULU => eprintln!("unexpected MULU"),
-			NEG => eprintln!("unexpected NEG"),
-			NEGC => eprintln!("unexpected NEGC"),
+					Some(Ins::MOV(size,src,dst))
+				}(),
+				_ => {
+					data.error("size specifier, 8-bit immediate, or Register");
+					None
+				}
+			}.map(|ins| add_to_section(&mut section_table, skey, ins)).unwrap_or_default(),
+			MOVA => eprintln!("unimplemented MOVA"),
+			MOVT => eprintln!("unimplemented MOVT"),
+			MUL => eprintln!("unimplemented MUL"),
+			MULS => eprintln!("unimplemented MULS"),
+			MULU => eprintln!("unimplemented MULU"),
+			NEG => eprintln!("unimplemented NEG"),
+			NEGC => eprintln!("unimplemented NEGC"),
 			Newline => {} // skip newlines
-			NOP => eprintln!("unexpected NOP"),
-			NOT => eprintln!("unexpected NOT"),
-			Number => eprintln!("unexpected Number"),
-			OParen => eprintln!("unexpected open-parenthesis"),
-			OR => eprintln!("unexpected OR"),
-			Org => {
-				data.next();
-				skey = data.number()? as u64;
-			}
-			PL => eprintln!("unexpected PL"),
-			Plus => eprintln!("unexpected Plus"),
-			PZ => eprintln!("unexpected PZ"),
-			Register => eprintln!("unexpected Register"),
-			ROTCL => eprintln!("unexpected ROTCL"),
-			ROTCR => eprintln!("unexpected ROTCR"),
-			ROTL => eprintln!("unexpected ROTL"),
-			ROTR => eprintln!("unexpected ROTR"),
-			RTE => eprintln!("unexpected RTE"),
-			RTS => eprintln!("unexpected RTS"),
-			SETT => eprintln!("unexpected SETT"),
-			SHAL => eprintln!("unexpected SHAL"),
-			SHAR => eprintln!("unexpected SHAR"),
-			SHLL => eprintln!("unexpected SHLL"),
-			SHLL2 => eprintln!("unexpected SHLL2"),
-			SHLL8 => eprintln!("unexpected SHLL8"),
-			SHLL16 => eprintln!("unexpected SHLL16"),
-			SHLR => eprintln!("unexpected SHLR"),
-			SHLR2 => eprintln!("unexpected SHLR2"),
-			SHLR8 => eprintln!("unexpected SHLR8"),
-			SHLR16 => eprintln!("unexpected SHLR16"),
-			Slash => eprintln!("unexpected Slash"),
-			SLEEP => eprintln!("unexpected SLEEP"),
-			STC => eprintln!("unexpected STC"),
-			STS => eprintln!("unexpected STS"),
-			STR => eprintln!("unexpected STR"),
-			SUB => eprintln!("unexpected SUB"),
-			SUBC => eprintln!("unexpected SUBC"),
-			SUBV => eprintln!("unexpected SUBV"),
-			SWAP => eprintln!("unexpected SWAP"),
-			TAS => eprintln!("unexpected TAS"),
-			TRAPA => eprintln!("unexpected TRAPA"),
-			TST => eprintln!("unexpected TST"),
-			Word => eprintln!("unexpected size specifier"),
-			XOR => eprintln!("unexpected XOR"),
-			XTRCT => eprintln!("unexpected XTRCT"),
+			NOP => eprintln!("unimplemented NOP"),
+			NOT => eprintln!("unimplemented NOT"),
+			OR => eprintln!("unimplemented OR"),
+			Org => data.match_number_pos()
+				.map(|addr| skey = addr as u64)
+				.unwrap_or_default(),
+			PL => eprintln!("unimplemented PL"),
+			PZ => eprintln!("unimplemented PZ"),
+			ROTCL => eprintln!("unimplemented ROTCL"),
+			ROTCR => eprintln!("unimplemented ROTCR"),
+			ROTL => eprintln!("unimplemented ROTL"),
+			ROTR => eprintln!("unimplemented ROTR"),
+			RTE => eprintln!("unimplemented RTE"),
+			RTS => eprintln!("unimplemented RTS"),
+			SETT => eprintln!("unimplemented SETT"),
+			SHAL => eprintln!("unimplemented SHAL"),
+			SHAR => eprintln!("unimplemented SHAR"),
+			SHLL => eprintln!("unimplemented SHLL"),
+			SHLL2 => eprintln!("unimplemented SHLL2"),
+			SHLL8 => eprintln!("unimplemented SHLL8"),
+			SHLL16 => eprintln!("unimplemented SHLL16"),
+			SHLR => eprintln!("unimplemented SHLR"),
+			SHLR2 => eprintln!("unimplemented SHLR2"),
+			SHLR8 => eprintln!("unimplemented SHLR8"),
+			SHLR16 => eprintln!("unimplemented SHLR16"),
+			Slash => eprintln!("unimplemented Slash"),
+			SLEEP => eprintln!("unimplemented SLEEP"),
+			STC => eprintln!("unimplemented STC"),
+			STS => eprintln!("unimplemented STS"),
+			STR => eprintln!("unimplemented STR"),
+			SUB => eprintln!("unimplemented SUB"),
+			SUBC => eprintln!("unimplemented SUBC"),
+			SUBV => eprintln!("unimplemented SUBV"),
+			SWAP => eprintln!("unimplemented SWAP"),
+			TAS => eprintln!("unimplemented TAS"),
+			TRAPA => eprintln!("unimplemented TRAPA"),
+			TST => eprintln!("unimplemented TST"),
+			XOR => eprintln!("unimplemented XOR"),
+			XTRCT => eprintln!("unimplemented XTRCT"),
 			Unknown => {
 				let txt = cur_tok.to_string(&file);
 				let (line,pos) = cur_tok.pos();
 				eprintln!("unknown item '{txt}' @ ({line}:{pos})");
+			}
+			_ => {
+				let txt = cur_tok.to_string(&file);
+				let (line,pos) = cur_tok.pos();
+				eprintln!("unexpected {txt} @ ({line}:{pos})");
 			}
 		}
 		data.next();
@@ -1384,9 +1361,7 @@ fn resolver(
 							is_resolved = false;
 						}
 					}
-					Incomplete(MOV(Byte,DirImm(isrc),DirReg(rdst))) |
-					Incomplete(MOV(Word,DirImm(isrc),DirReg(rdst))) |
-					Incomplete(MOV(Long,DirImm(isrc),DirReg(rdst))) => {
+					Incomplete(MOV_Imm(isrc,rdst)) => {
 						let base = 0b1110_0000_0000_0000;
 						let nbyte = to_byte2(rdst);
 						let imm = *isrc as i64;
@@ -1398,7 +1373,7 @@ fn resolver(
 							eprintln!("Moving 16-bit immediates is not implemented yet. Declare a labeled constant and move the label instead.");
 						} else {
 							// 8-bit immediate
-							let iword = (*isrc & 0xFF) as u16;
+							let iword = *isrc as u16;
 							results.push(Complete(base | nbyte | iword));
 						}
 					}
