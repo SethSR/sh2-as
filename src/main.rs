@@ -352,12 +352,12 @@ pub(crate) enum Ins {
 	/// | Rm,Rn             | 0110nnnnmmmm0111 | ~Rm -> Rn          | 1       | -      |
 	NOT(Reg,Reg),
 	/// | #imm,R0           | 11001011iiiiiiii | R0|imm -> R0       | 1       | -      |
-	OR_Imm(i8),
+	OR_Imm(u8),
 	/// | Rm,Rn             | 0010nnnnmmmm1011 | Rn|Rm -> Rn        | 1       | -      |
 	OR_Reg(Reg,Reg),
 	/// | #imm,@(R0,GBR)    | 11001111iiiiiiii | (R0+GBR)|imm ->    | 3       | -      |
 	/// |                   |                  | (R0+GBR)           |         |        |
-	OR_Byte(i8),
+	OR_Byte(u8),
 	/// | Rn                | 0100nnnn00100100 | T <- Rn <- T       | 1       | MSB    |
 	ROTCL(Reg),
 	/// | Rn                | 0100nnnn00100101 | T -> Rn -> T       | 1       | LSB    |
@@ -448,24 +448,24 @@ pub(crate) enum Ins {
 	/// | #imm              | 11000011iiiiiiii | PC/SR -> stack     | 8       | -      |
 	/// |                   |                  | area, (imm x 4 +   |         |        |
 	/// |                   |                  | VBR) -> PC         |         |        |
-	TRAPA(i8),
+	TRAPA(u8),
 	/// | #imm,R0           | 11001000iiiiiiii | R0 & imm; if the   | 1       | Result |
 	/// |                   |                  | result is 0, 1->T  |         |        |
-	TST_Imm(i8),
+	TST_Imm(u8),
 	/// | Rm,Rn             | 0010nnnnmmmm1000 | Rn & Rm; if the    | 1       | Result |
 	/// |                   |                  | result is 0, 1->T  |         |        |
 	TST_Reg(Reg,Reg),
 	/// | #imm,@(R0,GBR)    | 11001100iiiiiiii | (R0+GBR) & imm; if | 3       | Result |
 	/// |                   |                  | the result is 0,   |         |        |
 	/// |                   |                  | 1 -> T             |         |        |
-	TST_Byte(i8),
+	TST_Byte(u8),
 	/// | #imm,R0           | 11001010iiiiiiii | R0 ^ imm -> R0     | 1       | -      |
-	XOR_Imm(i8),
+	XOR_Imm(u8),
 	/// | Rm,Rn             | 0010nnnnmmmm1010 | Rn ^ Rm -> Rn      | 1       | -      |
 	XOR_Reg(Reg,Reg),
 	/// | #imm,@(R0,GBR)    | 11001110iiiiiiii | (R0+GBR) ^ imm ->  | 3       | -      |
 	/// |                   |                  | (R0+GBR)           |         |        |
-	XOR_Byte(i8),
+	XOR_Byte(u8),
 	/// | Rm,Rn             | 0010nnnnmmmm1101 | Center 32 bits of  | 1       | -      |
 	/// |                   |                  | Rm and Rn -> Rn    |         |        |
 	XTRCT(Reg,Reg),
@@ -1210,7 +1210,32 @@ fn parser(
 			NOT => data.match_reg_args()
 				.map(|(src,dst)| add_to_section(&mut section_table, skey, Ins::NOT(src,dst)))
 				.unwrap_or_default(),
-			OR => eprintln!("unimplemented OR"),
+			OR => match data.next().get_type() {
+				Number => data.number_pos()
+					.and_then(|num| assert_within_u8(&mut data, num))
+					.and_then(|imm| data.match_token(Comma).map(|_| imm))
+					.and_then(|imm| data.match_r0().map(|_| imm))
+					.map(Ins::OR_Imm),
+				Register => data.reg()
+					.and_then(|src| data.match_token(Comma).map(|_| src))
+					.zip(data.match_reg())
+					.map(|(src,dst)| Ins::OR_Reg(src,dst)),
+				Dot => || -> Option<Ins> {
+					data.match_token(Byte)?;
+					let num = data.match_number()?;
+					let imm = assert_within_u8(&mut data, num)?;
+					data.match_tokens(&[Comma,Address,OParen])?;
+					data.match_r0()?;
+					data.match_token(Comma)?;
+					data.match_ident("gbr")?;
+					data.match_token(CParen)?;
+					Some(Ins::OR_Byte(imm))
+				}(),
+				_ => {
+					data.error("Valid OR source argument: Number or Register");
+					None
+				}
+			}.map(|ins| add_to_section(&mut section_table, skey, ins)).unwrap_or_default(),
 			Org => data.match_number_pos()
 				.map(|addr| skey = addr as u64)
 				.unwrap_or_default(),
@@ -1275,10 +1300,58 @@ fn parser(
 			SWAP => eprintln!("unimplemented SWAP"),
 			TAS => eprintln!("unimplemented TAS"),
 			TRAPA => eprintln!("unimplemented TRAPA"),
-			TST => data.match_reg_args()
-				.map(|(src,dst)| add_to_section(&mut section_table, skey, Ins::SUB(src,dst)))
-				.unwrap_or_default(),
-			XOR => eprintln!("unimplemented XOR"),
+			TST => match data.next().get_type() {
+				Number => data.number_pos()
+					.and_then(|num| assert_within_u8(&mut data, num))
+					.and_then(|imm| data.match_token(Comma).map(|_| imm))
+					.and_then(|imm| data.match_r0().map(|_| imm))
+					.map(Ins::TST_Imm),
+				Register => data.reg()
+					.and_then(|src| data.match_token(Comma).map(|_| src))
+					.zip(data.match_reg())
+					.map(|(src,dst)| Ins::TST_Reg(src,dst)),
+				Dot => || -> Option<Ins> {
+					data.match_token(Byte)?;
+					let num = data.match_number()?;
+					let imm = assert_within_u8(&mut data, num)?;
+					data.match_tokens(&[Comma,Address,OParen])?;
+					data.match_r0()?;
+					data.match_token(Comma)?;
+					data.match_ident("gbr")?;
+					data.match_token(CParen)?;
+					Some(Ins::TST_Byte(imm))
+				}(),
+				_ => {
+					data.error("Valid TST source argument: Number or Register");
+					None
+				}
+			}.map(|ins| add_to_section(&mut section_table, skey, ins)).unwrap_or_default(),
+			XOR => match data.next().get_type() {
+				Number => data.number_pos()
+					.and_then(|num| assert_within_u8(&mut data, num))
+					.and_then(|imm| data.match_token(Comma).map(|_| imm))
+					.and_then(|imm| data.match_r0().map(|_| imm))
+					.map(Ins::XOR_Imm),
+				Register => data.reg()
+					.and_then(|src| data.match_token(Comma).map(|_| src))
+					.zip(data.match_reg())
+					.map(|(src,dst)| Ins::XOR_Reg(src,dst)),
+				Dot => || -> Option<Ins> {
+					data.match_token(Byte)?;
+					let num = data.match_number()?;
+					let imm = assert_within_u8(&mut data, num)?;
+					data.match_tokens(&[Comma,Address,OParen])?;
+					data.match_r0()?;
+					data.match_token(Comma)?;
+					data.match_ident("gbr")?;
+					data.match_token(CParen)?;
+					Some(Ins::XOR_Byte(imm))
+				}(),
+				_ => {
+					data.error("Valid XOR source argument: Number or Register");
+					None
+				}
+			}.map(|ins| add_to_section(&mut section_table, skey, ins)).unwrap_or_default(),
 			XTRCT => data.match_reg_args()
 				.map(|(src,dst)| add_to_section(&mut section_table, skey, Ins::SUB(src,dst)))
 				.unwrap_or_default(),
