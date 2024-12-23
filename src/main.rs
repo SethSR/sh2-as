@@ -586,8 +586,8 @@ impl Parser<'_,'_> {
 			}
 			TokenType::OParen => {
 				fn parse_num(data: &mut Parser, num: i64) -> Option<Arg> {
-					data.assert_token_with_offset(1, TokenType::Comma)?;
-					match data.peek(2).get_type() {
+					data.assert_token_with_offset(0, TokenType::Comma)?;
+					match data.peek(1).get_type() {
 						TokenType::GBR => {
 							let imm = assert_within_i8(data, num)?;
 							data.next(); // Comma
@@ -1459,18 +1459,18 @@ fn parser(
 				eprintln!("unexpected {txt} @ ({line}:{pos})");
 			}
 		}
-		data.next();
+		data.index += 1;
 	}
 
 	Ok((section_table, label_table))
 }
 
 fn to_byte2(reg: &Reg) -> u16 {
-	(reg << 12) as u16
+	(*reg as u16) << 12
 }
 
 fn to_byte3(reg: &Reg) -> u16 {
-	(reg << 8) as u16
+	(*reg as u16) << 8
 }
 
 fn to_sbyte(size: &Size) -> u16 {
