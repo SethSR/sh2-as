@@ -697,12 +697,6 @@ impl Parser<'_,'_> {
 		Some(())
 	}
 
-	fn match_ident<'a>(&'a mut self, id: &'_ str) -> Option<&'a Token> {
-		let file = self.file;
-		self.match_token(TokenType::Identifier)
-			.filter(|&tok| tok.to_string(&file).to_lowercase() == id)
-	}
-
 	fn match_number_pos(&mut self) -> Option<i64> {
 		self.match_token(TokenType::Number)?;
 		self.number_pos()
@@ -1280,40 +1274,24 @@ fn parser(
 				.unwrap_or_default(),
 			SLEEP => add_to_section(&mut section_table, skey, Ins::SLEEP),
 			STC => || -> Option<()> {
+				fn comma_reg(p: &mut Parser) -> Option<Reg> {
+					p.match_token(Comma)?;
+					p.match_reg()
+				}
+				fn pre_dec(p: &mut Parser) -> Option<Reg> {
+					p.match_tokens(&[Comma,Address,Dash])?;
+					p.match_reg()
+				}
 				let ins = match data.next().get_type() {
-					GBR => {
-						data.match_token(Comma)?;
-						let reg = data.match_reg()?;
-						Ins::STC_GBR(reg)
-					}
-					SR => {
-						data.match_token(Comma)?;
-						let reg = data.match_reg()?;
-						Ins::STC_SR(reg)
-					}
-					VBR => {
-						data.match_token(Comma)?;
-						let reg = data.match_reg()?;
-						Ins::STC_VBR(reg)
-					}
+					GBR => comma_reg(&mut data).map(Ins::STC_GBR)?,
+					SR => comma_reg(&mut data).map(Ins::STC_SR)?,
+					VBR => comma_reg(&mut data).map(Ins::STC_VBR)?,
 					Dot => {
-						data.match_tokens(&[Dot, Long])?;
+						data.match_token(Long)?;
 						match data.next().get_type() {
-							GBR => {
-								data.match_tokens(&[Comma,Address,Dash])?;
-								let reg = data.match_reg()?;
-								Ins::STC_GBR_Dec(reg)
-							}
-							SR => {
-								data.match_tokens(&[Comma,Address,Dash])?;
-								let reg = data.match_reg()?;
-								Ins::STC_SR_Dec(reg)
-							}
-							VBR => {
-								data.match_tokens(&[Comma,Address,Dash])?;
-								let reg = data.match_reg()?;
-								Ins::STC_VBR_Dec(reg)
-							}
+							GBR => pre_dec(&mut data).map(Ins::STC_GBR_Dec)?,
+							SR => pre_dec(&mut data).map(Ins::STC_SR_Dec)?,
+							VBR => pre_dec(&mut data).map(Ins::STC_VBR_Dec)?,
 							_ => {
 								data.error("Control Register (GBR,SR,VBR)");
 								return None;
@@ -1328,45 +1306,36 @@ fn parser(
 				Some(add_to_section(&mut section_table, skey, ins))
 			}().unwrap_or_default(),
 			STS => || -> Option<()> {
-				match data.peek(1).get_type() {
-					Identifier => {
-						let id = data.match_token(Identifier)
-							.map(|tok| tok.to_string(&file).to_lowercase())?;
-						data.match_token(Comma)?;
-						let reg = data.match_reg()?;
-						let ins = match id.as_str() {
-							"mach" => Some(Ins::STS_MACH(reg)),
-							"macl" => Some(Ins::STS_MACL(reg)),
-							"pr" => Some(Ins::STS_PR(reg)),
-							_ => {
-								data.error("Special Register (MACH,MACL,PR)");
-								None
-							}
-						}?;
-						Some(add_to_section(&mut section_table, skey, ins))
-					}
+				fn comma_reg(p: &mut Parser) -> Option<Reg> {
+					p.match_token(Comma)?;
+					p.match_reg()
+				}
+				fn pre_dec(p: &mut Parser) -> Option<Reg> {
+					p.match_tokens(&[Comma,Address,Dash])?;
+					p.match_reg()
+				}
+				let ins = match data.next().get_type() {
+					MACH => comma_reg(&mut data).map(Ins::STS_MACH)?,
+					MACL => comma_reg(&mut data).map(Ins::STS_MACL)?,
+					PR => comma_reg(&mut data).map(Ins::STS_PR)?,
 					Dot => {
-						data.match_tokens(&[Dot, Long])?;
-						let id = data.match_token(Identifier)
-							.map(|tok| tok.to_string(&file).to_lowercase())?;
-						data.match_tokens(&[Comma, Address, Dash])?;
-						let reg = data.match_reg()?;
-						let ins = match id.as_str() {
-							"mach" => Some(Ins::STS_MACH_Dec(reg)),
-							"macl" => Some(Ins::STS_MACL_Dec(reg)),
-							"pr" => Some(Ins::STS_PR_Dec(reg)),
+						data.match_token(Long)?;
+						match data.next().get_type() {
+							MACH => pre_dec(&mut data).map(Ins::STS_MACH_Dec)?,
+							MACL => pre_dec(&mut data).map(Ins::STS_MACL_Dec)?,
+							PR => pre_dec(&mut data).map(Ins::STS_PR_Dec)?,
 							_ => {
 								data.error("Special Register (MACH,MACL,PR)");
-								None
+								return None;
 							}
-						}?;
-						Some(add_to_section(&mut section_table, skey, ins))
+						}
 					}
 					_ => {
 						data.error("Valid STS instruction");
-						None
+						return None;
 					}
-				}
+				};
+				Some(add_to_section(&mut section_table, skey, ins))
 			}().unwrap_or_default(),
 			SUB => data.match_reg_args()
 				.map(|(src,dst)| add_to_section(&mut section_table, skey, Ins::SUB(src,dst)))
@@ -1409,9 +1378,7 @@ fn parser(
 					let imm = assert_within_u8(&mut data, num)?;
 					data.match_tokens(&[Comma,Address,OParen])?;
 					data.match_r0()?;
-					data.match_token(Comma)?;
-					data.match_ident("gbr")?;
-					data.match_token(CParen)?;
+					data.match_tokens(&[Comma,GBR,CParen])?;
 					Some(Ins::TST_Byte(imm))
 				}(),
 				_ => {
@@ -1435,9 +1402,7 @@ fn parser(
 					let imm = assert_within_u8(&mut data, num)?;
 					data.match_tokens(&[Comma,Address,OParen])?;
 					data.match_r0()?;
-					data.match_token(Comma)?;
-					data.match_ident("gbr")?;
-					data.match_token(CParen)?;
+					data.match_tokens(&[Comma,GBR,CParen])?;
 					Some(Ins::XOR_Byte(imm))
 				}(),
 				_ => {
