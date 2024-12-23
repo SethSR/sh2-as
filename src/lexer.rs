@@ -98,17 +98,21 @@ pub(crate) enum TokenType {
 	EXTS,
 	EXTU,
 	Equal,
+	GBR,
 	GE,
 	GT,
 	HI,
 	HS,
 	Identifier,
+	Immediate,
 	JMP,
 	JSR,
 	LDC,
 	LDS,
 	Long,
 	MAC,
+	MACH,
+	MACL,
 	MOV,
 	MOVA,
 	MOVT,
@@ -124,7 +128,9 @@ pub(crate) enum TokenType {
 	OParen,
 	OR,
 	Org,
+	PC,
 	PL,
+	PR,
 	PZ,
 	Plus,
 	ROTCL,
@@ -146,6 +152,7 @@ pub(crate) enum TokenType {
 	SHLR2,
 	SHLR8,
 	SLEEP,
+	SR,
 	STC,
 	STR,
 	STS,
@@ -158,6 +165,7 @@ pub(crate) enum TokenType {
 	TRAPA,
 	TST,
 	Unknown,
+	VBR,
 	Word,
 	XOR,
 	XTRCT,
@@ -177,6 +185,7 @@ impl fmt::Display for TokenType {
 			Delay => "S",
 			Dot => ".",
 			Equal => "=",
+			Immediate => "#",
 			Long => "l",
 			Newline => "\\n",
 			Number => "Number (bin/dec/hex)",
@@ -278,6 +287,10 @@ pub(crate) fn lexer(input: &str) -> Vec<Token> {
 				next(&mut char_idx, &mut chars);
 				results.push(Token::new(Dot, cur_idx, 1, line_idx, char_idx));
 			}
+			'#' => {
+				next(&mut char_idx, &mut chars);
+				results.push(Token::new(Immediate, cur_idx, 1, line_idx, char_idx));
+			}
 			'0'..='9' => {
 				next(&mut char_idx, &mut chars);
 				let size = tokenize(
@@ -314,13 +327,6 @@ pub(crate) fn lexer(input: &str) -> Vec<Token> {
 					cur_idx, &mut chars, &mut char_idx,
 					|ch| ['0','1'].contains(&ch) || '_' == ch);
 				results.push(Token::new(Number, cur_idx, size, line_idx, char_idx - size + 1));
-			}
-			'r' => {
-				next(&mut char_idx, &mut chars);
-				let size = tokenize(
-					cur_idx, &mut chars, &mut char_idx,
-					|ch| ('0'..='9').contains(&ch));
-				results.push(Token::new(Register, cur_idx, size, line_idx, char_idx - size + 1));
 			}
 			';' => {
 				let char_idx_s = char_idx;
@@ -360,6 +366,7 @@ pub(crate) fn lexer(input: &str) -> Vec<Token> {
 					"eq" => EQ,
 					"exts" => EXTS,
 					"extu" => EXTU,
+					"gbr" => GBR,
 					"ge" => GE,
 					"gt" => GT,
 					"hi" => HI,
@@ -370,6 +377,8 @@ pub(crate) fn lexer(input: &str) -> Vec<Token> {
 					"ldc" => LDC,
 					"lds" => LDS,
 					"mac" => MAC,
+					"mach" => MACH,
+					"macl" => MACL,
 					"mov" => MOV,
 					"mova" => MOVA,
 					"movt" => MOVT,
@@ -382,7 +391,9 @@ pub(crate) fn lexer(input: &str) -> Vec<Token> {
 					"not" => NOT,
 					"or" => OR,
 					"org" => Org,
+					"pc" => PC,
 					"pl" => PL,
+					"pr" => PR,
 					"pz" => PZ,
 					"rotcl" => ROTCL,
 					"rotcr" => ROTCR,
@@ -390,6 +401,22 @@ pub(crate) fn lexer(input: &str) -> Vec<Token> {
 					"rotr" => ROTR,
 					"rte" => RTE,
 					"rts" => RTS,
+					"r0" => Register,
+					"r1" => Register,
+					"r2" => Register,
+					"r3" => Register,
+					"r4" => Register,
+					"r5" => Register,
+					"r6" => Register,
+					"r7" => Register,
+					"r8" => Register,
+					"r9" => Register,
+					"r10" => Register,
+					"r11" => Register,
+					"r12" => Register,
+					"r13" => Register,
+					"r14" => Register,
+					"r15" => Register,
 					"s" => Delay,
 					"sett" => SETT,
 					"shal" => SHAL,
@@ -403,6 +430,7 @@ pub(crate) fn lexer(input: &str) -> Vec<Token> {
 					"shlr2" => SHLR2,
 					"shlr8" => SHLR8,
 					"sleep" => SLEEP,
+					"sr" => SR,
 					"stc" => STC,
 					"str" => STR,
 					"sts" => STS,
@@ -413,6 +441,7 @@ pub(crate) fn lexer(input: &str) -> Vec<Token> {
 					"tas" => TAS,
 					"trapa" => TRAPA,
 					"tst" => TST,
+					"vbr" => VBR,
 					"w" => Word,
 					"xor" => XOR,
 					"xtrct" => XTRCT,
