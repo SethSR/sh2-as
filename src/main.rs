@@ -562,7 +562,11 @@ impl Parser<'_,'_> {
 
 	fn reg(&self) -> Option<Reg> {
 		let txt = self.curr().to_string(self.file);
-		u8::from_str_radix(&txt[1..], 10).ok()
+		if txt.to_lowercase() == "pc" {
+			Some(15)
+		} else {
+			u8::from_str_radix(&txt[1..], 10).ok()
+		}
 	}
 
 	fn address(&mut self) -> Option<Arg> {
@@ -584,14 +588,14 @@ impl Parser<'_,'_> {
 				fn parse_num(data: &mut Parser, num: i64) -> Option<Arg> {
 					data.assert_token_with_offset(1, TokenType::Comma)?;
 					match data.peek(2).get_type() {
-						TokenType::Identifier if data.peek(2).to_string(&data.file).to_lowercase() == "gbr" => {
+						TokenType::GBR => {
 							let imm = assert_within_i8(data, num)?;
 							data.next(); // Comma
 							data.next(); // GBR
 							data.match_token(TokenType::CParen);
 							Some(Arg::DispGBR(imm))
 						}
-						TokenType::Identifier if data.peek(2).to_string(&data.file).to_lowercase() == "pc" => {
+						TokenType::PC => {
 							let imm = assert_within_i8(data, num)?;
 							data.next(); // Comma
 							data.next(); // PC
@@ -851,9 +855,7 @@ fn parser(
 					let imm = assert_within_u8(&mut data, num)?;
 					data.match_tokens(&[Comma,Address,OParen])?;
 					data.match_r0()?;
-					data.match_token(Comma)?;
-					data.match_ident("gbr")?;
-					data.match_token(CParen)?;
+					data.match_tokens(&[Comma,GBR,CParen])?;
 					Some(Ins::AND_Byte(imm))
 				}(),
 				_ => {
@@ -992,24 +994,22 @@ fn parser(
 					data.error("Size specifier Byte('b') or Word('w')");
 					None
 				} else {
-					data.match_reg_args().map(|(src,dst)| (sz,src,dst))
+					data.match_reg_args()
+						.map(|(src,dst)| add_to_section(&mut section_table, skey, Ins::EXTS(sz,src,dst)))
 				})
-				.map(|(sz,src,dst)| add_to_section(&mut section_table, skey, Ins::EXTS(sz,src,dst)))
 				.unwrap_or_default(),
 			EXTU => data.size()
 				.and_then(|sz| if sz == Size::Long {
 					data.error("Size specifier Byte('b') or Word('w')");
 					None
 				} else {
-					data.match_reg_args().map(|(src,dst)| (sz,src,dst))
+					data.match_reg_args()
+						.map(|(src,dst)| add_to_section(&mut section_table, skey, Ins::EXTU(sz,src,dst)))
 				})
-				.map(|(sz,src,dst)| add_to_section(&mut section_table, skey, Ins::EXTU(sz,src,dst)))
 				.unwrap_or_default(),
 			Identifier => {
 				let lbl = cur_tok.to_string(&file);
-
 				data.match_token_or_err(Colon, "End of label declaration (':')");
-
 				if label_table.contains_key(&lbl) {
 					eprintln!("ERROR: Label '{lbl}' already defined");
 					while data.peek(1).get_type() != Newline {
@@ -1046,11 +1046,11 @@ fn parser(
 			LDC => match data.next().get_type() {
 				Register => || -> Option<Ins> {
 					let reg = data.reg()?;
-					data.match_tokens(&[Comma,Identifier])?;
-					match data.curr().to_string(&file).to_lowercase().as_str() {
-						"gbr" => Some(Ins::LDC_GBR(reg)),
-						"sr" => Some(Ins::LDC_SR(reg)),
-						"vbr" => Some(Ins::LDC_VBR(reg)),
+					data.match_token(Comma)?;
+					match data.next().get_type() {
+						GBR => Some(Ins::LDC_GBR(reg)),
+						SR => Some(Ins::LDC_SR(reg)),
+						VBR => Some(Ins::LDC_VBR(reg)),
 						_ => {
 							data.error("Control Register (GBR,SR,VBR)");
 							None
@@ -1060,11 +1060,11 @@ fn parser(
 				Dot => || -> Option<Ins> {
 					data.match_tokens(&[Long,Address])?;
 					let reg = data.match_reg()?;
-					data.match_tokens(&[Plus,Identifier])?;
-					match data.curr().to_string(&file).to_lowercase().as_str() {
-						"gbr" => Some(Ins::LDC_GBR_Inc(reg)),
-						"sr" => Some(Ins::LDC_SR_Inc(reg)),
-						"vbr" => Some(Ins::LDC_VBR_Inc(reg)),
+					data.match_token(Plus)?;
+					match data.next().get_type() {
+						GBR => Some(Ins::LDC_GBR_Inc(reg)),
+						SR => Some(Ins::LDC_SR_Inc(reg)),
+						VBR => Some(Ins::LDC_VBR_Inc(reg)),
 						_ => {
 							data.error("Control Register (GBR,SR,VBR)");
 							None
@@ -1079,11 +1079,10 @@ fn parser(
 			LDS => match data.next().get_type() {
 					Register => data.reg()
 						.and_then(|reg| data.match_token(Comma).map(|_| reg))
-						.and_then(|reg| data.match_token(Identifier).map(|_| reg))
-						.and_then(|reg| match data.curr().to_string(&file).to_lowercase().as_str() {
-							"mach" => Some(Ins::LDS_MACH(reg)),
-							"macl" => Some(Ins::LDS_MACL(reg)),
-							"pr" => Some(Ins::LDS_PR(reg)),
+						.and_then(|reg| match data.next().get_type() {
+							MACH => Some(Ins::LDS_MACH(reg)),
+							MACL => Some(Ins::LDS_MACL(reg)),
+							PR => Some(Ins::LDS_PR(reg)),
 							_ => {
 								data.error("Special Register (MACH,MACL,PR)");
 								None
@@ -1092,11 +1091,11 @@ fn parser(
 					Dot => || -> Option<Ins> {
 						data.match_tokens(&[Long,Address])?;
 						let reg = data.match_reg()?;
-						data.match_tokens(&[Plus,Identifier])?;
-						match data.curr().to_string(&file).to_lowercase().as_str() {
-							"mach" => Some(Ins::LDS_MACH_Inc(reg)),
-							"macl" => Some(Ins::LDS_MACL_Inc(reg)),
-							"pr" => Some(Ins::LDS_PR_Inc(reg)),
+						data.match_token(Plus)?;
+						match data.next().get_type() {
+							MACH => Some(Ins::LDS_MACH_Inc(reg)),
+							MACL => Some(Ins::LDS_MACL_Inc(reg)),
+							PR => Some(Ins::LDS_PR_Inc(reg)),
 							_ => {
 								data.error("Special Register (MACH,MACL,PR)");
 								None
@@ -1177,9 +1176,7 @@ fn parser(
 			MOVA => data.match_tokens(&[Address, OParen])
 				.and_then(|_| data.match_number())
 				.and_then(|num| assert_within_i8(&mut data, num))
-				.and_then(|num| data.match_token(Comma).map(|_| num))
-				.and_then(|num| data.match_ident("pc").map(|_| num))
-				.and_then(|num| data.match_tokens(&[CParen, Comma]).map(|_| num))
+				.and_then(|num| data.match_tokens(&[Comma,PC,CParen,Comma]).map(|_| num))
 				.and_then(|num| data.match_r0().map(|_| num))
 				.map(|num| add_to_section(&mut section_table, skey, Ins::MOVA(num)))
 				.unwrap_or_default(),
@@ -1225,9 +1222,7 @@ fn parser(
 					let imm = assert_within_u8(&mut data, num)?;
 					data.match_tokens(&[Comma,Address,OParen])?;
 					data.match_r0()?;
-					data.match_token(Comma)?;
-					data.match_ident("gbr")?;
-					data.match_token(CParen)?;
+					data.match_tokens(&[Comma,GBR,CParen])?;
 					Some(Ins::OR_Byte(imm))
 				}(),
 				_ => {
@@ -1285,45 +1280,52 @@ fn parser(
 				.unwrap_or_default(),
 			SLEEP => add_to_section(&mut section_table, skey, Ins::SLEEP),
 			STC => || -> Option<()> {
-				match data.peek(1).get_type() {
-					Identifier => {
-						let id = data.match_token(Identifier)
-							.map(|tok| tok.to_string(&file).to_lowercase())?;
+				let ins = match data.next().get_type() {
+					GBR => {
 						data.match_token(Comma)?;
 						let reg = data.match_reg()?;
-						let ins = match id.as_str() {
-							"gbr" => Some(Ins::STC_GBR(reg)),
-							"sr" => Some(Ins::STC_SR(reg)),
-							"vbr" => Some(Ins::STC_VBR(reg)),
-							_ => {
-								data.error("Control Register (GBR,SR,VBR)");
-								None
-							}
-						}?;
-						Some(add_to_section(&mut section_table, skey, ins))
+						Ins::STC_GBR(reg)
+					}
+					SR => {
+						data.match_token(Comma)?;
+						let reg = data.match_reg()?;
+						Ins::STC_SR(reg)
+					}
+					VBR => {
+						data.match_token(Comma)?;
+						let reg = data.match_reg()?;
+						Ins::STC_VBR(reg)
 					}
 					Dot => {
 						data.match_tokens(&[Dot, Long])?;
-						let id = data.match_token(Identifier)
-							.map(|tok| tok.to_string(&file).to_lowercase())?;
-						data.match_tokens(&[Comma, Address, Dash])?;
-						let reg = data.match_reg()?;
-						let ins = match id.as_str() {
-							"gbr" => Some(Ins::STC_GBR_Dec(reg)),
-							"sr" => Some(Ins::STC_SR_Dec(reg)),
-							"vbr" => Some(Ins::STC_VBR_Dec(reg)),
+						match data.next().get_type() {
+							GBR => {
+								data.match_tokens(&[Comma,Address,Dash])?;
+								let reg = data.match_reg()?;
+								Ins::STC_GBR_Dec(reg)
+							}
+							SR => {
+								data.match_tokens(&[Comma,Address,Dash])?;
+								let reg = data.match_reg()?;
+								Ins::STC_SR_Dec(reg)
+							}
+							VBR => {
+								data.match_tokens(&[Comma,Address,Dash])?;
+								let reg = data.match_reg()?;
+								Ins::STC_VBR_Dec(reg)
+							}
 							_ => {
 								data.error("Control Register (GBR,SR,VBR)");
-								None
+								return None;
 							}
-						}?;
-						Some(add_to_section(&mut section_table, skey, ins))
+						}
 					}
 					_ => {
 						data.error("Valid STC instruction");
-						None
+						return None;
 					}
-				}
+				};
+				Some(add_to_section(&mut section_table, skey, ins))
 			}().unwrap_or_default(),
 			STS => || -> Option<()> {
 				match data.peek(1).get_type() {
