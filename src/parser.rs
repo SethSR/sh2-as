@@ -911,7 +911,7 @@ pub fn parser(
 				} else {
 					data.match_reg_args()
 				})
-				.map(|(src,dst)| output.add_to_section(skey, Ins::DMULS(src,dst)))
+				.map(|(src,dst)| output.add_to_section(skey, Ins::DMULU(src,dst)))
 				.unwrap_or_default(),
 			DT => data.match_reg()
 				.map(|reg| output.add_to_section(skey, Ins::DT(reg)))
@@ -1276,10 +1276,10 @@ pub fn parser(
 				.map(|(src,dst)| output.add_to_section(skey, Ins::SUB(src,dst)))
 				.unwrap_or_default(),
 			SUBC => data.match_reg_args()
-				.map(|(src,dst)| output.add_to_section(skey, Ins::SUB(src,dst)))
+				.map(|(src,dst)| output.add_to_section(skey, Ins::SUBC(src,dst)))
 				.unwrap_or_default(),
 			SUBV => data.match_reg_args()
-				.map(|(src,dst)| output.add_to_section(skey, Ins::SUB(src,dst)))
+				.map(|(src,dst)| output.add_to_section(skey, Ins::SUBV(src,dst)))
 				.unwrap_or_default(),
 			SWAP => || -> Option<()> {
 				data.match_token(Dot)?;
@@ -1346,7 +1346,7 @@ pub fn parser(
 				}
 			}.map(|ins| output.add_to_section(skey, ins)).unwrap_or_default(),
 			XTRCT => data.match_reg_args()
-				.map(|(src,dst)| output.add_to_section(skey, Ins::SUB(src,dst)))
+				.map(|(src,dst)| output.add_to_section(skey, Ins::XTRCT(src,dst)))
 				.unwrap_or_default(),
 			Unknown => {
 				let txt = cur_tok.to_string(&file);
