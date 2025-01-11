@@ -1,5 +1,6 @@
 
 use std::collections::HashMap;
+use std::rc::Rc;
 
 use miette::IntoDiagnostic;
 
@@ -32,13 +33,12 @@ fn main() -> miette::Result<()> {
 	let tokens = lexer(&file);
 
 	for token in &tokens {
-		let out = token.to_debug_string(&file);
 		if token.get_type() == TokenType::Unknown || !is_silent {
-			println!("{out}");
+			println!("{token:?}");
 		}
 	}
 
-	let mut data = match parser(&file, &tokens) {
+	let mut data = match parser(&tokens) {
 		Ok(tables) => tables,
 		Err(errors) => {
 			for error in errors {

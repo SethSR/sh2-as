@@ -1,4 +1,5 @@
 
+use std::rc::Rc;
 
 use crate::lexer::{Token,TokenType};
 
@@ -11,9 +12,9 @@ pub(crate) enum Arg {
 	DispReg(i8,Reg),
 	DispPC(i8),
 	DispGBR(i8),
-	DispLabel(String,Reg),
+	DispLabel(Rc<str>,Reg),
 	IndReg(Reg),
-	Label(String),
+	Label(Rc<str>),
 	PostInc(Reg),
 	PreDec(Reg),
 }
@@ -78,21 +79,21 @@ pub(crate) enum Ins {
 	/// | label             | 10011011dddddddd | if T = 0,          | 3/1     | -      |
 	/// |                   |                  | dispx2+PC -> PC;   |         |        |
 	/// |                   |                  | if T = 1, nop      |         |        |
-	BF(String),
+	BF(Rc<str>),
 	/// | label             | 10001111dddddddd | if T = 0,          | 2/1     | -      |
 	/// |                   |                  | dispx2+PC -> PC;   |         |        |
 	/// |                   |                  | if T = 1, nop      |         |        |
-	BFS(String),
+	BFS(Rc<str>),
 	/// | label             | 1010dddddddddddd | Delayed branch,    | 2       | -      |
 	/// |                   |                  | dispx2+PC -> PC    |         |        |
-	BRA(String),
+	BRA(Rc<str>),
 	/// | Rm                | 0000mmmm00100011 | Delayed branch,    | 2       | -      |
 	/// |                   |                  | Rm+PC -> PC        |         |        |
 	BRAF(Reg),
 	/// | label             | 1011dddddddddddd | Delayed branch,    | 2       | -      |
 	/// |                   |                  | PC -> PR,          |         |        |
 	/// |                   |                  | dispx2+PC -> PC    |         |        |
-	BSR(String),
+	BSR(Rc<str>),
 	/// | Rm                | 0000mmmm00000011 | Delayed branch,    | 2       | -      |
 	/// |                   |                  | PC -> PR,          |         |        |
 	/// |                   |                  | Rm+PC -> PC        |         |        |
@@ -100,11 +101,11 @@ pub(crate) enum Ins {
 	/// | label             | 10001001dddddddd | if T = 1,          | 3/1     | -      |
 	/// |                   |                  | dispx2+PC -> PC;   |         |        |
 	/// |                   |                  | if T = 0, nop      |         |        |
-	BT(String),
+	BT(Rc<str>),
 	/// | label             | 10001101dddddddd | if T = 1,          | 2/1     | -      |
 	/// |                   |                  | dispx2+PC -> PC;   |         |        |
 	/// |                   |                  | if T = 0, nop      |         |        |
-	BTS(String),
+	BTS(Rc<str>),
 	/// |                   | 0000000000101000 | 0 -> MACH, MACL    | 1       | -      |
 	CLRMAC,
 	/// |                   | 0000000000001000 | 0 -> T             | 1       | 0      |
@@ -381,8 +382,8 @@ pub(crate) enum Ins {
 
 	/*** Directives ***/
 	Const_Imm(Size,i64),
-	Const_Label(Size,String),
-	Label(String),
+	Const_Label(Size,Rc<str>),
+	Label(Rc<str>),
 }
 
 #[derive(Clone)]
@@ -442,14 +443,13 @@ impl std::fmt::Debug for Output {
 	}
 }
 
-struct Parser<'input, 'tok> {
-	file: &'input str,
+struct Parser<'tok> {
 	index: usize,
 	tokens: &'tok [Token],
 	errors: Vec<String>,
 }
 
-impl Parser<'_,'_> {
+impl Parser<'_> {
 	fn is_done(&self) -> bool {
 		self.index >= self.tokens.len()
 	}
@@ -463,9 +463,8 @@ impl Parser<'_,'_> {
 
 	fn expected(&mut self, msg: &str) {
 		let tok = self.curr();
-		let txt = tok.to_string(self.file);
 		let (line,pos) = tok.pos();
-		self.errors.push(format!("ERROR: Expected {msg}, Found '{txt}' @ ({line}:{pos})"));
+		self.errors.push(format!("ERROR: Expected {msg}, Found '{tok}' @ ({line}:{pos})"));
 	}
 
 	fn error(&mut self, msg: &str) {
@@ -482,7 +481,7 @@ impl Parser<'_,'_> {
 	}
 
 	fn number_pos(&self) -> Option<i64> {
-		let txt = self.curr().to_string(self.file);
+		let txt = self.curr().to_string();
 		match txt.chars().next() {
 			Some('%') => {
 				i64::from_str_radix(&txt[1..].replace('_',""), 2).ok()
@@ -508,7 +507,7 @@ impl Parser<'_,'_> {
 	}
 
 	fn reg(&self) -> Option<Reg> {
-		let txt = self.curr().to_string(self.file);
+		let txt = self.curr().to_string();
 		if txt.to_lowercase() == "pc" {
 			Some(15)
 		} else {
@@ -633,6 +632,11 @@ impl Parser<'_,'_> {
 		Some(self.next())
 	}
 
+	fn match_ident_or_err(&mut self, msg: &str) -> Option<Rc<str>> {
+		self.assert_token_with_offset_or_err(1, TokenType::Identifier, msg)?;
+		self.next().get_id()
+	}
+
 	fn match_token(&mut self, tt: TokenType) -> Option<&Token> {
 		self.match_token_or_err(tt, &tt.to_string())
 	}
@@ -740,14 +744,11 @@ impl Parser<'_,'_> {
 ///
 /// Given a sequence of valid tokens, the parser should return either a section and label table for
 /// the analysis stage, or a sequence of all errors encountered while parsing the input.
-pub fn parser(
-	file: &str,
-	tokens: &[Token],
-) -> Result<Output, Vec<String>> {
+pub fn parser(tokens: &[Token]) -> Result<Output, Vec<String>> {
 	let mut skey = 0;
 	let mut output = Output::default();
 
-	let mut data = Parser { file, tokens, index: 0, errors: Vec::new() };
+	let mut data = Parser { tokens, index: 0, errors: Vec::new() };
 
 	while !data.is_done() {
 		use TokenType::*;
@@ -799,45 +800,39 @@ pub fn parser(
 				}
 			}.map(|ins| output.add_to_section(skey, ins)).unwrap_or_default(),
 			BF => match data.next().get_type() {
-				Identifier => {
-					let lbl = data.curr().to_string(&file);
-					Some(Ins::BF(lbl))
-				}
+				Identifier => Some(Ins::BF(
+					data.curr().get_id()
+						.expect("identifier without referent"),
+				)),
 				Slash => || -> Option<Ins> {
 					data.match_token(Delay)?;
-					let lbl_tok = data.match_token_or_err(Identifier, "Label")?;
-					let lbl = lbl_tok.to_string(&file);
-					Some(Ins::BFS(lbl))
+					Some(Ins::BFS(data.match_ident_or_err("Label")?))
 				}(),
 				_ => {
 					data.error("Label");
 					None
 				}
 			}.map(|ins| output.add_to_section(skey, ins)).unwrap_or_default(),
-			BRA => data.match_token_or_err(Identifier, "Label")
-				.map(|lbl_tok| lbl_tok.to_string(&file))
+			BRA => data.match_ident_or_err("Label")
 				.map(|lbl| output.add_to_section(skey, Ins::BRA(lbl)))
 				.unwrap_or_default(),
 			BRAF => data.match_reg()
 				.map(|reg| output.add_to_section(skey, Ins::BRAF(reg)))
 				.unwrap_or_default(),
-			BSR => data.match_token_or_err(Identifier, "Label")
-				.map(|lbl_tok| lbl_tok.to_string(&file))
+			BSR => data.match_ident_or_err("Label")
 				.map(|lbl| output.add_to_section(skey, Ins::BSR(lbl)))
 				.unwrap_or_default(),
 			BSRF => data.match_reg()
 				.map(|reg| output.add_to_section(skey, Ins::BSRF(reg)))
 				.unwrap_or_default(),
 			BT => match data.next().get_type() {
-				Identifier => {
-					let lbl = data.curr().to_string(&file);
-					Some(Ins::BT(lbl))
-				}
+				Identifier => Some(Ins::BT(
+					data.curr().get_id()
+						.expect("identifier without referent"),
+				)),
 				Slash => || -> Option<Ins> {
 					data.match_token(Delay)?;
-					let lbl_tok = data.match_token_or_err(Identifier, "Label")?;
-					let lbl = lbl_tok.to_string(&file);
-					Some(Ins::BTS(lbl))
+					Some(Ins::BTS(data.match_ident_or_err("Label")?))
 				}(),
 				_ => {
 					data.error("Label");
@@ -886,10 +881,11 @@ pub fn parser(
 							Size::Long => data.assert_within_i32(num).map(|n| n as i64),
 						})
 						.map(|imm| Ins::Const_Imm(sz, imm)),
-					Identifier => {
-						let txt = data.curr().to_string(&file);
-						Some(Ins::Const_Label(sz, txt))
-					}
+					Identifier => Some(Ins::Const_Label(
+						sz,
+						data.curr().get_id()
+							.expect("identifier without referent")
+					)),
 					_ => {
 						data.error("integer literal or label");
 						None
@@ -943,7 +939,8 @@ pub fn parser(
 				})
 				.unwrap_or_default(),
 			Identifier => {
-				let lbl = cur_tok.to_string(&file);
+				let lbl = cur_tok.get_id()
+					.expect("identifier without referent");
 				if data.match_token_or_err(Colon, "End of label declaration (':')").is_none() {
 					continue;
 				}
@@ -1357,14 +1354,12 @@ pub fn parser(
 				.map(|(src,dst)| output.add_to_section(skey, Ins::XTRCT(src,dst)))
 				.unwrap_or_default(),
 			Unknown => {
-				let txt = cur_tok.to_string(&file);
 				let (line,pos) = cur_tok.pos();
-				eprintln!("unknown item '{txt}' @ ({line}:{pos})");
+				eprintln!("unknown item '{cur_tok}' @ [{line}:{pos}]");
 			}
 			_ => {
-				let txt = cur_tok.to_string(&file);
 				let (line,pos) = cur_tok.pos();
-				eprintln!("unexpected {txt} @ ({line}:{pos})");
+				eprintln!("unexpected {cur_tok} @ [{line}:{pos}]");
 			}
 		}
 		data.index += 1;

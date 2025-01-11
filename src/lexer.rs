@@ -1,10 +1,10 @@
 
 use std::fmt;
+use std::rc::Rc;
 
 pub(crate) struct Token {
 	tt: TokenType,
-	index: u16,
-	size: u8,
+	ex: Option<Rc<str>>,
 	line: u16,
 	pos: u16,
 }
@@ -12,36 +12,41 @@ pub(crate) struct Token {
 impl Token {
 	fn new(
 		tt: TokenType,
-		index: usize,
-		size: usize,
 		line: usize,
 		pos: usize,
 	) -> Self {
 		Self {
 			tt,
-			index: index as u16,
-			size: size as u8,
+			ex: None,
 			line: line as u16 + 1,
 			pos: pos as u16,
 		}
 	}
 
+	fn ident(tt: TokenType, s: Rc<str>, line: usize, pos: usize) -> Self {
+		let mut this = Self::new(tt, line, pos);
+		this.ex = Some(s);
+		this
+	}
+
+	fn num(s: Rc<str>, line: usize, pos: usize) -> Self {
+		let mut this = Self::new(TokenType::Number, line, pos);
+		this.ex = Some(s);
+		this
+	}
+
+	fn comment(s: Rc<str>, line: usize, pos: usize) -> Self {
+		let mut this = Self::new(TokenType::Comment, line, pos);
+		this.ex = Some(s);
+		this
+	}
+
+	pub(crate) fn get_id(&self) -> Option<Rc<str>> {
+		self.ex.clone()
+	}
+
 	pub(crate) fn get_type(&self) -> TokenType {
 		self.tt
-	}
-
-	pub(crate) fn to_string(&self, file: &str) -> String {
-		file[self.index as usize..][..self.size as usize].to_owned()
-	}
-
-	pub(crate) fn to_debug_string(&self, file: &str) -> String {
-		let Token { tt, index, size, line, pos } = self;
-		if *tt == TokenType::Newline {
-			format!("{tt:?} [{line}:{pos}]")
-		} else {
-			let txt = &file[*index as usize..][..*size as usize];
-			format!("{tt:?}({txt}) [{line}:{pos}]")
-		}
 	}
 
 	pub(crate) fn pos(&self) -> (u16,u16) {
@@ -51,18 +56,26 @@ impl Token {
 
 impl fmt::Display for Token {
 	fn fmt(&self, fmt: &mut fmt::Formatter) -> fmt::Result {
-		let Token { tt, ..} = self;
-		write!(fmt, "{tt:?}")
+		if let Some(txt) = &self.ex {
+			write!(fmt, "{txt}")
+		} else {
+			write!(fmt, "{}", self.tt)
+		}
 	}
 }
 
 impl fmt::Debug for Token {
 	fn fmt(&self, fmt: &mut fmt::Formatter) -> fmt::Result {
-		let Token { tt, line, pos, ..} = self;
-		write!(fmt, "{tt:?} [{line}:{pos}]")
+		let Token { tt, ex, line, pos } = self;
+		if let Some(txt) = ex {
+			write!(fmt, "{tt:?}({txt}) [{line}:{pos}]")
+		} else {
+			write!(fmt, "{tt:?} [{line}:{pos}]")
+		}
 	}
 }
 
+#[repr(u8)]
 #[derive(Debug,Clone,Copy,PartialEq,Eq)]
 pub(crate) enum TokenType {
 	ADD,
@@ -173,28 +186,112 @@ pub(crate) enum TokenType {
 
 impl fmt::Display for TokenType {
 	fn fmt(&self, fmt: &mut fmt::Formatter) -> fmt::Result {
-		use TokenType::*;
+		use TokenType as TT;
 		let s = match self {
-			Address => "@",
-			Byte => "b",
-			CParen => ")",
-			Colon => ":",
-			Comma => ",",
-			Const => "dc",
-			Dash => "-",
-			Delay => "S",
-			Dot => ".",
-			Equal => "=",
-			Immediate => "#",
-			Long => "l",
-			Newline => "\\n",
-			Number => "Number (bin/dec/hex)",
-			OParen => "(",
-			Plus => "+",
-			Register => "Register (R0-15,PC)",
-			Slash => "/",
-			Word => "w",
-			_ => &format!("{self:?}"),
+			TT::ADD => "ADD",
+			TT::ADDC => "ADDC",
+			TT::ADDV => "ADDV",
+			TT::AND => "AND",
+			TT::Address => "@",
+			TT::BF => "BF",
+			TT::BRA => "BRA",
+			TT::BRAF => "BRAF",
+			TT::BSR => "BSR",
+			TT::BSRF => "BSRF",
+			TT::BT => "BT",
+			TT::Byte => "b",
+			TT::CLRMAC => "CLRMAC",
+			TT::CLRT => "CLRT",
+			TT::CMP => "CMP",
+			TT::CParen => ")",
+			TT::Colon => ":",
+			TT::Comma => ",",
+			TT::Comment => "Comment",
+			TT::Const => "dc",
+			TT::DIV0S => "DIV0S",
+			TT::DIV0U => "DIV0U",
+			TT::DIV1 => "DIV1",
+			TT::DMULS => "DMULS",
+			TT::DMULU => "DMULU",
+			TT::DT => "DT",
+			TT::Dash => "-",
+			TT::Delay => "S",
+			TT::Dot => ".",
+			TT::EQ => "EQ",
+			TT::EXTS => "EXTS",
+			TT::EXTU => "EXTU",
+			TT::Equal => "=",
+			TT::GBR => "GBR",
+			TT::GE => "GE",
+			TT::GT => "GT",
+			TT::HI => "HI",
+			TT::HS => "HS",
+			TT::Identifier => "Identifier",
+			TT::Immediate => "#",
+			TT::JMP => "JMP",
+			TT::JSR => "JSR",
+			TT::LDC => "LDC",
+			TT::LDS => "LDS",
+			TT::Long => "l",
+			TT::MAC => "MAC",
+			TT::MACH => "MACH",
+			TT::MACL => "MACL",
+			TT::MOV => "MOV",
+			TT::MOVA => "MOVA",
+			TT::MOVT => "MOVT",
+			TT::MUL => "MUL",
+			TT::MULS => "MULS",
+			TT::MULU => "MULU",
+			TT::NEG => "NEG",
+			TT::NEGC => "NEGC",
+			TT::NOP => "NOP",
+			TT::NOT => "NOT",
+			TT::Newline => "\\n",
+			TT::Number => "Number (bin/dec/hex)",
+			TT::OParen => "(",
+			TT::OR => "OR",
+			TT::Org => "Org",
+			TT::PC => "PC",
+			TT::PL => "PL",
+			TT::PR => "PR",
+			TT::PZ => "PZ",
+			TT::Plus => "+",
+			TT::ROTCL => "ROTCL",
+			TT::ROTCR => "ROTCR",
+			TT::ROTL => "ROTL",
+			TT::ROTR => "ROTR",
+			TT::RTE => "RTE",
+			TT::RTS => "RTS",
+			TT::Register => "Register (R0-15,PC)",
+			TT::SETT => "SETT",
+			TT::SHAL => "SHAL",
+			TT::SHAR => "SHAR",
+			TT::SHLL => "SHLL",
+			TT::SHLL16 => "SHLL16",
+			TT::SHLL2 => "SHLL2",
+			TT::SHLL8 => "SHLL8",
+			TT::SHLR => "SHLR",
+			TT::SHLR16 => "SHLR16",
+			TT::SHLR2 => "SHLR2",
+			TT::SHLR8 => "SHLR8",
+			TT::SLEEP => "SLEEP",
+			TT::SR => "SR",
+			TT::STC => "STC",
+			TT::STR => "STR",
+			TT::STS => "STS",
+			TT::SUB => "SUB",
+			TT::SUBC => "SUBC",
+			TT::SUBV => "SUBV",
+			TT::SWAP => "SWAP",
+			TT::Slash => "/",
+			TT::TAS => "TAS",
+			TT::TRAPA => "TRAPA",
+			TT::TST => "TST",
+			TT::Unknown => "Unknown",
+			TT::VBR => "VBR",
+			TT::Word => "w",
+			TT::XOR => "XOR",
+			TT::XTRCT => "XTRCT",
 		};
 		write!(fmt, "'{s}'")
 	}
@@ -208,12 +305,13 @@ fn next(
 	chars.next();
 }
 
-fn tokenize<I: Iterator<Item=(usize,char)>>(
+fn tokenize<'a, I: Iterator<Item=(usize,char)>>(
+	input: &'a str,
 	cur_idx: usize,
 	chars: &mut std::iter::Peekable<I>,
 	char_idx: &mut usize,
 	pred: fn(char) -> bool,
-) -> usize {
+) -> &'a str {
 	let mut index = cur_idx + 1;
 	while let Some((idx,ch)) = chars.peek() {
 		index = *idx;
@@ -222,7 +320,7 @@ fn tokenize<I: Iterator<Item=(usize,char)>>(
 		}
 		next(char_idx, chars);
 	}
-	index - cur_idx
+	&input[cur_idx..][..index - cur_idx]
 }
 
 fn next_line<I: Iterator<Item=(usize,char)>>(
@@ -250,98 +348,108 @@ pub(crate) fn lexer(input: &str) -> Vec<Token> {
 	let mut char_idx = 0;
 	let mut chars = input.char_indices().peekable();
 
+	let mut id_storage = std::collections::HashMap::<&str, Rc<str>>::default();
+
 	while let Some(&(cur_idx, cur_char)) = chars.peek() {
 		match cur_char {
 			' ' | '\t' => next(&mut char_idx, &mut chars),
 			'\n' => {
 				chars.next();
-				results.push(Token::new(Newline, cur_idx, 1, line_idx, char_idx));
+				results.push(Token::new(Newline, line_idx, char_idx));
 				line_idx += 1;
 				char_idx = 0;
 			}
 			',' => {
 				next(&mut char_idx, &mut chars);
-				results.push(Token::new(Comma, cur_idx, 1, line_idx, char_idx));
+				results.push(Token::new(Comma, line_idx, char_idx));
 			}
 			'+' => {
 				next(&mut char_idx, &mut chars);
-				results.push(Token::new(Plus, cur_idx, 1, line_idx, char_idx));
+				results.push(Token::new(Plus, line_idx, char_idx));
 			}
 			'-' => {
 				next(&mut char_idx, &mut chars);
-				results.push(Token::new(Dash, cur_idx, 1, line_idx, char_idx));
+				results.push(Token::new(Dash, line_idx, char_idx));
 			}
 			'/' => {
 				next(&mut char_idx, &mut chars);
-				results.push(Token::new(Slash, cur_idx, 1, line_idx, char_idx));
+				results.push(Token::new(Slash, line_idx, char_idx));
 			}
 			'@' => {
 				next(&mut char_idx, &mut chars);
-				results.push(Token::new(Address, cur_idx, 1, line_idx, char_idx));
+				results.push(Token::new(Address, line_idx, char_idx));
 			}
 			':' => {
 				next(&mut char_idx, &mut chars);
-				results.push(Token::new(Colon, cur_idx, 1, line_idx, char_idx));
+				results.push(Token::new(Colon, line_idx, char_idx));
 			}
 			'.' => {
 				next(&mut char_idx, &mut chars);
-				results.push(Token::new(Dot, cur_idx, 1, line_idx, char_idx));
+				results.push(Token::new(Dot, line_idx, char_idx));
 			}
 			'#' => {
 				next(&mut char_idx, &mut chars);
-				results.push(Token::new(Immediate, cur_idx, 1, line_idx, char_idx));
+				results.push(Token::new(Immediate, line_idx, char_idx));
 			}
 			'0'..='9' => {
 				next(&mut char_idx, &mut chars);
-				let size = tokenize(
+				let token = tokenize(input,
 					cur_idx, &mut chars, &mut char_idx,
 					|ch| ('0'..='9').contains(&ch) || '_' == ch);
-				results.push(Token::new(Number, cur_idx, size, line_idx, char_idx - size + 1));
+				let s = id_storage.entry(token)
+					.or_insert_with(|| token.into());
+				results.push(Token::num(s.clone(), line_idx, char_idx - token.len() + 1));
 			}
 			'=' => {
 				next(&mut char_idx, &mut chars);
-				results.push(Token::new(Equal, cur_idx, 1, line_idx, char_idx));
+				results.push(Token::new(Equal, line_idx, char_idx));
 			}
 			'(' => {
 				next(&mut char_idx, &mut chars);
-				results.push(Token::new(OParen,cur_idx,1, line_idx, char_idx));
+				results.push(Token::new(OParen, line_idx, char_idx));
 			}
 			')' => {
 				next(&mut char_idx, &mut chars);
-				results.push(Token::new(CParen,cur_idx,1, line_idx, char_idx));
+				results.push(Token::new(CParen, line_idx, char_idx));
 			}
 			'$' => {
 				next(&mut char_idx, &mut chars);
-				let size = tokenize(
+				let token = tokenize(input,
 					cur_idx, &mut chars, &mut char_idx,
 					|ch| ('0'..='9').contains(&ch)
 						|| ('a'..='f').contains(&ch)
 						|| ('A'..='F').contains(&ch)
 						|| '_' == ch
 				);
-				results.push(Token::new(Number, cur_idx, size, line_idx, char_idx - size + 1));
+				let s = id_storage.entry(token)
+					.or_insert_with(|| token.into());
+				results.push(Token::num(s.clone(), line_idx, char_idx - token.len() + 1));
 			}
 			'%' => {
 				next(&mut char_idx, &mut chars);
-				let size = tokenize(
+				let token = tokenize(input,
 					cur_idx, &mut chars, &mut char_idx,
 					|ch| ['0','1'].contains(&ch) || '_' == ch);
-				results.push(Token::new(Number, cur_idx, size, line_idx, char_idx - size + 1));
+				let s = id_storage.entry(token)
+					.or_insert_with(|| token.into());
+				results.push(Token::num(s.clone(), line_idx, char_idx - token.len() + 1));
 			}
 			';' => {
 				let char_idx_s = char_idx;
 				let size = next_line(cur_idx, &mut chars, &mut char_idx);
-				results.push(Token::new(Comment, cur_idx, size, line_idx, char_idx_s+1));
+				let token = &input[cur_idx..][..size];
+				// NOTE - srenshaw - We just assume every comment is unique.
+				results.push(Token::comment(token.into(), line_idx, char_idx_s+1));
 			}
 
 			c if c.is_alphabetic() => {
-				let size = tokenize(
+				let token = tokenize(input,
 					cur_idx, &mut chars, &mut char_idx,
 					|ch| ('a'..='z').contains(&ch)
 						|| ('A'..='Z').contains(&ch)
 						|| ('0'..='9').contains(&ch)
 						|| '_' == ch);
-				let tt = match input[cur_idx..][..size].to_lowercase().as_str() {
+				let tt = match token.to_lowercase().as_str() {
 					"add" => ADD,
 					"addc" => ADDC,
 					"addv" => ADDV,
@@ -447,17 +555,21 @@ pub(crate) fn lexer(input: &str) -> Vec<Token> {
 					"xtrct" => XTRCT,
 					_ => Identifier,
 				};
-				results.push(Token::new(tt,cur_idx,size, line_idx, char_idx - size + 1));
+				let s = id_storage.entry(token)
+					.or_insert_with(|| token.into());
+				results.push(Token::ident(tt, s.clone(), line_idx, char_idx - token.len() + 1));
 			}
 			_ => {
 				let size = next_line(cur_idx, &mut chars, &mut char_idx);
 				char_idx += size;
-				results.push(Token::new(Unknown, cur_idx, size, line_idx, char_idx));
+				let token = &input[cur_idx..][..size];
+				let s = id_storage.entry(token)
+					.or_insert_with(|| token.into());
+				results.push(Token::ident(Unknown, s.clone(), line_idx, char_idx));
 			}
 		}
 	}
 
 	results
 }
-
 
