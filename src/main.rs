@@ -1,4 +1,6 @@
 
+use std::collections::HashMap;
+
 use miette::IntoDiagnostic;
 
 mod lexer;
@@ -8,6 +10,9 @@ use lexer::TokenType;
 mod parser;
 use parser::parser;
 use parser::{Arg,Ins,Reg,Output,Size,State};
+
+type SectionMap = HashMap<u64, Vec<State>>;
+type LabelMap = HashMap<Rc<str>, Option<u32>>;
 
 fn main() -> miette::Result<()> {
 	let mut args = std::env::args();
@@ -63,10 +68,7 @@ fn main() -> miette::Result<()> {
 	// TODO - srenshaw - This is just for debugging purposes. This is not the "real" output!
 	for (_, section) in data.sections {
 		let output = section.iter()
-			.map(|state| match state {
-				State::Complete(word) => *word,
-				State::Incomplete(_) => 0xDEAD,
-			})
+			.map(|state| state.completed_or(0xDEAD))
 			.flat_map(|word| [(word >> 8) as u8, word as u8])
 			.collect::<Vec<u8>>();
 		std::fs::write(&target, output)
@@ -125,7 +127,7 @@ fn ni_type(base: u16, rn: Reg, imm: i8) -> State {
 }
 
 fn to_d8(
-	data: &std::collections::HashMap<String, Option<u32>>,
+	data: &LabelMap,
 	label: &str,
 	cur_addr: u32,
 	base: u16,
@@ -145,7 +147,7 @@ fn to_d8(
 }
 
 fn to_d12(
-	data: &std::collections::HashMap<String, Option<u32>>,
+	data: &LabelMap,
 	label: &str,
 	cur_addr: u32,
 	base: u16,

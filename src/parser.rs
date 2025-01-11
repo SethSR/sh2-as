@@ -1,5 +1,4 @@
 
-use std::collections::HashMap;
 
 use crate::lexer::{Token,TokenType};
 
@@ -394,6 +393,15 @@ pub(crate) enum State {
 	Incomplete(Ins),
 }
 
+impl State {
+	pub fn completed_or(&self, default: u16) -> u16 {
+		match self {
+			Self::Complete(inst) => *inst,
+			Self::Incomplete(_) => default,
+		}
+	}
+}
+
 impl std::fmt::Debug for State {
 	fn fmt(&self, fmt: &mut std::fmt::Formatter) -> std::fmt::Result {
 		match self {
@@ -405,8 +413,8 @@ impl std::fmt::Debug for State {
 
 #[derive(Default)]
 pub(crate) struct Output {
-	pub(crate) sections: HashMap<u64, Vec<State>>,
-	pub(crate) labels: HashMap<String, Option<u32>>,
+	pub(crate) sections: crate::SectionMap,
+	pub(crate) labels: crate::LabelMap,
 }
 
 impl Output {
