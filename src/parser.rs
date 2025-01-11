@@ -425,7 +425,7 @@ impl std::fmt::Debug for Output {
 			}
 		}
 
-		writeln!(fmt, "Labels:");
+		writeln!(fmt, "Labels:")?;
 		for (label,_) in &self.labels {
 			writeln!(fmt, "\t{label}")?;
 		}
