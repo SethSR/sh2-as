@@ -755,6 +755,28 @@ pub fn parser(tokens: &[Token]) -> Result<Output, Vec<String>> {
 		use TokenType as TT;
 		let cur_tok = data.curr();
 		match cur_tok.get_type() {
+			TT::IdComment => {} // skip comments
+			TT::IdLabel => {
+				let lbl = cur_tok.get_id()
+					.expect("identifier without referent");
+				if data.match_token_or_err(TT::SymColon, "End of label declaration (':')").is_none() {
+					continue;
+				}
+				if output.labels.contains_key(&lbl) {
+					eprintln!("ERROR: Label '{lbl}' already defined");
+					while data.peek(1).get_type() != TT::SymNewline {
+						data.next();
+					}
+					data.next();
+					continue;
+				}
+				output.labels.insert(lbl.clone(), None);
+				output.add_to_section(skey, Ins::Label(lbl));
+			}
+			TT::IdUnknown => {
+				let (line,pos) = cur_tok.pos();
+				eprintln!("unknown item '{cur_tok}' @ [{line}:{pos}]");
+			}
 			TT::InsADD => match data.next().get_type() {
 				TT::SymDash | TT::IdNumber => data.number()
 					.and_then(|num| data.assert_within_i8(num))
@@ -872,27 +894,6 @@ pub fn parser(tokens: &[Token]) -> Result<Output, Vec<String>> {
 					output.add_to_section(skey, ins);
 				}
 			}
-			TT::IdComment => {} // skip comments
-			TT::SymConst => data.size()
-				.and_then(|sz| match data.next().get_type() {
-					TT::IdNumber => data.number()
-						.and_then(|num| match sz {
-							Size::Byte => data.assert_within_i8(num).map(|n| n as i64),
-							Size::Word => data.assert_within_i16(num).map(|n| n as i64),
-							Size::Long => data.assert_within_i32(num).map(|n| n as i64),
-						})
-						.map(|imm| Ins::Const_Imm(sz, imm)),
-					TT::IdLabel => Some(Ins::Const_Label(
-						sz,
-						data.curr().get_id()
-							.expect("identifier without referent")
-					)),
-					_ => {
-						data.error("integer literal or label");
-						None
-					}
-				})
-				.map(|ins| output.add_to_section(skey, ins)).unwrap_or_default(),
 			TT::InsDIV0S => data.match_reg_args()
 				.map(|(src,dst)| output.add_to_section(skey, Ins::DIV0S(src,dst)))
 				.unwrap_or_default(),
@@ -939,23 +940,6 @@ pub fn parser(tokens: &[Token]) -> Result<Output, Vec<String>> {
 						.map(|(src,dst)| output.add_to_section(skey, Ins::EXTU(sz,src,dst)))
 				})
 				.unwrap_or_default(),
-			TT::IdLabel => {
-				let lbl = cur_tok.get_id()
-					.expect("identifier without referent");
-				if data.match_token_or_err(TT::SymColon, "End of label declaration (':')").is_none() {
-					continue;
-				}
-				if output.labels.contains_key(&lbl) {
-					eprintln!("ERROR: Label '{lbl}' already defined");
-					while data.peek(1).get_type() != TT::SymNewline {
-						data.next();
-					}
-					data.next();
-					continue;
-				}
-				output.labels.insert(lbl.clone(), None);
-				output.add_to_section(skey, Ins::Label(lbl));
-			}
 			TT::InsJMP => {
 				// TODO - srenshaw - Add label handling for JMP
 				let mut func = || -> Option<Ins> {
@@ -1136,7 +1120,6 @@ pub fn parser(tokens: &[Token]) -> Result<Output, Vec<String>> {
 			TT::InsNEGC => data.match_reg_args()
 				.map(|(src,dst)| output.add_to_section(skey, Ins::NEGC(src,dst)))
 				.unwrap_or_default(),
-			TT::SymNewline => {} // skip newlines
 			TT::InsNOP => output.add_to_section(skey, Ins::NOP),
 			TT::InsNOT => data.match_reg_args()
 				.map(|(src,dst)| output.add_to_section(skey, Ins::NOT(src,dst)))
@@ -1165,9 +1148,6 @@ pub fn parser(tokens: &[Token]) -> Result<Output, Vec<String>> {
 					None
 				}
 			}.map(|ins| output.add_to_section(skey, ins)).unwrap_or_default(),
-			TT::SymOrg => data.match_number_pos()
-				.map(|addr| skey = addr as u64)
-				.unwrap_or_default(),
 			TT::InsROTCL => data.match_reg()
 				.map(|reg| output.add_to_section(skey, Ins::ROTCL(reg)))
 				.unwrap_or_default(),
@@ -1354,10 +1334,30 @@ pub fn parser(tokens: &[Token]) -> Result<Output, Vec<String>> {
 			TT::InsXTRCT => data.match_reg_args()
 				.map(|(src,dst)| output.add_to_section(skey, Ins::XTRCT(src,dst)))
 				.unwrap_or_default(),
-			TT::IdUnknown => {
-				let (line,pos) = cur_tok.pos();
-				eprintln!("unknown item '{cur_tok}' @ [{line}:{pos}]");
-			}
+			TT::SymConst => data.size()
+				.and_then(|sz| match data.next().get_type() {
+					TT::IdNumber => data.number()
+						.and_then(|num| match sz {
+							Size::Byte => data.assert_within_i8(num).map(|n| n as i64),
+							Size::Word => data.assert_within_i16(num).map(|n| n as i64),
+							Size::Long => data.assert_within_i32(num).map(|n| n as i64),
+						})
+						.map(|imm| Ins::Const_Imm(sz, imm)),
+					TT::IdLabel => Some(Ins::Const_Label(
+						sz,
+						data.curr().get_id()
+							.expect("identifier without referent")
+					)),
+					_ => {
+						data.error("integer literal or label");
+						None
+					}
+				})
+				.map(|ins| output.add_to_section(skey, ins)).unwrap_or_default(),
+			TT::SymNewline => {} // skip newlines
+			TT::SymOrg => data.match_number_pos()
+				.map(|addr| skey = addr as u64)
+				.unwrap_or_default(),
 			_ => {
 				let (line,pos) = cur_tok.pos();
 				eprintln!("unexpected {cur_tok} @ [{line}:{pos}]");
