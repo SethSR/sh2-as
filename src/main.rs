@@ -33,7 +33,7 @@ fn main() -> miette::Result<()> {
 	let tokens = lexer(&file);
 
 	for token in &tokens {
-		if token.get_type() == TokenType::Unknown || !is_silent {
+		if token.get_type() == TokenType::IdUnknown || !is_silent {
 			println!("{token:?}");
 		}
 	}

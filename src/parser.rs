@@ -468,7 +468,7 @@ impl Parser<'_> {
 
 	fn error(&mut self, msg: &str) {
 		self.expected(msg);
-		while self.peek(1).get_type() != TokenType::Newline {
+		while self.peek(1).get_type() != TokenType::SymNewline {
 			self.next();
 		}
 		self.next();
@@ -497,8 +497,8 @@ impl Parser<'_> {
 
 	fn number(&mut self) -> Option<i64> {
 		let mut is_neg = false;
-		if self.curr().get_type() == TokenType::Dash {
-			self.match_token_or_err(TokenType::Number, "Number after unary minus")?;
+		if self.curr().get_type() == TokenType::SymDash {
+			self.match_token_or_err(TokenType::IdNumber, "Number after unary minus")?;
 			is_neg = true;
 		}
 		let num = self.number_pos()?;
@@ -515,44 +515,46 @@ impl Parser<'_> {
 	}
 
 	fn address(&mut self) -> Option<Arg> {
+		use TokenType as TT;
+
 		let nxt_tok = self.next();
 		match nxt_tok.get_type() {
-			TokenType::Dash => {
+			TT::SymDash => {
 				let reg = self.match_reg()?;
 				Some(Arg::PreDec(reg))
 			}
-			TokenType::Register => {
+			TT::IdRegister => {
 				let reg = self.reg()?;
-				if self.try_match_token(TokenType::Plus).is_some() {
+				if self.try_match_token(TT::SymPlus).is_some() {
 					Some(Arg::PostInc(reg))
 				} else {
 					Some(Arg::IndReg(reg))
 				}
 			}
-			TokenType::OParen => {
+			TT::SymOParen => {
 				fn parse_num(data: &mut Parser, num: i64) -> Option<Arg> {
-					data.assert_token_with_offset(0, TokenType::Comma)?;
+					data.assert_token_with_offset(0, TT::SymComma)?;
 					match data.peek(1).get_type() {
-						TokenType::GBR => {
+						TT::SymGBR => {
 							let imm = data.assert_within_i8(num)?;
 							data.next(); // Comma
 							data.next(); // GBR
-							data.match_token(TokenType::CParen);
+							data.match_token(TT::SymCParen);
 							Some(Arg::DispGBR(imm))
 						}
-						TokenType::PC => {
+						TT::SymPC => {
 							let imm = data.assert_within_i8(num)?;
 							data.next(); // Comma
 							data.next(); // PC
-							data.match_token(TokenType::CParen);
+							data.match_token(TT::SymCParen);
 							Some(Arg::DispPC(imm))
 						}
-						TokenType::Register => {
+						TT::IdRegister => {
 							let imm = data.assert_within_i4(num)?;
 							let src = data.reg()?;
 							data.next(); // Comma
 							data.next(); // Register
-							data.match_token(TokenType::CParen);
+							data.match_token(TT::SymCParen);
 							Some(Arg::DispReg(imm,src))
 						}
 						_ => {
@@ -563,16 +565,16 @@ impl Parser<'_> {
 				}
 
 				match self.next().get_type() {
-					TokenType::Dash | TokenType::Number => {
+					TT::SymDash | TT::IdNumber => {
 						let num = self.number()?;
 						parse_num(self, num)
 					}
-					TokenType::Register => {
+					TT::IdRegister => {
 						let disp = self.reg()?;
 						self.assert_r0(disp);
-						self.match_token(TokenType::Comma);
+						self.match_token(TT::SymComma);
 						let src = self.match_reg()?;
-						self.match_token(TokenType::CParen);
+						self.match_token(TT::SymCParen);
 						Some(Arg::DispR0(src))
 					}
 					_ => {
@@ -590,9 +592,9 @@ impl Parser<'_> {
 
 	fn match_size(&mut self) -> Option<Size> {
 		match self.next().get_type() {
-			TokenType::Byte => Some(Size::Byte),
-			TokenType::Word => Some(Size::Word),
-			TokenType::Long => Some(Size::Long),
+			TokenType::SymByte => Some(Size::Byte),
+			TokenType::SymWord => Some(Size::Word),
+			TokenType::SymLong => Some(Size::Long),
 			_ => {
 				self.error("size specifier");
 				None
@@ -601,7 +603,7 @@ impl Parser<'_> {
 	}
 
 	fn size(&mut self) -> Option<Size> {
-		self.match_token(TokenType::Dot)?;
+		self.match_token(TokenType::SymDot)?;
 		self.match_size()
 	}
 
@@ -632,7 +634,7 @@ impl Parser<'_> {
 	}
 
 	fn match_ident_or_err(&mut self, msg: &str) -> Option<Label> {
-		self.assert_token_with_offset_or_err(1, TokenType::Identifier, msg)?;
+		self.assert_token_with_offset_or_err(1, TokenType::IdLabel, msg)?;
 		self.next().get_id()
 	}
 
@@ -648,15 +650,15 @@ impl Parser<'_> {
 	}
 
 	fn match_number_pos(&mut self) -> Option<i64> {
-		self.match_token(TokenType::Number)?;
+		self.match_token(TokenType::IdNumber)?;
 		self.number_pos()
 	}
 
 	fn match_number(&mut self) -> Option<i64> {
 		let mut is_neg = false;
-		let num = if self.peek(1).get_type() == TokenType::Dash {
+		let num = if self.peek(1).get_type() == TokenType::SymDash {
 			is_neg = true;
-			self.match_token_or_err(TokenType::Number, "Number after unary minus")?;
+			self.match_token_or_err(TokenType::IdNumber, "Number after unary minus")?;
 			self.number_pos()?
 		} else {
 			self.match_number_pos()?
@@ -665,7 +667,7 @@ impl Parser<'_> {
 	}
 
 	fn match_reg(&mut self) -> Option<Reg> {
-		self.match_token(TokenType::Register)?;
+		self.match_token(TokenType::IdRegister)?;
 		self.reg()
 	}
 
@@ -686,7 +688,7 @@ impl Parser<'_> {
 
 	fn match_reg_args(&mut self) -> Option<(Reg,Reg)> {
 		let src = self.match_reg()?;
-		self.match_token(TokenType::Comma);
+		self.match_token(TokenType::SymComma);
 		let dst = self.match_reg()?;
 		Some((src,dst))
 	}
@@ -750,17 +752,17 @@ pub fn parser(tokens: &[Token]) -> Result<Output, Vec<String>> {
 	let mut data = Parser { tokens, index: 0, errors: Vec::new() };
 
 	while !data.is_done() {
-		use TokenType::*;
+		use TokenType as TT;
 		let cur_tok = data.curr();
 		match cur_tok.get_type() {
-			ADD => match data.next().get_type() {
-				Dash | Number => data.number()
+			TT::InsADD => match data.next().get_type() {
+				TT::SymDash | TT::IdNumber => data.number()
 					.and_then(|num| data.assert_within_i8(num))
-					.and_then(|imm| data.match_token(Comma).map(|_| imm))
+					.and_then(|imm| data.match_token(TT::SymComma).map(|_| imm))
 					.zip(data.match_reg())
 					.map(|(imm,reg)| Ins::ADD_Imm(imm,reg)),
-				Register => data.reg()
-					.and_then(|src| data.match_token(Comma).map(|_| src))
+				TT::IdRegister => data.reg()
+					.and_then(|src| data.match_token(TT::SymComma).map(|_| src))
 					.zip(data.match_reg())
 					.map(|(src,dst)| Ins::ADD_Reg(src,dst)),
 				_ => {
@@ -768,29 +770,29 @@ pub fn parser(tokens: &[Token]) -> Result<Output, Vec<String>> {
 					None
 				}
 			}.map(|ins| output.add_to_section(skey, ins)).unwrap_or_default(),
-			ADDC => data.match_reg_args()
+			TT::InsADDC => data.match_reg_args()
 				.map(|(src,dst)| output.add_to_section(skey, Ins::ADDC(src,dst)))
 				.unwrap_or_default(),
-			ADDV => data.match_reg_args()
+			TT::InsADDV => data.match_reg_args()
 				.map(|(src,dst)| output.add_to_section(skey, Ins::ADDV(src,dst)))
 				.unwrap_or_default(),
-			AND => match data.next().get_type() {
-				Number => data.number_pos()
+			TT::InsAND => match data.next().get_type() {
+				TT::IdNumber => data.number_pos()
 					.and_then(|num| data.assert_within_u8(num))
-					.and_then(|imm| data.match_token(Comma).map(|_| imm))
+					.and_then(|imm| data.match_token(TT::SymComma).map(|_| imm))
 					.and_then(|imm| data.match_r0().map(|_| imm))
 					.map(Ins::AND_Imm),
-				Register => data.reg()
-					.and_then(|src| data.match_token(Comma).map(|_| src))
+				TT::IdRegister => data.reg()
+					.and_then(|src| data.match_token(TT::SymComma).map(|_| src))
 					.zip(data.match_reg())
 					.map(|(src,dst)| Ins::AND_Reg(src,dst)),
-				Dot => || -> Option<Ins> {
-					data.match_token(Byte)?;
+				TT::SymDot => || -> Option<Ins> {
+					data.match_token(TT::SymByte)?;
 					let num = data.match_number()?;
 					let imm = data.assert_within_u8(num)?;
-					data.match_tokens(&[Comma,Address,OParen])?;
+					data.match_tokens(&[TT::SymComma,TT::SymAddress,TT::SymOParen])?;
 					data.match_r0()?;
-					data.match_tokens(&[Comma,GBR,CParen])?;
+					data.match_tokens(&[TT::SymComma,TT::SymGBR,TT::SymCParen])?;
 					Some(Ins::AND_Byte(imm))
 				}(),
 				_ => {
@@ -798,13 +800,13 @@ pub fn parser(tokens: &[Token]) -> Result<Output, Vec<String>> {
 					None
 				}
 			}.map(|ins| output.add_to_section(skey, ins)).unwrap_or_default(),
-			BF => match data.next().get_type() {
-				Identifier => Some(Ins::BF(
+			TT::InsBF => match data.next().get_type() {
+				TT::IdLabel => Some(Ins::BF(
 					data.curr().get_id()
 						.expect("identifier without referent"),
 				)),
-				Slash => || -> Option<Ins> {
-					data.match_token(Delay)?;
+				TT::SymSlash => || -> Option<Ins> {
+					data.match_token(TT::SymDelay)?;
 					Some(Ins::BFS(data.match_ident_or_err("Label")?))
 				}(),
 				_ => {
@@ -812,25 +814,25 @@ pub fn parser(tokens: &[Token]) -> Result<Output, Vec<String>> {
 					None
 				}
 			}.map(|ins| output.add_to_section(skey, ins)).unwrap_or_default(),
-			BRA => data.match_ident_or_err("Label")
+			TT::InsBRA => data.match_ident_or_err("Label")
 				.map(|lbl| output.add_to_section(skey, Ins::BRA(lbl)))
 				.unwrap_or_default(),
-			BRAF => data.match_reg()
+			TT::InsBRAF => data.match_reg()
 				.map(|reg| output.add_to_section(skey, Ins::BRAF(reg)))
 				.unwrap_or_default(),
-			BSR => data.match_ident_or_err("Label")
+			TT::InsBSR => data.match_ident_or_err("Label")
 				.map(|lbl| output.add_to_section(skey, Ins::BSR(lbl)))
 				.unwrap_or_default(),
-			BSRF => data.match_reg()
+			TT::InsBSRF => data.match_reg()
 				.map(|reg| output.add_to_section(skey, Ins::BSRF(reg)))
 				.unwrap_or_default(),
-			BT => match data.next().get_type() {
-				Identifier => Some(Ins::BT(
+			TT::InsBT => match data.next().get_type() {
+				TT::IdLabel => Some(Ins::BT(
 					data.curr().get_id()
 						.expect("identifier without referent"),
 				)),
-				Slash => || -> Option<Ins> {
-					data.match_token(Delay)?;
+				TT::SymSlash => || -> Option<Ins> {
+					data.match_token(TT::SymDelay)?;
 					Some(Ins::BTS(data.match_ident_or_err("Label")?))
 				}(),
 				_ => {
@@ -838,28 +840,28 @@ pub fn parser(tokens: &[Token]) -> Result<Output, Vec<String>> {
 					None
 				}
 			}.map(|ins| output.add_to_section(skey, ins)).unwrap_or_default(),
-			CLRMAC => output.add_to_section(skey, Ins::CLRMAC),
-			CLRT => output.add_to_section(skey, Ins::CLRT),
-			CMP => {
+			TT::InsCLRMAC => output.add_to_section(skey, Ins::CLRMAC),
+			TT::InsCLRT => output.add_to_section(skey, Ins::CLRT),
+			TT::InsCMP => {
 				let mut func = || -> Option<Ins> {
-					data.match_token(Slash)?;
+					data.match_token(TT::SymSlash)?;
 					match data.next().get_type() {
-						EQ => if data.next().get_type() == Number {
+						TT::SymEQ => if data.next().get_type() == TT::IdNumber {
 							let num = data.number()?;
 							let imm = data.assert_within_i8(num)?;
-							data.match_token(Comma)?;
+							data.match_token(TT::SymComma)?;
 							data.match_r0()?;
 							Some(Ins::CMP_EQ_Imm(imm))
 						} else {
 							data.match_reg_args().map(|(src,dst)| Ins::CMP_EQ_Reg(src,dst))
 						},
-						GE => data.match_reg_args().map(|(src,dst)| Ins::CMP_GE(src,dst)),
-						GT => data.match_reg_args().map(|(src,dst)| Ins::CMP_GT(src,dst)),
-						HI => data.match_reg_args().map(|(src,dst)| Ins::CMP_HI(src,dst)),
-						HS => data.match_reg_args().map(|(src,dst)| Ins::CMP_HS(src,dst)),
-						PL => data.match_reg().map(Ins::CMP_PL),
-						PZ => data.match_reg().map(Ins::CMP_PZ),
-						STR => data.match_reg_args().map(|(src,dst)| Ins::CMP_STR(src,dst)),
+						TT::SymGE => data.match_reg_args().map(|(src,dst)| Ins::CMP_GE(src,dst)),
+						TT::SymGT => data.match_reg_args().map(|(src,dst)| Ins::CMP_GT(src,dst)),
+						TT::SymHI => data.match_reg_args().map(|(src,dst)| Ins::CMP_HI(src,dst)),
+						TT::SymHS => data.match_reg_args().map(|(src,dst)| Ins::CMP_HS(src,dst)),
+						TT::SymPL => data.match_reg().map(Ins::CMP_PL),
+						TT::SymPZ => data.match_reg().map(Ins::CMP_PZ),
+						TT::SymSTR => data.match_reg_args().map(|(src,dst)| Ins::CMP_STR(src,dst)),
 						_ => {
 							data.error("Comparator type (EQ,GT,GE,HI,HS,PL,PZ,STR)");
 							None
@@ -870,17 +872,17 @@ pub fn parser(tokens: &[Token]) -> Result<Output, Vec<String>> {
 					output.add_to_section(skey, ins);
 				}
 			}
-			Comment => {} // skip comments
-			Const => data.size()
+			TT::IdComment => {} // skip comments
+			TT::SymConst => data.size()
 				.and_then(|sz| match data.next().get_type() {
-					Number => data.number()
+					TT::IdNumber => data.number()
 						.and_then(|num| match sz {
 							Size::Byte => data.assert_within_i8(num).map(|n| n as i64),
 							Size::Word => data.assert_within_i16(num).map(|n| n as i64),
 							Size::Long => data.assert_within_i32(num).map(|n| n as i64),
 						})
 						.map(|imm| Ins::Const_Imm(sz, imm)),
-					Identifier => Some(Ins::Const_Label(
+					TT::IdLabel => Some(Ins::Const_Label(
 						sz,
 						data.curr().get_id()
 							.expect("identifier without referent")
@@ -891,14 +893,14 @@ pub fn parser(tokens: &[Token]) -> Result<Output, Vec<String>> {
 					}
 				})
 				.map(|ins| output.add_to_section(skey, ins)).unwrap_or_default(),
-			DIV0S => data.match_reg_args()
+			TT::InsDIV0S => data.match_reg_args()
 				.map(|(src,dst)| output.add_to_section(skey, Ins::DIV0S(src,dst)))
 				.unwrap_or_default(),
-			DIV0U => output.add_to_section(skey, Ins::DIV0U),
-			DIV1 => data.match_reg_args()
+			TT::InsDIV0U => output.add_to_section(skey, Ins::DIV0U),
+			TT::InsDIV1 => data.match_reg_args()
 				.map(|(src,dst)| output.add_to_section(skey, Ins::DIV1(src,dst)))
 				.unwrap_or_default(),
-			DMULS => data.size()
+			TT::InsDMULS => data.size()
 				.and_then(|sz| if sz != Size::Long {
 					data.error("Size specifier Long('l')");
 					None
@@ -907,7 +909,7 @@ pub fn parser(tokens: &[Token]) -> Result<Output, Vec<String>> {
 				})
 				.map(|(src,dst)| output.add_to_section(skey, Ins::DMULS(src,dst)))
 				.unwrap_or_default(),
-			DMULU => data.size()
+			TT::InsDMULU => data.size()
 				.and_then(|sz| if sz != Size::Long {
 					data.error("Size specifier Long('l')");
 					None
@@ -916,10 +918,10 @@ pub fn parser(tokens: &[Token]) -> Result<Output, Vec<String>> {
 				})
 				.map(|(src,dst)| output.add_to_section(skey, Ins::DMULU(src,dst)))
 				.unwrap_or_default(),
-			DT => data.match_reg()
+			TT::InsDT => data.match_reg()
 				.map(|reg| output.add_to_section(skey, Ins::DT(reg)))
 				.unwrap_or_default(),
-			EXTS => data.size()
+			TT::InsEXTS => data.size()
 				.and_then(|sz| if sz == Size::Long {
 					data.error("Size specifier Byte('b') or Word('w')");
 					None
@@ -928,7 +930,7 @@ pub fn parser(tokens: &[Token]) -> Result<Output, Vec<String>> {
 						.map(|(src,dst)| output.add_to_section(skey, Ins::EXTS(sz,src,dst)))
 				})
 				.unwrap_or_default(),
-			EXTU => data.size()
+			TT::InsEXTU => data.size()
 				.and_then(|sz| if sz == Size::Long {
 					data.error("Size specifier Byte('b') or Word('w')");
 					None
@@ -937,15 +939,15 @@ pub fn parser(tokens: &[Token]) -> Result<Output, Vec<String>> {
 						.map(|(src,dst)| output.add_to_section(skey, Ins::EXTU(sz,src,dst)))
 				})
 				.unwrap_or_default(),
-			Identifier => {
+			TT::IdLabel => {
 				let lbl = cur_tok.get_id()
 					.expect("identifier without referent");
-				if data.match_token_or_err(Colon, "End of label declaration (':')").is_none() {
+				if data.match_token_or_err(TT::SymColon, "End of label declaration (':')").is_none() {
 					continue;
 				}
 				if output.labels.contains_key(&lbl) {
 					eprintln!("ERROR: Label '{lbl}' already defined");
-					while data.peek(1).get_type() != Newline {
+					while data.peek(1).get_type() != TT::SymNewline {
 						data.next();
 					}
 					data.next();
@@ -954,10 +956,10 @@ pub fn parser(tokens: &[Token]) -> Result<Output, Vec<String>> {
 				output.labels.insert(lbl.clone(), None);
 				output.add_to_section(skey, Ins::Label(lbl));
 			}
-			JMP => {
+			TT::InsJMP => {
 				// TODO - srenshaw - Add label handling for JMP
 				let mut func = || -> Option<Ins> {
-					data.match_token(Address)?;
+					data.match_token(TT::SymAddress)?;
 					let reg = data.match_reg()?;
 					Some(Ins::JMP(reg))
 				};
@@ -965,10 +967,10 @@ pub fn parser(tokens: &[Token]) -> Result<Output, Vec<String>> {
 					output.add_to_section(skey, ins);
 				}
 			}
-			JSR => {
+			TT::InsJSR => {
 				// TODO - srenshaw - Add label handling for JSR
 				let mut func = || -> Option<Ins> {
-					data.match_token(Address)?;
+					data.match_token(TT::SymAddress)?;
 					let reg = data.match_reg()?;
 					Some(Ins::JSR(reg))
 				};
@@ -976,28 +978,28 @@ pub fn parser(tokens: &[Token]) -> Result<Output, Vec<String>> {
 					output.add_to_section(skey, ins);
 				}
 			}
-			LDC => match data.next().get_type() {
-				Register => || -> Option<Ins> {
+			TT::InsLDC => match data.next().get_type() {
+				TT::IdRegister => || -> Option<Ins> {
 					let reg = data.reg()?;
-					data.match_token(Comma)?;
+					data.match_token(TT::SymComma)?;
 					match data.next().get_type() {
-						GBR => Some(Ins::LDC_GBR(reg)),
-						SR => Some(Ins::LDC_SR(reg)),
-						VBR => Some(Ins::LDC_VBR(reg)),
+						TT::SymGBR => Some(Ins::LDC_GBR(reg)),
+						TT::SymSR => Some(Ins::LDC_SR(reg)),
+						TT::SymVBR => Some(Ins::LDC_VBR(reg)),
 						_ => {
 							data.error("Control Register (GBR,SR,VBR)");
 							None
 						}
 					}
 				}(),
-				Dot => || -> Option<Ins> {
-					data.match_tokens(&[Long,Address])?;
+				TT::SymDot => || -> Option<Ins> {
+					data.match_tokens(&[TT::SymLong,TT::SymAddress])?;
 					let reg = data.match_reg()?;
-					data.match_token(Plus)?;
+					data.match_token(TT::SymPlus)?;
 					match data.next().get_type() {
-						GBR => Some(Ins::LDC_GBR_Inc(reg)),
-						SR => Some(Ins::LDC_SR_Inc(reg)),
-						VBR => Some(Ins::LDC_VBR_Inc(reg)),
+						TT::SymGBR => Some(Ins::LDC_GBR_Inc(reg)),
+						TT::SymSR => Some(Ins::LDC_SR_Inc(reg)),
+						TT::SymVBR => Some(Ins::LDC_VBR_Inc(reg)),
 						_ => {
 							data.error("Control Register (GBR,SR,VBR)");
 							None
@@ -1009,26 +1011,26 @@ pub fn parser(tokens: &[Token]) -> Result<Output, Vec<String>> {
 					None
 				}
 			}.map(|ins| output.add_to_section(skey, ins)).unwrap_or_default(),
-			LDS => match data.next().get_type() {
-					Register => data.reg()
-						.and_then(|reg| data.match_token(Comma).map(|_| reg))
+			TT::InsLDS => match data.next().get_type() {
+					TT::IdRegister => data.reg()
+						.and_then(|reg| data.match_token(TT::SymComma).map(|_| reg))
 						.and_then(|reg| match data.next().get_type() {
-							MACH => Some(Ins::LDS_MACH(reg)),
-							MACL => Some(Ins::LDS_MACL(reg)),
-							PR => Some(Ins::LDS_PR(reg)),
+							TT::SymMACH => Some(Ins::LDS_MACH(reg)),
+							TT::SymMACL => Some(Ins::LDS_MACL(reg)),
+							TT::SymPR => Some(Ins::LDS_PR(reg)),
 							_ => {
 								data.error("Special Register (MACH,MACL,PR)");
 								None
 							}
 						}),
-					Dot => || -> Option<Ins> {
-						data.match_tokens(&[Long,Address])?;
+					TT::SymDot => || -> Option<Ins> {
+						data.match_tokens(&[TT::SymLong,TT::SymAddress])?;
 						let reg = data.match_reg()?;
-						data.match_token(Plus)?;
+						data.match_token(TT::SymPlus)?;
 						match data.next().get_type() {
-							MACH => Some(Ins::LDS_MACH_Inc(reg)),
-							MACL => Some(Ins::LDS_MACL_Inc(reg)),
-							PR => Some(Ins::LDS_PR_Inc(reg)),
+							TT::SymMACH => Some(Ins::LDS_MACH_Inc(reg)),
+							TT::SymMACL => Some(Ins::LDS_MACL_Inc(reg)),
+							TT::SymPR => Some(Ins::LDS_PR_Inc(reg)),
 							_ => {
 								data.error("Special Register (MACH,MACL,PR)");
 								None
@@ -1040,7 +1042,7 @@ pub fn parser(tokens: &[Token]) -> Result<Output, Vec<String>> {
 						None
 					}
 				}.map(|ins| output.add_to_section(skey, ins)).unwrap_or_default(),
-			MAC => {
+			TT::InsMAC => {
 				let ins_func = match data.size() {
 					Some(Size::Byte) => {
 						data.error("Size specifier Word('w') or Long('l')");
@@ -1051,48 +1053,48 @@ pub fn parser(tokens: &[Token]) -> Result<Output, Vec<String>> {
 					None => continue,
 				};
 				let ins = || -> Option<Ins> {
-					data.match_token(Address)?;
+					data.match_token(TT::SymAddress)?;
 					let src = data.match_reg()?;
-					data.match_tokens(&[Plus,Comma,Address])?;
+					data.match_tokens(&[TT::SymPlus,TT::SymComma,TT::SymAddress])?;
 					let dst = data.match_reg()?;
-					data.match_token(Plus)?;
+					data.match_token(TT::SymPlus)?;
 					Some(ins_func(src,dst))
 				}();
 				if let Some(ins) = ins {
 					output.add_to_section(skey, ins);
 				}
 			}
-			MOV => match data.next().get_type() {
-				Dash | Number => {
+			TT::InsMOV => match data.next().get_type() {
+				TT::SymDash | TT::IdNumber => {
 					data.match_number()
 						.and_then(|num| data.assert_within_i8(num))
-						.and_then(|imm| data.match_token(Comma).map(|_| imm))
+						.and_then(|imm| data.match_token(TT::SymComma).map(|_| imm))
 						.zip(data.match_reg())
 						.map(|(imm,reg)| Ins::MOV_Imm(imm,reg))
 				}
-				Register => {
+				TT::IdRegister => {
 					data.reg()
-						.and_then(|src| data.match_token(Comma).map(|_| src))
+						.and_then(|src| data.match_token(TT::SymComma).map(|_| src))
 						.zip(data.match_reg())
 						.map(|(src,dst)| Ins::MOV_Reg(src,dst))
 				}
-				Dot => || -> Option<Ins> {
+				TT::SymDot => || -> Option<Ins> {
 					let size = data.match_size()?;
 
 					let src = match data.next().get_type() {
-						Address => data.address(),
-						Register => data.reg().map(Arg::DirReg),
+						TT::SymAddress => data.address(),
+						TT::IdRegister => data.reg().map(Arg::DirReg),
 						_ => {
 							data.error("Register, Displacement, or Address");
 							None
 						}
 					}?;
 
-					data.match_token(Comma)?;
+					data.match_token(TT::SymComma)?;
 
 					let dst = match data.next().get_type() {
-						Address => data.address(),
-						Register => data.reg().map(Arg::DirReg),
+						TT::SymAddress => data.address(),
+						TT::IdRegister => data.reg().map(Arg::DirReg),
 						_ => {
 							data.error("Register, Displacement, or Address");
 							None
@@ -1106,56 +1108,56 @@ pub fn parser(tokens: &[Token]) -> Result<Output, Vec<String>> {
 					None
 				}
 			}.map(|ins| output.add_to_section(skey, ins)).unwrap_or_default(),
-			MOVA => data.match_tokens(&[Address, OParen])
+			TT::InsMOVA => data.match_tokens(&[TT::SymAddress, TT::SymOParen])
 				.and_then(|_| data.match_number())
 				.and_then(|num| data.assert_within_i8(num))
-				.and_then(|num| data.match_tokens(&[Comma,PC,CParen,Comma]).map(|_| num))
+				.and_then(|num| data.match_tokens(&[TT::SymComma,TT::SymPC,TT::SymCParen,TT::SymComma]).map(|_| num))
 				.and_then(|num| data.match_r0().map(|_| num))
 				.map(|num| output.add_to_section(skey, Ins::MOVA(num)))
 				.unwrap_or_default(),
-			MOVT => data.match_reg()
+			TT::InsMOVT => data.match_reg()
 				.map(|dst| output.add_to_section(skey, Ins::MOVT(dst)))
 				.unwrap_or_default(),
-			MUL => data.match_tokens(&[Dot,Long])
+			TT::InsMUL => data.match_tokens(&[TT::SymDot,TT::SymLong])
 				.and_then(|_| data.match_reg_args())
 				.map(|(src,dst)| output.add_to_section(skey, Ins::MUL(src,dst)))
 				.unwrap_or_default(),
-			MULS => data.match_tokens(&[Dot,Word])
+			TT::InsMULS => data.match_tokens(&[TT::SymDot,TT::SymWord])
 				.and_then(|_| data.match_reg_args())
 				.map(|(src,dst)| output.add_to_section(skey, Ins::MULS(src,dst)))
 				.unwrap_or_default(),
-			MULU => data.match_tokens(&[Dot,Word])
+			TT::InsMULU => data.match_tokens(&[TT::SymDot,TT::SymWord])
 				.and_then(|_| data.match_reg_args())
 				.map(|(src,dst)| output.add_to_section(skey, Ins::MULU(src,dst)))
 				.unwrap_or_default(),
-			NEG => data.match_reg_args()
+			TT::InsNEG => data.match_reg_args()
 				.map(|(src,dst)| output.add_to_section(skey, Ins::NEG(src,dst)))
 				.unwrap_or_default(),
-			NEGC => data.match_reg_args()
+			TT::InsNEGC => data.match_reg_args()
 				.map(|(src,dst)| output.add_to_section(skey, Ins::NEGC(src,dst)))
 				.unwrap_or_default(),
-			Newline => {} // skip newlines
-			NOP => output.add_to_section(skey, Ins::NOP),
-			NOT => data.match_reg_args()
+			TT::SymNewline => {} // skip newlines
+			TT::InsNOP => output.add_to_section(skey, Ins::NOP),
+			TT::InsNOT => data.match_reg_args()
 				.map(|(src,dst)| output.add_to_section(skey, Ins::NOT(src,dst)))
 				.unwrap_or_default(),
-			OR => match data.next().get_type() {
-				Number => data.number_pos()
+			TT::InsOR => match data.next().get_type() {
+				TT::IdNumber => data.number_pos()
 					.and_then(|num| data.assert_within_u8(num))
-					.and_then(|imm| data.match_token(Comma).map(|_| imm))
+					.and_then(|imm| data.match_token(TT::SymComma).map(|_| imm))
 					.and_then(|imm| data.match_r0().map(|_| imm))
 					.map(Ins::OR_Imm),
-				Register => data.reg()
-					.and_then(|src| data.match_token(Comma).map(|_| src))
+				TT::IdRegister => data.reg()
+					.and_then(|src| data.match_token(TT::SymComma).map(|_| src))
 					.zip(data.match_reg())
 					.map(|(src,dst)| Ins::OR_Reg(src,dst)),
-				Dot => || -> Option<Ins> {
-					data.match_token(Byte)?;
+				TT::SymDot => || -> Option<Ins> {
+					data.match_token(TT::SymByte)?;
 					let num = data.match_number()?;
 					let imm = data.assert_within_u8(num)?;
-					data.match_tokens(&[Comma,Address,OParen])?;
+					data.match_tokens(&[TT::SymComma,TT::SymAddress,TT::SymOParen])?;
 					data.match_r0()?;
-					data.match_tokens(&[Comma,GBR,CParen])?;
+					data.match_tokens(&[TT::SymComma,TT::SymGBR,TT::SymCParen])?;
 					Some(Ins::OR_Byte(imm))
 				}(),
 				_ => {
@@ -1163,74 +1165,74 @@ pub fn parser(tokens: &[Token]) -> Result<Output, Vec<String>> {
 					None
 				}
 			}.map(|ins| output.add_to_section(skey, ins)).unwrap_or_default(),
-			Org => data.match_number_pos()
+			TT::SymOrg => data.match_number_pos()
 				.map(|addr| skey = addr as u64)
 				.unwrap_or_default(),
-			ROTCL => data.match_reg()
+			TT::InsROTCL => data.match_reg()
 				.map(|reg| output.add_to_section(skey, Ins::ROTCL(reg)))
 				.unwrap_or_default(),
-			ROTCR => data.match_reg()
+			TT::InsROTCR => data.match_reg()
 				.map(|reg| output.add_to_section(skey, Ins::ROTCR(reg)))
 				.unwrap_or_default(),
-			ROTL => data.match_reg()
+			TT::InsROTL => data.match_reg()
 				.map(|reg| output.add_to_section(skey, Ins::ROTL(reg)))
 				.unwrap_or_default(),
-			ROTR => data.match_reg()
+			TT::InsROTR => data.match_reg()
 				.map(|reg| output.add_to_section(skey, Ins::ROTR(reg)))
 				.unwrap_or_default(),
-			RTE => output.add_to_section(skey, Ins::RTE),
-			RTS => output.add_to_section(skey, Ins::RTS),
-			SETT => output.add_to_section(skey, Ins::SETT),
-			SHAL => data.match_reg()
+			TT::InsRTE => output.add_to_section(skey, Ins::RTE),
+			TT::InsRTS => output.add_to_section(skey, Ins::RTS),
+			TT::InsSETT => output.add_to_section(skey, Ins::SETT),
+			TT::InsSHAL => data.match_reg()
 				.map(|reg| output.add_to_section(skey, Ins::SHAL(reg)))
 				.unwrap_or_default(),
-			SHAR => data.match_reg()
+			TT::InsSHAR => data.match_reg()
 				.map(|reg| output.add_to_section(skey, Ins::SHAR(reg)))
 				.unwrap_or_default(),
-			SHLL => data.match_reg()
+			TT::InsSHLL => data.match_reg()
 				.map(|reg| output.add_to_section(skey, Ins::SHLL(reg)))
 				.unwrap_or_default(),
-			SHLL2 => data.match_reg()
+			TT::InsSHLL2 => data.match_reg()
 				.map(|reg| output.add_to_section(skey, Ins::SHLL2(reg)))
 				.unwrap_or_default(),
-			SHLL8 => data.match_reg()
+			TT::InsSHLL8 => data.match_reg()
 				.map(|reg| output.add_to_section(skey, Ins::SHLL8(reg)))
 				.unwrap_or_default(),
-			SHLL16 => data.match_reg()
+			TT::InsSHLL16 => data.match_reg()
 				.map(|reg| output.add_to_section(skey, Ins::SHLL16(reg)))
 				.unwrap_or_default(),
-			SHLR => data.match_reg()
+			TT::InsSHLR => data.match_reg()
 				.map(|reg| output.add_to_section(skey, Ins::SHLR(reg)))
 				.unwrap_or_default(),
-			SHLR2 => data.match_reg()
+			TT::InsSHLR2 => data.match_reg()
 				.map(|reg| output.add_to_section(skey, Ins::SHLR2(reg)))
 				.unwrap_or_default(),
-			SHLR8 => data.match_reg()
+			TT::InsSHLR8 => data.match_reg()
 				.map(|reg| output.add_to_section(skey, Ins::SHLR8(reg)))
 				.unwrap_or_default(),
-			SHLR16 => data.match_reg()
+			TT::InsSHLR16 => data.match_reg()
 				.map(|reg| output.add_to_section(skey, Ins::SHLR16(reg)))
 				.unwrap_or_default(),
-			SLEEP => output.add_to_section(skey, Ins::SLEEP),
-			STC => || -> Option<()> {
+			TT::InsSLEEP => output.add_to_section(skey, Ins::SLEEP),
+			TT::InsSTC => || -> Option<()> {
 				fn comma_reg(p: &mut Parser) -> Option<Reg> {
-					p.match_token(Comma)?;
+					p.match_token(TT::SymComma)?;
 					p.match_reg()
 				}
 				fn pre_dec(p: &mut Parser) -> Option<Reg> {
-					p.match_tokens(&[Comma,Address,Dash])?;
+					p.match_tokens(&[TT::SymComma,TT::SymAddress,TT::SymDash])?;
 					p.match_reg()
 				}
 				let ins = match data.next().get_type() {
-					GBR => comma_reg(&mut data).map(Ins::STC_GBR)?,
-					SR => comma_reg(&mut data).map(Ins::STC_SR)?,
-					VBR => comma_reg(&mut data).map(Ins::STC_VBR)?,
-					Dot => {
-						data.match_token(Long)?;
+					TT::SymGBR => comma_reg(&mut data).map(Ins::STC_GBR)?,
+					TT::SymSR => comma_reg(&mut data).map(Ins::STC_SR)?,
+					TT::SymVBR => comma_reg(&mut data).map(Ins::STC_VBR)?,
+					TT::SymDot => {
+						data.match_token(TT::SymLong)?;
 						match data.next().get_type() {
-							GBR => pre_dec(&mut data).map(Ins::STC_GBR_Dec)?,
-							SR => pre_dec(&mut data).map(Ins::STC_SR_Dec)?,
-							VBR => pre_dec(&mut data).map(Ins::STC_VBR_Dec)?,
+							TT::SymGBR => pre_dec(&mut data).map(Ins::STC_GBR_Dec)?,
+							TT::SymSR => pre_dec(&mut data).map(Ins::STC_SR_Dec)?,
+							TT::SymVBR => pre_dec(&mut data).map(Ins::STC_VBR_Dec)?,
 							_ => {
 								data.error("Control Register (GBR,SR,VBR)");
 								return None;
@@ -1244,25 +1246,25 @@ pub fn parser(tokens: &[Token]) -> Result<Output, Vec<String>> {
 				};
 				Some(output.add_to_section(skey, ins))
 			}().unwrap_or_default(),
-			STS => || -> Option<()> {
+			TT::InsSTS => || -> Option<()> {
 				fn comma_reg(p: &mut Parser) -> Option<Reg> {
-					p.match_token(Comma)?;
+					p.match_token(TT::SymComma)?;
 					p.match_reg()
 				}
 				fn pre_dec(p: &mut Parser) -> Option<Reg> {
-					p.match_tokens(&[Comma,Address,Dash])?;
+					p.match_tokens(&[TT::SymComma,TT::SymAddress,TT::SymDash])?;
 					p.match_reg()
 				}
 				let ins = match data.next().get_type() {
-					MACH => comma_reg(&mut data).map(Ins::STS_MACH)?,
-					MACL => comma_reg(&mut data).map(Ins::STS_MACL)?,
-					PR => comma_reg(&mut data).map(Ins::STS_PR)?,
-					Dot => {
-						data.match_token(Long)?;
+					TT::SymMACH => comma_reg(&mut data).map(Ins::STS_MACH)?,
+					TT::SymMACL => comma_reg(&mut data).map(Ins::STS_MACL)?,
+					TT::SymPR => comma_reg(&mut data).map(Ins::STS_PR)?,
+					TT::SymDot => {
+						data.match_token(TT::SymLong)?;
 						match data.next().get_type() {
-							MACH => pre_dec(&mut data).map(Ins::STS_MACH_Dec)?,
-							MACL => pre_dec(&mut data).map(Ins::STS_MACL_Dec)?,
-							PR => pre_dec(&mut data).map(Ins::STS_PR_Dec)?,
+							TT::SymMACH => pre_dec(&mut data).map(Ins::STS_MACH_Dec)?,
+							TT::SymMACL => pre_dec(&mut data).map(Ins::STS_MACL_Dec)?,
+							TT::SymPR => pre_dec(&mut data).map(Ins::STS_PR_Dec)?,
 							_ => {
 								data.error("Special Register (MACH,MACL,PR)");
 								return None;
@@ -1276,48 +1278,48 @@ pub fn parser(tokens: &[Token]) -> Result<Output, Vec<String>> {
 				};
 				Some(output.add_to_section(skey, ins))
 			}().unwrap_or_default(),
-			SUB => data.match_reg_args()
+			TT::InsSUB => data.match_reg_args()
 				.map(|(src,dst)| output.add_to_section(skey, Ins::SUB(src,dst)))
 				.unwrap_or_default(),
-			SUBC => data.match_reg_args()
+			TT::InsSUBC => data.match_reg_args()
 				.map(|(src,dst)| output.add_to_section(skey, Ins::SUBC(src,dst)))
 				.unwrap_or_default(),
-			SUBV => data.match_reg_args()
+			TT::InsSUBV => data.match_reg_args()
 				.map(|(src,dst)| output.add_to_section(skey, Ins::SUBV(src,dst)))
 				.unwrap_or_default(),
-			SWAP => || -> Option<()> {
-				data.match_token(Dot)?;
+			TT::InsSWAP => || -> Option<()> {
+				data.match_token(TT::SymDot)?;
 				let sz = data.match_size()?;
 				let (src,dst) = data.match_reg_args()?;
 				Some(output.add_to_section(skey, Ins::SWAP(sz,src,dst)))
 			}().unwrap_or_default(),
-			TAS => data.match_tokens(&[Dot, Byte, Address])
+			TT::InsTAS => data.match_tokens(&[TT::SymDot, TT::SymByte, TT::SymAddress])
 				.and_then(|_| data.match_reg())
 				.map(Ins::TAS)
 				.map(|ins| output.add_to_section(skey, ins))
 				.unwrap_or_default(),
-			TRAPA => data.match_number()
+			TT::InsTRAPA => data.match_number()
 				.and_then(|num| data.assert_within_u8(num))
 				.map(Ins::TRAPA)
 				.map(|ins| output.add_to_section(skey, ins))
 				.unwrap_or_default(),
-			TST => match data.next().get_type() {
-				Number => data.number_pos()
+			TT::InsTST => match data.next().get_type() {
+				TT::IdNumber => data.number_pos()
 					.and_then(|num| data.assert_within_u8(num))
-					.and_then(|imm| data.match_token(Comma).map(|_| imm))
+					.and_then(|imm| data.match_token(TT::SymComma).map(|_| imm))
 					.and_then(|imm| data.match_r0().map(|_| imm))
 					.map(Ins::TST_Imm),
-				Register => data.reg()
-					.and_then(|src| data.match_token(Comma).map(|_| src))
+				TT::IdRegister => data.reg()
+					.and_then(|src| data.match_token(TT::SymComma).map(|_| src))
 					.zip(data.match_reg())
 					.map(|(src,dst)| Ins::TST_Reg(src,dst)),
-				Dot => || -> Option<Ins> {
-					data.match_token(Byte)?;
+				TT::SymDot => || -> Option<Ins> {
+					data.match_token(TT::SymByte)?;
 					let num = data.match_number()?;
 					let imm = data.assert_within_u8(num)?;
-					data.match_tokens(&[Comma,Address,OParen])?;
+					data.match_tokens(&[TT::SymComma,TT::SymAddress,TT::SymOParen])?;
 					data.match_r0()?;
-					data.match_tokens(&[Comma,GBR,CParen])?;
+					data.match_tokens(&[TT::SymComma,TT::SymGBR,TT::SymCParen])?;
 					Some(Ins::TST_Byte(imm))
 				}(),
 				_ => {
@@ -1325,23 +1327,23 @@ pub fn parser(tokens: &[Token]) -> Result<Output, Vec<String>> {
 					None
 				}
 			}.map(|ins| output.add_to_section(skey, ins)).unwrap_or_default(),
-			XOR => match data.next().get_type() {
-				Number => data.number_pos()
+			TT::InsXOR => match data.next().get_type() {
+				TT::IdNumber => data.number_pos()
 					.and_then(|num| data.assert_within_u8(num))
-					.and_then(|imm| data.match_token(Comma).map(|_| imm))
+					.and_then(|imm| data.match_token(TT::SymComma).map(|_| imm))
 					.and_then(|imm| data.match_r0().map(|_| imm))
 					.map(Ins::XOR_Imm),
-				Register => data.reg()
-					.and_then(|src| data.match_token(Comma).map(|_| src))
+				TT::IdRegister => data.reg()
+					.and_then(|src| data.match_token(TT::SymComma).map(|_| src))
 					.zip(data.match_reg())
 					.map(|(src,dst)| Ins::XOR_Reg(src,dst)),
-				Dot => || -> Option<Ins> {
-					data.match_token(Byte)?;
+				TT::SymDot => || -> Option<Ins> {
+					data.match_token(TT::SymByte)?;
 					let num = data.match_number()?;
 					let imm = data.assert_within_u8(num)?;
-					data.match_tokens(&[Comma,Address,OParen])?;
+					data.match_tokens(&[TT::SymComma,TT::SymAddress,TT::SymOParen])?;
 					data.match_r0()?;
-					data.match_tokens(&[Comma,GBR,CParen])?;
+					data.match_tokens(&[TT::SymComma,TT::SymGBR,TT::SymCParen])?;
 					Some(Ins::XOR_Byte(imm))
 				}(),
 				_ => {
@@ -1349,10 +1351,10 @@ pub fn parser(tokens: &[Token]) -> Result<Output, Vec<String>> {
 					None
 				}
 			}.map(|ins| output.add_to_section(skey, ins)).unwrap_or_default(),
-			XTRCT => data.match_reg_args()
+			TT::InsXTRCT => data.match_reg_args()
 				.map(|(src,dst)| output.add_to_section(skey, Ins::XTRCT(src,dst)))
 				.unwrap_or_default(),
-			Unknown => {
+			TT::IdUnknown => {
 				let (line,pos) = cur_tok.pos();
 				eprintln!("unknown item '{cur_tok}' @ [{line}:{pos}]");
 			}
