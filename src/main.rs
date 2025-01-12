@@ -1,6 +1,5 @@
 
 use std::collections::HashMap;
-use std::rc::Rc;
 
 use miette::IntoDiagnostic;
 
@@ -12,8 +11,9 @@ mod parser;
 use parser::parser;
 use parser::{Arg,Ins,Reg,Output,Size,State};
 
+type Label = std::rc::Rc<str>;
 type SectionMap = HashMap<u64, Vec<State>>;
-type LabelMap = HashMap<Rc<str>, Option<u32>>;
+type LabelMap = HashMap<Label, Option<u32>>;
 
 fn main() -> miette::Result<()> {
 	let mut args = std::env::args();

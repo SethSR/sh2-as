@@ -1,6 +1,5 @@
 
-use std::rc::Rc;
-
+use crate::Label;
 use crate::lexer::{Token,TokenType};
 
 pub(crate) type Reg = u8;
@@ -12,9 +11,9 @@ pub(crate) enum Arg {
 	DispReg(i8,Reg),
 	DispPC(i8),
 	DispGBR(i8),
-	DispLabel(Rc<str>,Reg),
+	DispLabel(Label,Reg),
 	IndReg(Reg),
-	Label(Rc<str>),
+	Label(Label),
 	PostInc(Reg),
 	PreDec(Reg),
 }
@@ -79,21 +78,21 @@ pub(crate) enum Ins {
 	/// | label             | 10011011dddddddd | if T = 0,          | 3/1     | -      |
 	/// |                   |                  | dispx2+PC -> PC;   |         |        |
 	/// |                   |                  | if T = 1, nop      |         |        |
-	BF(Rc<str>),
+	BF(Label),
 	/// | label             | 10001111dddddddd | if T = 0,          | 2/1     | -      |
 	/// |                   |                  | dispx2+PC -> PC;   |         |        |
 	/// |                   |                  | if T = 1, nop      |         |        |
-	BFS(Rc<str>),
+	BFS(Label),
 	/// | label             | 1010dddddddddddd | Delayed branch,    | 2       | -      |
 	/// |                   |                  | dispx2+PC -> PC    |         |        |
-	BRA(Rc<str>),
+	BRA(Label),
 	/// | Rm                | 0000mmmm00100011 | Delayed branch,    | 2       | -      |
 	/// |                   |                  | Rm+PC -> PC        |         |        |
 	BRAF(Reg),
 	/// | label             | 1011dddddddddddd | Delayed branch,    | 2       | -      |
 	/// |                   |                  | PC -> PR,          |         |        |
 	/// |                   |                  | dispx2+PC -> PC    |         |        |
-	BSR(Rc<str>),
+	BSR(Label),
 	/// | Rm                | 0000mmmm00000011 | Delayed branch,    | 2       | -      |
 	/// |                   |                  | PC -> PR,          |         |        |
 	/// |                   |                  | Rm+PC -> PC        |         |        |
@@ -101,11 +100,11 @@ pub(crate) enum Ins {
 	/// | label             | 10001001dddddddd | if T = 1,          | 3/1     | -      |
 	/// |                   |                  | dispx2+PC -> PC;   |         |        |
 	/// |                   |                  | if T = 0, nop      |         |        |
-	BT(Rc<str>),
+	BT(Label),
 	/// | label             | 10001101dddddddd | if T = 1,          | 2/1     | -      |
 	/// |                   |                  | dispx2+PC -> PC;   |         |        |
 	/// |                   |                  | if T = 0, nop      |         |        |
-	BTS(Rc<str>),
+	BTS(Label),
 	/// |                   | 0000000000101000 | 0 -> MACH, MACL    | 1       | -      |
 	CLRMAC,
 	/// |                   | 0000000000001000 | 0 -> T             | 1       | 0      |
@@ -382,8 +381,8 @@ pub(crate) enum Ins {
 
 	/*** Directives ***/
 	Const_Imm(Size,i64),
-	Const_Label(Size,Rc<str>),
-	Label(Rc<str>),
+	Const_Label(Size,Label),
+	Label(Label),
 }
 
 #[derive(Clone)]
@@ -632,7 +631,7 @@ impl Parser<'_> {
 		Some(self.next())
 	}
 
-	fn match_ident_or_err(&mut self, msg: &str) -> Option<Rc<str>> {
+	fn match_ident_or_err(&mut self, msg: &str) -> Option<Label> {
 		self.assert_token_with_offset_or_err(1, TokenType::Identifier, msg)?;
 		self.next().get_id()
 	}

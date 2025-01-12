@@ -1,10 +1,11 @@
 
 use std::fmt;
-use std::rc::Rc;
+
+use crate::Label;
 
 pub(crate) struct Token {
 	tt: TokenType,
-	ex: Option<Rc<str>>,
+	ex: Option<Label>,
 	line: u16,
 	pos: u16,
 }
@@ -23,25 +24,25 @@ impl Token {
 		}
 	}
 
-	fn ident(tt: TokenType, s: Rc<str>, line: usize, pos: usize) -> Self {
+	fn ident(tt: TokenType, s: Label, line: usize, pos: usize) -> Self {
 		let mut this = Self::new(tt, line, pos);
 		this.ex = Some(s);
 		this
 	}
 
-	fn num(s: Rc<str>, line: usize, pos: usize) -> Self {
+	fn num(s: Label, line: usize, pos: usize) -> Self {
 		let mut this = Self::new(TokenType::Number, line, pos);
 		this.ex = Some(s);
 		this
 	}
 
-	fn comment(s: Rc<str>, line: usize, pos: usize) -> Self {
+	fn comment(s: Label, line: usize, pos: usize) -> Self {
 		let mut this = Self::new(TokenType::Comment, line, pos);
 		this.ex = Some(s);
 		this
 	}
 
-	pub(crate) fn get_id(&self) -> Option<Rc<str>> {
+	pub(crate) fn get_id(&self) -> Option<Label> {
 		self.ex.clone()
 	}
 
@@ -348,7 +349,7 @@ pub(crate) fn lexer(input: &str) -> Vec<Token> {
 	let mut char_idx = 0;
 	let mut chars = input.char_indices().peekable();
 
-	let mut id_storage = std::collections::HashMap::<&str, Rc<str>>::default();
+	let mut id_storage = std::collections::HashMap::<&str, Label>::default();
 
 	while let Some(&(cur_idx, cur_char)) = chars.peek() {
 		match cur_char {
