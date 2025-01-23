@@ -3,6 +3,7 @@ use std::fmt;
 
 use crate::Label;
 
+#[derive(Clone)]
 pub(crate) struct Token {
 	tt: TokenType,
 	ex: Option<Label>,
@@ -293,7 +294,7 @@ impl fmt::Display for TokenType {
 			TT::SymVBR => "VBR",
 			TT::SymWord => "w",
 		};
-		write!(fmt, "'{s}'")
+		write!(fmt, "{s}")
 	}
 }
 
@@ -368,8 +369,17 @@ pub(crate) fn lexer(input: &str) -> Vec<Token> {
 				results.push(Token::new(TT::SymPlus, line_idx, char_idx));
 			}
 			'-' => {
-				next(&mut char_idx, &mut chars);
-				results.push(Token::new(TT::SymDash, line_idx, char_idx));
+				let token = tokenize(input,
+					cur_idx, &mut chars, &mut char_idx,
+					|ch| ('0'..='9').contains(&ch) || '_' == ch || '-' == ch
+				);
+				if token.len() > 1 {
+					let s = id_storage.entry(token)
+						.or_insert_with(|| token.into());
+					results.push(Token::num(s.clone(), line_idx, char_idx - token.len()));
+				} else {
+					results.push(Token::new(TT::SymDash, line_idx, char_idx));
+				}
 			}
 			'/' => {
 				next(&mut char_idx, &mut chars);

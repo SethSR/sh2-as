@@ -25,7 +25,7 @@ fn main() -> miette::Result<()> {
 		.unwrap_or("asm.out".to_string());
 
 	// TODO - srenshaw - Change this to a CLI option.
-	let is_silent = true;
+	let is_silent = false;
 
 	let file = std::fs::read_to_string(source)
 		.into_diagnostic()?;
@@ -509,6 +509,21 @@ fn resolver(
 						let sbyte = to_sbyte(size) << 8;
 						let dword = *disp as u8 as u16;
 						results.push(Complete(base | sbyte | dword));
+					}
+					Incomplete(MOV(Long,DispLabel(lbl,rsrc),DirReg(rdst))) => {
+						if !data.values.contains_key(lbl) {
+							todo!("unknown value: '{lbl}'");
+						}
+						let disp = data.values[lbl];
+						let disp = disp >> 2;
+						if !(-8..7).contains(&disp) {
+							todo!("value too large to use as displacement: {disp}");
+						}
+						let dbyte = (disp as u16) & 0x000F;
+						let base = 0b0101_0000_0000_0000;
+						let nbyte = to_byte2(*rdst);
+						let mbyte = to_byte3(*rsrc);
+						results.push(Complete(base | nbyte | mbyte | dbyte))
 					}
 					// | @(disp,PC),R0     | 11000111dddddddd | disp x 4+PC -> R0  | 1       | -      |
 					Incomplete(MOVA(disp)) => results.push(d_type(0b11000111_00000000, *disp as u8)),

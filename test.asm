@@ -3,15 +3,15 @@
 
 ;Set up the VDP2 registers
 	mov.l VDP2_Reg_Base,r11
-	add $E,r11
+	add #$E,r11
 	mov.w RAM_n_Screen_Config,r6 ;Set RAM partitioning / screen mode
 	mov.w r6,@r11  ;$25F8_000E RAMCTL - RAM Control Register
 
-	add $2E,r11
+	add #$2E,r11
 	mov.w Map_Offset_Register,r2
 	mov.w r2,@r11  ;$25F8_003C MPOFN - Map Offset Register
 
-	add $3C,r11
+	add #$3C,r11
 	      ;%NNNNNNNN--------
 	mov.w r2,@-r11 ;$25F8_0076 SCYDNO - Scr Scroll (Vert Fraction)
 	      ;%-----NNNNNNNNNNN
@@ -21,26 +21,26 @@
 	      ;%-----NNNNNNNNNNN
 	mov.w r2,@-r11 ;$25F8_0070 SCXINO - Scr Scroll (Horz Integer)
 
-	add -72,r11
+	add #-72,r11
 	mov.w Character_CTRL,r2 ;nn=bmp size(512x256/512x512/1024x256/1024x512)
 	mov.w r2,@r11  ;$25F8_0028 CHTCLA - Character ctrl (NBG0, NBG1)
 
-	add -8,r11
+	add #-8,r11
 	mov.w Screen_Display_Enable,r8
 	mov.w r8,@r11  ;$25F8_0020 BGON - Screen Display Enable
 
-	add -32,r11
+	add #-32,r11
 	mov.l TV_Mode,r10 ;L=interlace V=Vres H=Hres
 	mov.w r10,@r11 ;$25F8_0000 TVMD - TV Mode
 
 ;Set Palette
 	mov.l VDP2_CRAM_Base,r6
 	mov.l Palette,r8    ;Palette
-	mov.w 4,r0          ;PaletteEntries
+	mov.w PaletteEntries,r0          ;PaletteEntries
 PaletteLoop:
 	mov.w @r8+,r1       ;-BBBBBGGGGGRRRRR
 	mov.w r1,@r6        ;Set a color
-	add 2,r6
+	add #2,r6
 
 	dt r0               ;Dec R0
 	bf PaletteLoop
@@ -74,6 +74,9 @@ TV_Mode:
 	    ;%D------BLLVV-HHH      D=1=Screen on B=1=Blackout
 	dc.w %1000000000000000
 
+PaletteEntries:
+	dc.w 4
+
 Palette: ;-BBBBBGGGGGRRRRR
 	dc.w   %0011110000000000   ;Our 4 colors!
 	dc.w   %0000001111111111
@@ -89,7 +92,7 @@ ShowSpriteXY:    ;R11=Width R10=Height
 	add r0,r12
 
 	mov.l @(UserRam_PlayerY,r9),r0 ;+Ypos*512
-	mov.l 512,r1    ;512 bytes per line
+	mov.l #512,r1    ;512 bytes per line
 	mulu r0,r1
 	sts macl,r0     ;Get L result of multiplication
 	add r0,r12
@@ -98,7 +101,7 @@ ShowSpriteXY:    ;R11=Width R10=Height
 ShowSprite:     ;Show sprite @R13 to @R12
 	              ;R11=Width R10=Height
 
-	mov.l 512,r3         ;Line Width in bytes
+	mov.l #512,r3         ;Line Width in bytes
 ShowSpriteY:
 	mov r11,r1
 	mov r12,r2
@@ -107,9 +110,9 @@ ShowSpriteX:
 		mov.l @r12,r4      ;Get screen word
 		xor r4,r0          ;XOR with current screen data
 		mov.l r0,@r12      ;Store back to screen
-		add 4,r12          ;Across screen 4 pixels
+		add #4,r12          ;Across screen 4 pixels
 
-		add -3,r1          ;We did 4 pixels
+		add #-3,r1          ;We did 4 pixels
 		dt r1              ;We did 4 pixels
 		bf ShowSpriteX
 
@@ -142,25 +145,25 @@ GetJoy:
 	sts.l pr,@-sp
 
 ;Set up the ports
-		mov %0000_0000,r0   ;All ports to input
+		mov #%0000_0000,r0   ;All ports to input
 		mov $2010_0079,r1   ;DDR1 Data Dir %-DDDDDDD 1=output 0=input
 		mov.b r0,@r1
 
-		mov 0,r0           ;0=SMPC / 1=SH2 direct
+		mov #0,r0           ;0=SMPC / 1=SH2 direct
 		mov $2010_007D,r1   ;% - - - - - - IOSEL2 IOSEL1
 		mov.b r0,@r1
 
-		mov 0,r0           ;1=VDP Latch
+		mov #0,r0           ;1=VDP Latch
 		mov $2010_007F,r1   ;% - - - - - - EXLE2 EXLE1
 		mov.b r0,@r1
 
 ;Send our command
-		mov.b 1,r0         ;Flag busy before our command
+		mov.b #1,r0         ;Flag busy before our command
 		mov $2010_0063,r13 ;Status flag
 		mov.b r0,@r13
 
 		mov $2010_0001,r1  ;SMPC Status Acquisition Switch
-		mov $00,r0         ;1=Get extra info (time reset etc.)
+		mov #$00,r0         ;1=Get extra info (time reset etc.)
 		mov.b r0,@r1
 
 		mov $2010_0003,r1
@@ -181,8 +184,8 @@ GetJoy:
 GetJoyWait:
 		mov $2010_0063,r13 ;Status flag
 		mov.b @r13,r0
-		and 1,r0           ;Only bottom bit is defined
-		cmp/eq 1,r0        ;Wait for command completion
+		and #1,r0           ;Only bottom bit is defined
+		cmp/eq #1,r0        ;Wait for command completion
 		bt GetJoyWait
 
 

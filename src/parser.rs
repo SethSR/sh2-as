@@ -415,6 +415,7 @@ impl std::fmt::Debug for State {
 pub(crate) struct Output {
 	pub(crate) sections: crate::SectionMap,
 	pub(crate) labels: crate::LabelMap,
+	pub(crate) values: std::collections::HashMap<Label, i8>,
 }
 
 impl Output {
@@ -450,12 +451,8 @@ struct Parser<'tok> {
 
 macro_rules! error {
 	($t:ty, $data:expr, $msg:expr) => {{
-		$data.expected($msg);
-		while $data.peek(1).get_type() != crate::lexer::TokenType::SymNewline {
-			$data.next();
-		}
-		$data.next();
-		Option::<$t>::None
+		$data.next_line();
+		Err::<$t, std::string::String>($data.expected($msg))
 	}}
 }
 
@@ -471,10 +468,17 @@ impl Parser<'_> {
 		self.peek(0)
 	}
 
-	fn expected(&mut self, msg: &str) {
-		let tok = self.curr();
+	fn expected(&mut self, msg: &str) -> String {
+		let tok = self.curr().clone();
 		let (line,pos) = tok.pos();
-		self.errors.push(format!("ERROR: Expected {msg}, Found '{tok}' @ ({line}:{pos})"));
+		match tok.get_type() {
+			TokenType::IdNumber => {
+				let num = self.signed(Size::Long);
+				let num = num.expect("unable to parse number");
+				format!("ERROR: Expected '{msg}', Found '{tok}' ({num}) @ [{line}:{pos}]")
+			}
+			_ => format!("ERROR: Expected '{msg}', Found '{tok}' @ [{line}:{pos}]"),
+		}
 	}
 
 	fn next(&mut self) -> &Token {
@@ -482,244 +486,328 @@ impl Parser<'_> {
 		self.curr()
 	}
 
-	fn number_pos(&mut self) -> Option<i64> {
+	fn next_line(&mut self) {
+		while self.peek(1).get_type() != TokenType::SymNewline {
+			self.next();
+		}
+		self.next();
+	}
+
+	fn to_i64(txt: &str, radix: u32, sz: Size, is_signed: bool) -> Result<i64, String> {
+		let txt = txt.replace('_',"");
+		if is_signed {
+			match sz {
+				Size::Byte => i8::from_str_radix(&txt, radix).map(|n| n as i64),
+				Size::Word => i16::from_str_radix(&txt, radix).map(|n| n as i64),
+				Size::Long => i32::from_str_radix(&txt, radix).map(|n| n as i64),
+			}.map_err(|e| format!("{e}"))
+		} else {
+			match sz {
+				Size::Byte => u8::from_str_radix(&txt, radix).map(|n| n as i64),
+				Size::Word => u16::from_str_radix(&txt, radix).map(|n| n as i64),
+				Size::Long => u32::from_str_radix(&txt, radix).map(|n| n as i64),
+			}.map_err(|e| format!("{e}"))
+		}
+	}
+
+	fn i64_from_dec(txt: &str, sz: Size, is_signed: bool) -> Result<i64, String> {
+		Self::to_i64(txt, 10, sz, is_signed)
+	}
+	fn i64_from_bin(txt: &str, sz: Size) -> Result<i64, String> {
+		Self::to_i64(&txt[1..], 2, sz, false)
+	}
+	fn i64_from_hex(txt: &str, sz: Size) -> Result<i64, String> {
+		Self::to_i64(&txt[1..], 16, sz, false)
+	}
+
+	fn unsigned(&mut self, sz: Size) -> Result<i64, String> {
 		let txt = self.curr().to_string();
 		match txt.chars().next() {
-			Some('%') => {
-				i64::from_str_radix(&txt[1..].replace('_',""), 2).ok()
-			}
-			Some('$') => {
-				i64::from_str_radix(&txt[1..].replace('_',""), 16).ok()
-			}
-			Some(c) if c.is_numeric() => {
-				i64::from_str_radix(&txt.replace('_',""), 10).ok()
-			}
-			_ => unreachable!("number tokens should only have valid binary, decimal, or hexadecimal values"),
+			Some('%') => Self::i64_from_bin(&txt, sz),
+			Some('$') => Self::i64_from_hex(&txt, sz),
+			Some(c) if c.is_numeric() => Self::i64_from_dec(&txt, sz, false),
+			_ => error!(i64, self, "parsing non-numeric"),
 		}
 	}
 
-	fn number(&mut self) -> Option<i64> {
-		let mut is_neg = false;
-		if self.curr().get_type() == TokenType::SymDash {
-			self.match_token_or_err(TokenType::IdNumber, "Number after unary minus")?;
-			is_neg = true;
+	fn signed(&mut self, sz: Size) -> Result<i64, String> {
+		let txt = self.curr().to_string();
+		match txt.chars().next() {
+			Some('%') => Self::i64_from_bin(&txt, sz),
+			Some('$') => Self::i64_from_hex(&txt, sz),
+			Some('-') => Self::i64_from_dec(&txt, sz, true),
+			Some(c) if c.is_numeric() => Self::i64_from_dec(&txt, sz, false),
+			_ => error!(i64, self, "parsing non-numeric"),
 		}
-		let num = self.number_pos()?;
-		Some(if is_neg { -num } else { num })
 	}
 
-	fn reg(&self) -> Option<Reg> {
+	fn reg(&self) -> Result<Reg, String> {
 		let txt = self.curr().to_string();
 		if txt.to_lowercase() == "pc" {
-			Some(15)
+			Ok(15)
 		} else {
-			u8::from_str_radix(&txt[1..], 10).ok()
+			u8::from_str_radix(&txt[1..], 10).map_err(|e| format!("{e}"))
 		}
 	}
 
-	fn address(&mut self) -> Option<Arg> {
+	fn address(&mut self) -> Result<Arg, String> {
 		use TokenType as TT;
 
-		let nxt_tok = self.next();
-		match nxt_tok.get_type() {
-			TT::SymDash => {
-				let reg = self.match_reg()?;
-				Some(Arg::PreDec(reg))
-			}
+		match self.next().get_type() {
+			TT::SymDash => self.match_reg()
+				.map(Arg::PreDec),
 			TT::IdRegister => {
 				let reg = self.reg()?;
-				if self.try_match_token(TT::SymPlus).is_some() {
-					Some(Arg::PostInc(reg))
+				if self.match_token(TT::SymPlus).is_ok() {
+					Ok(Arg::PostInc(reg))
 				} else {
-					Some(Arg::IndReg(reg))
+					Ok(Arg::IndReg(reg))
 				}
 			}
-			TT::SymOParen => {
-				fn parse_num(data: &mut Parser, num: i64) -> Option<Arg> {
-					data.assert_token_with_offset(0, TT::SymComma)?;
-					match data.peek(1).get_type() {
-						TT::SymGBR => {
-							let imm = data.assert_within_i8(num)?;
-							data.next(); // Comma
-							data.next(); // GBR
-							data.match_token(TT::SymCParen);
-							Some(Arg::DispGBR(imm))
-						}
-						TT::SymPC => {
-							let imm = data.assert_within_i8(num)?;
-							data.next(); // Comma
-							data.next(); // PC
-							data.match_token(TT::SymCParen);
-							Some(Arg::DispPC(imm))
-						}
-						TT::IdRegister => {
-							let imm = data.assert_within_i4(num)?;
-							let src = data.reg()?;
-							data.next(); // Comma
-							data.next(); // Register
-							data.match_token(TT::SymCParen);
-							Some(Arg::DispReg(imm,src))
-						}
-						_ => error!(Arg, data, "GBR or Register"),
+			TT::SymOParen => match self.next().get_type() {
+				TT::IdLabel => {
+					let Some(lbl) = self.curr().get_id() else {
+						return error!(Arg, self, "Unknown Value");
+					};
+					self.match_token(TT::SymComma)?;
+					let reg = self.match_reg()?;
+					self.match_token(TT::SymCParen)?;
+					Ok(Arg::DispLabel(lbl,reg))
+				}
+				TT::IdNumber => {
+					let num = self.signed(Size::Byte)?;
+					self.match_token(TT::SymComma)?;
+					match self.next().get_type() {
+						TT::SymGBR => self.assert_within_i8(num)
+							.and_then(|imm| self.match_token(TT::SymCParen).map(|_| imm))
+							.map(Arg::DispGBR),
+						TT::SymPC => self.assert_within_i8(num)
+							.and_then(|imm| self.match_token(TT::SymCParen).map(|_| imm))
+							.map(Arg::DispPC),
+						TT::IdRegister => self.assert_within_i4(num)
+							.and_then(|imm| self.reg().map(|r| (imm,r)))
+							.and_then(|pair| self.match_token(TT::SymCParen).map(|_| pair))
+							.map(|(disp,reg)| Arg::DispReg(disp,reg)),
+						_ => error!(Arg, self, "GBR, PC, or Register"),
 					}
 				}
-
-				match self.next().get_type() {
-					TT::SymDash | TT::IdNumber => {
-						let num = self.number()?;
-						parse_num(self, num)
-					}
-					TT::IdRegister => {
-						let disp = self.reg()?;
-						self.assert_r0(disp);
-						self.match_token(TT::SymComma);
-						let src = self.match_reg()?;
-						self.match_token(TT::SymCParen);
-						Some(Arg::DispR0(src))
-					}
-					_ => error!(Arg, self, "Number or R0"),
-				}
+				TT::IdRegister => self.reg_args()
+					.and_then(|(r0,reg)| self.assert_r0(r0).map(|_| reg))
+					.and_then(|reg| self.match_token(TT::SymCParen).map(|_| reg))
+					.map(Arg::DispR0),
+				_ => error!(Arg, self, "Number or R0"),
 			}
 			_ => error!(Arg, self, "Address specifier (@r_/ @-r_ / @r_+)"),
 		}
 	}
 
-	fn match_size(&mut self) -> Option<Size> {
+	fn match_size(&mut self) -> Result<Size, String> {
 		match self.next().get_type() {
-			TokenType::SymByte => Some(Size::Byte),
-			TokenType::SymWord => Some(Size::Word),
-			TokenType::SymLong => Some(Size::Long),
+			TokenType::SymByte => Ok(Size::Byte),
+			TokenType::SymWord => Ok(Size::Word),
+			TokenType::SymLong => Ok(Size::Long),
 			_ => error!(Size, self, "size specifier"),
 		}
 	}
 
-	fn size(&mut self) -> Option<Size> {
+	fn size(&mut self) -> Result<Size, String> {
 		self.match_token(TokenType::SymDot)?;
 		self.match_size()
 	}
 
-	fn try_match_token(&mut self, tt: TokenType) -> Option<&Token> {
-		if self.peek(1).get_type() == tt {
-			Some(self.next())
-		} else {
-			None
-		}
-	}
-
-	fn assert_token_with_offset_or_err(&mut self, offset: usize, tt: TokenType, msg: &str) -> Option<()> {
+	fn assert_token_with_offset_or_err<'a>(&mut self,
+		offset: usize,
+		tt: TokenType,
+		msg: &'a str,
+	) -> Result<(), String> {
 		if self.peek(offset).get_type() != tt {
 			error!((), self, msg)
 		} else {
-			Some(())
+			Ok(())
 		}
 	}
 
-	fn assert_token_with_offset(&mut self, offset: usize, tt: TokenType) -> Option<()> {
-		self.assert_token_with_offset_or_err(offset, tt, &tt.to_string())
-	}
-
-	fn match_token_or_err<'a>(&'a mut self, tt: TokenType, msg: &'_ str) -> Option<&'a Token> {
+	fn match_token_or_err<'a>(&'a mut self,
+		tt: TokenType,
+		msg: &str,
+	) -> Result<&'a Token, String> {
 		self.assert_token_with_offset_or_err(1, tt, msg)?;
-		Some(self.next())
+		Ok(self.next())
 	}
 
-	fn match_ident_or_err(&mut self, msg: &str) -> Option<Label> {
+	fn match_ident_or_err<'a>(&mut self, msg: &str) -> Result<Label, String> {
 		self.assert_token_with_offset_or_err(1, TokenType::IdLabel, msg)?;
-		self.next().get_id()
+		Ok(self.next().get_id().unwrap())
 	}
 
-	fn match_token(&mut self, tt: TokenType) -> Option<&Token> {
+	fn match_token(&mut self, tt: TokenType) -> Result<&Token, String> {
 		self.match_token_or_err(tt, &tt.to_string())
+			.map_err(|s| s.to_string())
 	}
 
-	fn match_tokens(&mut self, tts: &[TokenType]) -> Option<()> {
+	fn match_tokens(&mut self, tts: &[TokenType]) -> Result<(),String> {
 		for tt in tts {
 			self.match_token(*tt)?;
 		}
-		Some(())
+		Ok(())
 	}
 
-	fn match_number_pos(&mut self) -> Option<i64> {
+	fn match_unsigned(&mut self, sz: Size) -> Result<i64, String> {
 		self.match_token(TokenType::IdNumber)?;
-		self.number_pos()
+		self.unsigned(sz)
 	}
 
-	fn match_number(&mut self) -> Option<i64> {
-		let mut is_neg = false;
-		let num = if self.peek(1).get_type() == TokenType::SymDash {
-			is_neg = true;
-			self.match_token_or_err(TokenType::IdNumber, "Number after unary minus")?;
-			self.number_pos()?
-		} else {
-			self.match_number_pos()?
-		};
-		Some(if is_neg { -num } else { num })
+	fn match_signed(&mut self, sz: Size) -> Result<i64, String> {
+		self.match_token(TokenType::IdNumber)?;
+		self.signed(sz)
 	}
 
-	fn match_reg(&mut self) -> Option<Reg> {
+	fn match_reg(&mut self) -> Result<Reg, String> {
 		self.match_token(TokenType::IdRegister)?;
 		self.reg()
 	}
 
-	fn assert_r0(&mut self, reg: u8) -> Option<()> {
+	fn assert_r0(&mut self, reg: u8) -> Result<(), String> {
 		if reg == 0 {
-			Some(())
+			Ok(())
 		} else {
 			error!((), self, "R0")
 		}
 	}
 
-	fn match_r0(&mut self) -> Option<()> {
+	fn match_r0(&mut self) -> Result<(), String> {
 		let reg = self.match_reg()?;
-		self.assert_r0(reg);
-		Some(())
+		self.assert_r0(reg)?;
+		Ok(())
 	}
 
-	fn match_reg_args(&mut self) -> Option<(Reg,Reg)> {
-		let src = self.match_reg()?;
-		self.match_token(TokenType::SymComma);
+	fn reg_args(&mut self) -> Result<(Reg,Reg), String> {
+		let src = self.reg()?;
+		self.match_token(TokenType::SymComma)?;
 		let dst = self.match_reg()?;
-		Some((src,dst))
+		Ok((src,dst))
 	}
 
-	fn assert_within_i4(&mut self, value: i64) -> Option<i8> {
+	fn match_reg_args(&mut self) -> Result<(Reg,Reg), String> {
+		self.assert_token_with_offset_or_err(1,
+			TokenType::IdRegister,
+			&TokenType::IdRegister.to_string())?;
+		self.reg_args()
+	}
+
+	fn assert_within_i4(&mut self, value: i64) -> Result<i8, String> {
 		if (-8..7).contains(&value) {
-			Some(((value as u8) & 0x0F) as i8)
+			Ok(((value as u8) & 0x0F) as i8)
 		} else {
 			error!(i8, self, "immediate value between -8 & 7")
 		}
 	}
 
-	fn assert_within_i8(&mut self, value: i64) -> Option<i8> {
+	fn assert_within_i8(&mut self, value: i64) -> Result<i8, String> {
 		if (i8::MIN as i64..i8::MAX as i64).contains(&value) {
-			Some(value as i8)
+			Ok(value as i8)
 		} else {
-			error!(i8, self, "immediate value between -128 & 127")
+			error!(i8, self, &format!("immediate value between {} & {}", i8::MIN, i8::MAX))
 		}
 	}
 
-	fn assert_within_i16(&mut self, value: i64) -> Option<i16> {
+	fn assert_within_i16(&mut self, value: i64) -> Result<i16, String> {
 		if (i16::MIN as i64..i16::MAX as i64).contains(&value) {
-			Some(value as i16)
+			Ok(value as i16)
 		} else {
-			error!(i16, self, "immediate value between -32768 & 32767")
+			error!(i16, self, &format!("immediate value between {} & {}", i16::MIN, i16::MAX))
 		}
 	}
 
-	fn assert_within_i32(&mut self, value: i64) -> Option<i32> {
+	fn assert_within_i32(&mut self, value: i64) -> Result<i32, String> {
 		if (i32::MIN as i64..i32::MAX as i64).contains(&value) {
-			Some(value as i32)
+			Ok(value as i32)
 		} else {
-			error!(i32, self, "immediate value between -2147483648 & 2147483647")
+			error!(i32, self, &format!("immediate value between {} & {}", i32::MIN, i32::MAX))
 		}
 	}
 
-	fn assert_within_u8(&mut self, value: i64) -> Option<u8> {
+	fn assert_within_u8(&mut self, value: i64) -> Result<u8, String> {
 		if (u8::MIN as i64..u8::MAX as i64).contains(&value) {
-			Some(value as u8)
+			Ok(value as u8)
 		} else {
 			error!(u8, self, "immediate value between 0 & 255")
 		}
+	}
+
+	fn simple_branch_ins(
+		&mut self,
+		fn_fast: impl Fn(Label) -> Ins,
+		fn_delay: impl Fn(Label) -> Ins,
+	) -> Result<Ins, String> {
+		use TokenType as TT;
+		match self.next().get_type() {
+			TT::IdLabel => self.curr().get_id()
+				.map(fn_fast)
+				.ok_or_else(|| {
+					self.next_line();
+					self.expected("Label")
+				}),
+			TT::SymSlash => self.match_token(TT::SymDelay).map(|_| ())
+				.and_then(|_| self.match_ident_or_err("Label"))
+				.map_err(|e| self.expected(&e))
+				.map(fn_delay),
+			_ => error!(Ins, self, "Label"),
+		}
+	}
+
+	fn logic_ins(
+		&mut self,
+		fn_imm: impl Fn(u8) -> Ins,
+		fn_reg: impl Fn(Reg,Reg) -> Ins,
+		fn_byte: impl Fn(u8) -> Ins,
+		ins_name: &str,
+	) -> Result<Ins, String> {
+		use TokenType as TT;
+		match self.next().get_type() {
+			// INS r#,r#
+			TT::IdRegister => self.reg_args()
+				.map(|(src,dst)| fn_reg(src,dst)),
+			// INS.B #imm,@(r#,GBR)
+			TT::SymDot => self.match_tokens(&[TT::SymByte,TT::SymImmediate])
+				.and_then(|_| self.match_signed(Size::Byte))
+				.and_then(|num| self.assert_within_u8(num))
+				.and_then(|imm| self.match_tokens(&[TT::SymComma,TT::SymAddress,TT::SymOParen]).map(|_| imm))
+				.and_then(|imm| self.match_r0().map(|_| imm))
+				.and_then(|imm| self.match_tokens(&[TT::SymComma,TT::SymGBR,TT::SymCParen]).map(|_| imm))
+				.map(fn_byte),
+			// INS #imm,r0
+			TT::SymImmediate => self.match_unsigned(Size::Byte)
+				.and_then(|num| self.assert_within_u8(num))
+				.and_then(|imm| self.match_token(TT::SymComma).map(|_| imm))
+				.and_then(|imm| self.match_r0().map(|_| imm))
+				.map(fn_imm),
+			_ => error!(Ins, self, &format!("Valid {ins_name} source argument: Number or Register")),
+		}
+	}
+
+	fn dmul_ins(&mut self,
+		fn_ins: impl Fn(Reg,Reg) -> Ins,
+	) -> Result<Ins, String> {
+		self.size()
+			.and_then(|sz| if sz == Size::Long {
+				self.match_reg_args()
+					.map(|(src,dst)| fn_ins(src,dst))
+			} else {
+				error!(Ins, self, "Size specifier Long('l')")
+			})
+	}
+
+	fn ext_ins(&mut self,
+		fn_ins: impl Fn(Size,Reg,Reg) -> Ins,
+	) -> Result<Ins, String> {
+		self.size()
+			.and_then(|sz| if sz == Size::Long {
+				error!(Ins, self, "Size specifier Byte('b') or Word('w')")
+			} else {
+				self.match_reg_args()
+					.map(|(src,dst)| fn_ins(sz,src,dst))
+			})
 	}
 }
 
@@ -738,38 +826,46 @@ pub fn parser(tokens: &[Token]) -> Result<Output, Vec<String>> {
 	while !data.is_done() {
 		use TokenType as TT;
 		let cur_tok = data.curr();
+		eprintln!("{cur_tok:?}");
 		match cur_tok.get_type() {
 			TT::IdComment => {} // skip comments
 			TT::IdLabel => {
 				let lbl = cur_tok.get_id()
 					.expect("identifier without referent");
-				if data.match_token_or_err(TT::SymColon, "End of label declaration (':')").is_none() {
-					continue;
-				}
-				if output.labels.contains_key(&lbl) {
-					eprintln!("ERROR: Label '{lbl}' already defined");
-					while data.peek(1).get_type() != TT::SymNewline {
-						data.next();
+				match data.next().get_type() {
+					TT::SymEqual => data.match_signed(Size::Byte)
+						.and_then(|num| data.assert_within_i8(num))
+						.map(|imm| output.values.insert(lbl.clone(), imm))
+						.map(|_| ())
+						.unwrap_or_default(),
+					TT::SymColon => {
+						if output.labels.contains_key(&lbl) {
+							data.errors.push(format!("ERROR: Label '{lbl}' already defined"));
+							data.next_line();
+							continue;
+						}
+						output.labels.insert(lbl.clone(), None);
+						output.add_to_section(skey, Ins::Label(lbl))
 					}
-					data.next();
-					continue;
+					_ => {
+						let msg = data.expected(": or \"= <number>\" to declare a new label or value");
+						data.errors.push(msg);
+						data.next_line();
+						continue;
+					}
 				}
-				output.labels.insert(lbl.clone(), None);
-				output.add_to_section(skey, Ins::Label(lbl));
 			}
 			TT::IdUnknown => {
 				let (line,pos) = cur_tok.pos();
-				eprintln!("unknown item '{cur_tok}' @ [{line}:{pos}]");
+				data.errors.push(format!("ERROR: unknown item '{cur_tok}' @ [{line}:{pos}]"));
 			}
 			TT::InsADD => match data.next().get_type() {
-				TT::SymDash | TT::IdNumber => data.number()
+				TT::SymImmediate => data.match_signed(Size::Byte)
 					.and_then(|num| data.assert_within_i8(num))
 					.and_then(|imm| data.match_token(TT::SymComma).map(|_| imm))
-					.zip(data.match_reg())
+					.and_then(|imm| data.match_reg().map(|r| (imm,r)))
 					.map(|(imm,reg)| Ins::ADD_Imm(imm,reg)),
-				TT::IdRegister => data.reg()
-					.and_then(|src| data.match_token(TT::SymComma).map(|_| src))
-					.zip(data.match_reg())
+				TT::IdRegister => data.reg_args()
 					.map(|(src,dst)| Ins::ADD_Reg(src,dst)),
 				_ => error!(Ins, data, "Valid ADD source argument: Number or Register"),
 			}.map(|ins| output.add_to_section(skey, ins)).unwrap_or_default(),
@@ -779,38 +875,12 @@ pub fn parser(tokens: &[Token]) -> Result<Output, Vec<String>> {
 			TT::InsADDV => data.match_reg_args()
 				.map(|(src,dst)| output.add_to_section(skey, Ins::ADDV(src,dst)))
 				.unwrap_or_default(),
-			TT::InsAND => match data.next().get_type() {
-				TT::IdNumber => data.number_pos()
-					.and_then(|num| data.assert_within_u8(num))
-					.and_then(|imm| data.match_token(TT::SymComma).map(|_| imm))
-					.and_then(|imm| data.match_r0().map(|_| imm))
-					.map(Ins::AND_Imm),
-				TT::IdRegister => data.reg()
-					.and_then(|src| data.match_token(TT::SymComma).map(|_| src))
-					.zip(data.match_reg())
-					.map(|(src,dst)| Ins::AND_Reg(src,dst)),
-				TT::SymDot => || -> Option<Ins> {
-					data.match_token(TT::SymByte)?;
-					let num = data.match_number()?;
-					let imm = data.assert_within_u8(num)?;
-					data.match_tokens(&[TT::SymComma,TT::SymAddress,TT::SymOParen])?;
-					data.match_r0()?;
-					data.match_tokens(&[TT::SymComma,TT::SymGBR,TT::SymCParen])?;
-					Some(Ins::AND_Byte(imm))
-				}(),
-				_ => error!(Ins, data, "Valid AND source argument: Number or Register"),
-			}.map(|ins| output.add_to_section(skey, ins)).unwrap_or_default(),
-			TT::InsBF => match data.next().get_type() {
-				TT::IdLabel => Some(Ins::BF(
-					data.curr().get_id()
-						.expect("identifier without referent"),
-				)),
-				TT::SymSlash => || -> Option<Ins> {
-					data.match_token(TT::SymDelay)?;
-					Some(Ins::BFS(data.match_ident_or_err("Label")?))
-				}(),
-				_ => error!(Ins, data, "Label"),
-			}.map(|ins| output.add_to_section(skey, ins)).unwrap_or_default(),
+			TT::InsAND => data.logic_ins(Ins::AND_Imm, Ins::AND_Reg, Ins::AND_Byte, "AND")
+				.map(|ins| output.add_to_section(skey, ins))
+				.unwrap_or_default(),
+			TT::InsBF => data.simple_branch_ins(Ins::BF, Ins::BFS)
+				.map(|ins| output.add_to_section(skey, ins))
+				.unwrap_or_default(),
 			TT::InsBRA => data.match_ident_or_err("Label")
 				.map(|lbl| output.add_to_section(skey, Ins::BRA(lbl)))
 				.unwrap_or_default(),
@@ -823,29 +893,21 @@ pub fn parser(tokens: &[Token]) -> Result<Output, Vec<String>> {
 			TT::InsBSRF => data.match_reg()
 				.map(|reg| output.add_to_section(skey, Ins::BSRF(reg)))
 				.unwrap_or_default(),
-			TT::InsBT => match data.next().get_type() {
-				TT::IdLabel => Some(Ins::BT(
-					data.curr().get_id()
-						.expect("identifier without referent"),
-				)),
-				TT::SymSlash => || -> Option<Ins> {
-					data.match_token(TT::SymDelay)?;
-					Some(Ins::BTS(data.match_ident_or_err("Label")?))
-				}(),
-				_ => error!(Ins, data, "Label"),
-			}.map(|ins| output.add_to_section(skey, ins)).unwrap_or_default(),
+			TT::InsBT => data.simple_branch_ins(Ins::BT, Ins::BTS)
+				.map(|ins| output.add_to_section(skey, ins))
+				.unwrap_or_default(),
 			TT::InsCLRMAC => output.add_to_section(skey, Ins::CLRMAC),
 			TT::InsCLRT => output.add_to_section(skey, Ins::CLRT),
 			TT::InsCMP => {
-				let mut func = || -> Option<Ins> {
+				let mut func = || -> Result<Ins, String> {
 					data.match_token(TT::SymSlash)?;
 					match data.next().get_type() {
-						TT::SymEQ => if data.next().get_type() == TT::IdNumber {
-							let num = data.number()?;
+						TT::SymEQ => if data.next().get_type() == TT::SymImmediate {
+							let num = data.match_signed(Size::Byte)?;
 							let imm = data.assert_within_i8(num)?;
 							data.match_token(TT::SymComma)?;
 							data.match_r0()?;
-							Some(Ins::CMP_EQ_Imm(imm))
+							Ok(Ins::CMP_EQ_Imm(imm))
 						} else {
 							data.match_reg_args().map(|(src,dst)| Ins::CMP_EQ_Reg(src,dst))
 						},
@@ -859,8 +921,9 @@ pub fn parser(tokens: &[Token]) -> Result<Output, Vec<String>> {
 						_ => error!(Ins, data, "Comparator type (EQ,GT,GE,HI,HS,PL,PZ,STR)"),
 					}
 				};
-				if let Some(ins) = func() {
-					output.add_to_section(skey, ins);
+				match func() {
+					Ok(ins) => output.add_to_section(skey, ins),
+					Err(e) => data.errors.push(e),
 				}
 			}
 			TT::InsDIV0S => data.match_reg_args()
@@ -870,171 +933,209 @@ pub fn parser(tokens: &[Token]) -> Result<Output, Vec<String>> {
 			TT::InsDIV1 => data.match_reg_args()
 				.map(|(src,dst)| output.add_to_section(skey, Ins::DIV1(src,dst)))
 				.unwrap_or_default(),
-			TT::InsDMULS => data.size()
-				.and_then(|sz| if sz == Size::Long {
-					data.match_reg_args()
-				} else {
-					error!((Reg,Reg), data, "Size specifier Long('l')")
-				})
-				.map(|(src,dst)| output.add_to_section(skey, Ins::DMULS(src,dst)))
+			TT::InsDMULS => data.dmul_ins(Ins::DMULS)
+				.map(|ins| output.add_to_section(skey, ins))
 				.unwrap_or_default(),
-			TT::InsDMULU => data.size()
-				.and_then(|sz| if sz == Size::Long {
-					data.match_reg_args()
-				} else {
-					error!((Reg,Reg), data, "Size specifier Long('l')")
-				})
-				.map(|(src,dst)| output.add_to_section(skey, Ins::DMULU(src,dst)))
+			TT::InsDMULU => data.dmul_ins(Ins::DMULU)
+				.map(|ins| output.add_to_section(skey, ins))
 				.unwrap_or_default(),
-			TT::InsDT => data.match_reg()
-				.map(|reg| output.add_to_section(skey, Ins::DT(reg)))
+			TT::InsDT => data.match_reg().map(Ins::DT)
+				.map(|ins| output.add_to_section(skey, ins))
 				.unwrap_or_default(),
-			TT::InsEXTS => data.size()
-				.and_then(|sz| if sz == Size::Long {
-					error!((), data, "Size specifier Byte('b') or Word('w')")
-				} else {
-					data.match_reg_args()
-						.map(|(src,dst)| output.add_to_section(skey, Ins::EXTS(sz,src,dst)))
-				})
+			TT::InsEXTS => data.ext_ins(Ins::EXTS)
+				.map(|ins| output.add_to_section(skey, ins))
 				.unwrap_or_default(),
-			TT::InsEXTU => data.size()
-				.and_then(|sz| if sz == Size::Long {
-					error!((), data, "Size specifier Byte('b') or Word('w')")
-				} else {
-					data.match_reg_args()
-						.map(|(src,dst)| output.add_to_section(skey, Ins::EXTU(sz,src,dst)))
-				})
+			TT::InsEXTU => data.ext_ins(Ins::EXTU)
+				.map(|ins| output.add_to_section(skey, ins))
 				.unwrap_or_default(),
 			TT::InsJMP => {
 				// TODO - srenshaw - Add label handling for JMP
-				let mut func = || -> Option<Ins> {
-					data.match_token(TT::SymAddress)?;
-					let reg = data.match_reg()?;
-					Some(Ins::JMP(reg))
-				};
-				if let Some(ins) = func() {
-					output.add_to_section(skey, ins);
-				}
+				data.match_token(TT::SymAddress).map(|_| ())
+					.and_then(|_| data.match_reg())
+					.map(Ins::JMP)
+					.map(|ins| output.add_to_section(skey, ins))
+					.unwrap_or_default()
 			}
 			TT::InsJSR => {
 				// TODO - srenshaw - Add label handling for JSR
-				let mut func = || -> Option<Ins> {
-					data.match_token(TT::SymAddress)?;
-					let reg = data.match_reg()?;
-					Some(Ins::JSR(reg))
-				};
-				if let Some(ins) = func() {
-					output.add_to_section(skey, ins);
-				}
+				data.match_token(TT::SymAddress).map(|_| ())
+					.and_then(|_| data.match_reg())
+					.map(Ins::JSR)
+					.map(|ins| output.add_to_section(skey, ins))
+					.unwrap_or_default()
 			}
 			TT::InsLDC => match data.next().get_type() {
-				TT::IdRegister => || -> Option<Ins> {
-					let reg = data.reg()?;
-					data.match_token(TT::SymComma)?;
-					match data.next().get_type() {
-						TT::SymGBR => Some(Ins::LDC_GBR(reg)),
-						TT::SymSR => Some(Ins::LDC_SR(reg)),
-						TT::SymVBR => Some(Ins::LDC_VBR(reg)),
+				// LDC r#,GBR
+				// LDC r#,SR
+				// LDC r#,VBR
+				TT::IdRegister => data.reg()
+					.and_then(|reg| data.match_token(TT::SymComma).map(|_| reg))
+					.and_then(|reg| match data.next().get_type() {
+						TT::SymGBR => Ok(Ins::LDC_GBR(reg)),
+						TT::SymSR => Ok(Ins::LDC_SR(reg)),
+						TT::SymVBR => Ok(Ins::LDC_VBR(reg)),
 						_ => error!(Ins, data, "Control Register (GBR,SR,VBR)"),
-					}
-				}(),
-				TT::SymDot => || -> Option<Ins> {
-					data.match_tokens(&[TT::SymLong,TT::SymAddress])?;
-					let reg = data.match_reg()?;
-					data.match_token(TT::SymPlus)?;
-					match data.next().get_type() {
-						TT::SymGBR => Some(Ins::LDC_GBR_Inc(reg)),
-						TT::SymSR => Some(Ins::LDC_SR_Inc(reg)),
-						TT::SymVBR => Some(Ins::LDC_VBR_Inc(reg)),
+					}),
+				// LDC.L @r#+,GBR
+				// LDC.L @r#+,SR
+				// LDC.L @r#+,VBR
+				TT::SymDot => data.match_tokens(&[TT::SymLong,TT::SymAddress])
+					.and_then(|_| data.match_reg())
+					.and_then(|reg| data.match_tokens(&[TT::SymPlus,TT::SymComma]).map(|_| reg))
+					.and_then(|reg| match data.next().get_type() {
+						TT::SymGBR => Ok(Ins::LDC_GBR_Inc(reg)),
+						TT::SymSR => Ok(Ins::LDC_SR_Inc(reg)),
+						TT::SymVBR => Ok(Ins::LDC_VBR_Inc(reg)),
 						_ => error!(Ins, data, "Control Register (GBR,SR,VBR)"),
-					}
-				}(),
+					}),
 				_ => error!(Ins, data, "Valid LDC instruction"),
 			}.map(|ins| output.add_to_section(skey, ins)).unwrap_or_default(),
 			TT::InsLDS => match data.next().get_type() {
-					TT::IdRegister => data.reg()
-						.and_then(|reg| data.match_token(TT::SymComma).map(|_| reg))
-						.and_then(|reg| match data.next().get_type() {
-							TT::SymMACH => Some(Ins::LDS_MACH(reg)),
-							TT::SymMACL => Some(Ins::LDS_MACL(reg)),
-							TT::SymPR => Some(Ins::LDS_PR(reg)),
-							_ => error!(Ins, data, "Special Register (MACH,MACL,PR)"),
-						}),
-					TT::SymDot => || -> Option<Ins> {
-						data.match_tokens(&[TT::SymLong,TT::SymAddress])?;
-						let reg = data.match_reg()?;
-						data.match_token(TT::SymPlus)?;
-						match data.next().get_type() {
-							TT::SymMACH => Some(Ins::LDS_MACH_Inc(reg)),
-							TT::SymMACL => Some(Ins::LDS_MACL_Inc(reg)),
-							TT::SymPR => Some(Ins::LDS_PR_Inc(reg)),
-							_ => error!(Ins, data, "Special Register (MACH,MACL,PR)"),
-						}
-					}(),
-					_ => error!(Ins, data, "Valid LDS instruction"),
-				}.map(|ins| output.add_to_section(skey, ins)).unwrap_or_default(),
+				// LDS r#,MACH
+				// LDS r#,MACL
+				// LDS r#,PR
+				TT::IdRegister => data.reg()
+					.and_then(|reg| data.match_token(TT::SymComma).map(|_| reg))
+					.and_then(|reg| match data.next().get_type() {
+						TT::SymMACH => Ok(Ins::LDS_MACH(reg)),
+						TT::SymMACL => Ok(Ins::LDS_MACL(reg)),
+						TT::SymPR => Ok(Ins::LDS_PR(reg)),
+						_ => error!(Ins, data, "Special Register (MACH,MACL,PR)"),
+					}),
+				// LDS.L @r#+,MACH
+				// LDS.L @r#+,MACL
+				// LDS.L @r#+,PR
+				TT::SymDot => data.match_tokens(&[TT::SymLong,TT::SymAddress])
+					.and_then(|_| data.match_reg())
+					.and_then(|reg| data.match_tokens(&[TT::SymPlus,TT::SymComma]).map(|_| reg))
+					.and_then(|reg| match data.next().get_type() {
+						TT::SymMACH => Ok(Ins::LDS_MACH_Inc(reg)),
+						TT::SymMACL => Ok(Ins::LDS_MACL_Inc(reg)),
+						TT::SymPR => Ok(Ins::LDS_PR_Inc(reg)),
+						_ => error!(Ins, data, "Special Register (MACH,MACL,PR)"),
+					}),
+				_ => error!(Ins, data, "Valid LDS instruction"),
+			}.map(|ins| output.add_to_section(skey, ins)).unwrap_or_default(),
 			TT::InsMAC => {
 				let ins_func = match data.size() {
-					Some(Size::Byte) => {
-						error!((), data, "Size specifier Word('w') or Long('l')");
+					Ok(Size::Byte) => {
+						let msg = data.expected("Size specifier Word('w') or Long('l')");
+						data.errors.push(msg);
+						data.next_line();
 						continue;
 					}
-					Some(Size::Word) => Ins::MAC_Word,
-					Some(Size::Long) => Ins::MAC_Long,
-					None => continue,
+					Ok(Size::Word) => Ins::MAC_Word,
+					Ok(Size::Long) => Ins::MAC_Long,
+					Err(_) => continue,
 				};
-				let ins = || -> Option<Ins> {
-					data.match_token(TT::SymAddress)?;
-					let src = data.match_reg()?;
-					data.match_tokens(&[TT::SymPlus,TT::SymComma,TT::SymAddress])?;
-					let dst = data.match_reg()?;
-					data.match_token(TT::SymPlus)?;
-					Some(ins_func(src,dst))
-				}();
-				if let Some(ins) = ins {
-					output.add_to_section(skey, ins);
-				}
+				data.match_token(TT::SymAddress).map(|_| ())
+					.and_then(|_| data.match_reg())
+					.and_then(|reg| data.match_tokens(&[TT::SymPlus,TT::SymComma,TT::SymAddress]).map(|_| reg))
+					.and_then(|reg| data.match_reg().map(|r| (reg,r)))
+					.and_then(|pair| data.match_token(TT::SymPlus).map(|_| pair))
+					.map(|(src,dst)| ins_func(src,dst))
+					.map(|ins| output.add_to_section(skey, ins))
+					.unwrap_or_default()
 			}
+			// MOV #imm,r#
+			// MOV r#,r#
+			//
+			// MOV.B @(disp,GBR),r0
+			// MOV.W @(disp,GBR),r0
+			// MOV.L @(disp,GBR),r0
+			// MOV_FromGBR(Size,i8)
+			//
+			// MOV.B @(disp,r#),r0
+			// MOV.W @(disp,r#),r0
+			// MOV.L @(disp,r#),r#
+			// MOV_FromDisp(Size,i4,Reg,Reg) // assert!(Dst == r0 || Size == Long)
+			//
+			// MOV.B @(r0,r#),r#
+			// MOV.W @(r0,r#),r#
+			// MOV.L @(r0,r#),r#
+			// MOV_FromR0(Size,Reg,Reg)
+			//
+			// MOV.W @(disp,PC),r#
+			// MOV.L @(disp,PC),r#
+			// MOV_FromPC(Size,i8,Reg) // !Byte
+			// MOV_FromLabel(Size,Label,Reg) // !Byte
+			//
+			// MOV.B @r#+,r#
+			// MOV.W @r#+,r#
+			// MOV.L @r#+,r#
+			// MOV_FromInc(Size,Reg,Reg)
+			//
+			// MOV.B @r#,r#
+			// MOV.W @r#,r#
+			// MOV.L @r#,r#
+			// MOV_FromReg(Size,Reg,Reg)
+			//
+			// MOV.B r0,@(disp,GBR)
+			// MOV.W r0,@(disp,GBR)
+			// MOV.L r0,@(disp,GBR)
+			// MOV_ToGBR(Size,i8)
+			//
+			// MOV.B r0,@(disp,r#)
+			// MOV.W r0,@(disp,r#)
+			// MOV.L r#,@(disp,r#)
+			// MOV_ToDisp(Size,i4,Reg,Reg) // assert!(Src == r0 || Size == Long)
+			//
+			// MOV.B r#,@(r0,r#)
+			// MOV.W r#,@(r0,r#)
+			// MOV.L r#,@(r0,r#)
+			// MOV_ToR0(Size,Reg,Reg)
+			//
+			// MOV.B r#,@-r#
+			// MOV.W r#,@-r#
+			// MOV.L r#,@-r#
+			// MOV_ToDec(Size,Reg,Reg)
+			//
+			// MOV.B r#,@r#
+			// MOV.W r#,@r#
+			// MOV.L r#,@r#
+			// MOV_ToReg(Size,Reg,Reg)
 			TT::InsMOV => match data.next().get_type() {
-				TT::SymDash | TT::IdNumber => {
-					data.match_number()
-						.and_then(|num| data.assert_within_i8(num))
-						.and_then(|imm| data.match_token(TT::SymComma).map(|_| imm))
-						.zip(data.match_reg())
-						.map(|(imm,reg)| Ins::MOV_Imm(imm,reg))
-				}
-				TT::IdRegister => {
-					data.reg()
-						.and_then(|src| data.match_token(TT::SymComma).map(|_| src))
-						.zip(data.match_reg())
-						.map(|(src,dst)| Ins::MOV_Reg(src,dst))
-				}
-				TT::SymDot => || -> Option<Ins> {
+				// MOV Rm,Rn
+				TT::IdRegister => data.reg_args()
+					.map(|(src,dst)| Ins::MOV_Reg(src,dst)),
+				TT::SymDot => || -> Result<Ins, String> {
 					let size = data.match_size()?;
 
 					let src = match data.next().get_type() {
-						TT::SymAddress => data.address(),
+						TT::IdLabel => data.curr().get_id()
+							.map(Arg::Label)
+							.ok_or_else(|| {
+								data.next_line();
+								data.expected("Label")
+							}),
 						TT::IdRegister => data.reg().map(Arg::DirReg),
+						TT::SymAddress => data.address(),
 						_ => error!(Arg, data, "Register, Displacement, or Address"),
 					}?;
 
 					data.match_token(TT::SymComma)?;
 
 					let dst = match data.next().get_type() {
-						TT::SymAddress => data.address(),
 						TT::IdRegister => data.reg().map(Arg::DirReg),
+						TT::SymAddress => data.address(),
 						_ => error!(Arg, data, "Register, Displacement, or Address"),
 					}?;
 
-					Some(Ins::MOV(size,src,dst))
+					Ok(Ins::MOV(size,src,dst))
 				}(),
+				// MOV #imm,Rn
+				TT::SymImmediate => data.match_signed(Size::Byte)
+					.and_then(|num| data.assert_within_i8(num))
+					.and_then(|imm| data.match_token(TT::SymComma).map(|_| imm))
+					.and_then(|imm| data.match_reg().map(|r| (imm,r)))
+					.map(|(imm,reg)| Ins::MOV_Imm(imm,reg)),
 				_ => error!(Ins, data, "size specifier, 8-bit immediate, or Register")
 			}.map(|ins| output.add_to_section(skey, ins)).unwrap_or_default(),
 			TT::InsMOVA => data.match_tokens(&[TT::SymAddress, TT::SymOParen])
-				.and_then(|_| data.match_number())
+				.and_then(|_| data.match_signed(Size::Byte))
 				.and_then(|num| data.assert_within_i8(num))
-				.and_then(|num| data.match_tokens(&[TT::SymComma,TT::SymPC,TT::SymCParen,TT::SymComma]).map(|_| num))
-				.and_then(|num| data.match_r0().map(|_| num))
+				.and_then(|imm| data.match_tokens(&[TT::SymComma,TT::SymPC,TT::SymCParen,TT::SymComma]).map(|_| imm))
+				.and_then(|imm| data.match_r0().map(|_| imm))
 				.map(|num| output.add_to_section(skey, Ins::MOVA(num)))
 				.unwrap_or_default(),
 			TT::InsMOVT => data.match_reg()
@@ -1062,27 +1163,9 @@ pub fn parser(tokens: &[Token]) -> Result<Output, Vec<String>> {
 			TT::InsNOT => data.match_reg_args()
 				.map(|(src,dst)| output.add_to_section(skey, Ins::NOT(src,dst)))
 				.unwrap_or_default(),
-			TT::InsOR => match data.next().get_type() {
-				TT::IdNumber => data.number_pos()
-					.and_then(|num| data.assert_within_u8(num))
-					.and_then(|imm| data.match_token(TT::SymComma).map(|_| imm))
-					.and_then(|imm| data.match_r0().map(|_| imm))
-					.map(Ins::OR_Imm),
-				TT::IdRegister => data.reg()
-					.and_then(|src| data.match_token(TT::SymComma).map(|_| src))
-					.zip(data.match_reg())
-					.map(|(src,dst)| Ins::OR_Reg(src,dst)),
-				TT::SymDot => || -> Option<Ins> {
-					data.match_token(TT::SymByte)?;
-					let num = data.match_number()?;
-					let imm = data.assert_within_u8(num)?;
-					data.match_tokens(&[TT::SymComma,TT::SymAddress,TT::SymOParen])?;
-					data.match_r0()?;
-					data.match_tokens(&[TT::SymComma,TT::SymGBR,TT::SymCParen])?;
-					Some(Ins::OR_Byte(imm))
-				}(),
-				_ => error!(Ins, data, "Valid OR source argument: Number or Register"),
-			}.map(|ins| output.add_to_section(skey, ins)).unwrap_or_default(),
+			TT::InsOR => data.logic_ins(Ins::OR_Imm, Ins::OR_Reg, Ins::OR_Byte, "OR")
+				.map(|ins| output.add_to_section(skey, ins))
+				.unwrap_or_default(),
 			TT::InsROTCL => data.match_reg()
 				.map(|reg| output.add_to_section(skey, Ins::ROTCL(reg)))
 				.unwrap_or_default(),
@@ -1129,16 +1212,16 @@ pub fn parser(tokens: &[Token]) -> Result<Output, Vec<String>> {
 				.map(|reg| output.add_to_section(skey, Ins::SHLR16(reg)))
 				.unwrap_or_default(),
 			TT::InsSLEEP => output.add_to_section(skey, Ins::SLEEP),
-			TT::InsSTC => || -> Option<()> {
-				fn comma_reg(p: &mut Parser) -> Option<Reg> {
+			TT::InsSTC => || -> Result<Ins, String> {
+				fn comma_reg(p: &mut Parser) -> Result<Reg, String> {
 					p.match_token(TT::SymComma)?;
 					p.match_reg()
 				}
-				fn pre_dec(p: &mut Parser) -> Option<Reg> {
+				fn pre_dec(p: &mut Parser) -> Result<Reg, String> {
 					p.match_tokens(&[TT::SymComma,TT::SymAddress,TT::SymDash])?;
 					p.match_reg()
 				}
-				let ins = match data.next().get_type() {
+				match data.next().get_type() {
 					TT::SymGBR => comma_reg(&mut data).map(Ins::STC_GBR),
 					TT::SymSR => comma_reg(&mut data).map(Ins::STC_SR),
 					TT::SymVBR => comma_reg(&mut data).map(Ins::STC_VBR),
@@ -1152,19 +1235,18 @@ pub fn parser(tokens: &[Token]) -> Result<Output, Vec<String>> {
 						}
 					}
 					_ => error!(Ins, data, "Valid STC instruction"),
-				};
-				Some(output.add_to_section(skey, ins?))
-			}().unwrap_or_default(),
-			TT::InsSTS => || -> Option<()> {
-				fn comma_reg(p: &mut Parser) -> Option<Reg> {
+				}
+			}().map(|ins| output.add_to_section(skey, ins)).unwrap_or_default(),
+			TT::InsSTS => || -> Result<Ins, String> {
+				fn comma_reg(p: &mut Parser) -> Result<Reg, String> {
 					p.match_token(TT::SymComma)?;
 					p.match_reg()
 				}
-				fn pre_dec(p: &mut Parser) -> Option<Reg> {
+				fn pre_dec(p: &mut Parser) -> Result<Reg, String> {
 					p.match_tokens(&[TT::SymComma,TT::SymAddress,TT::SymDash])?;
 					p.match_reg()
 				}
-				let ins = match data.next().get_type() {
+				match data.next().get_type() {
 					TT::SymMACH => comma_reg(&mut data).map(Ins::STS_MACH),
 					TT::SymMACL => comma_reg(&mut data).map(Ins::STS_MACL),
 					TT::SymPR => comma_reg(&mut data).map(Ins::STS_PR),
@@ -1178,9 +1260,8 @@ pub fn parser(tokens: &[Token]) -> Result<Output, Vec<String>> {
 						}
 					}
 					_ => error!(Ins, data, "Valid STS instruction"),
-				};
-				Some(output.add_to_section(skey, ins?))
-			}().unwrap_or_default(),
+				}
+			}().map(|ins| output.add_to_section(skey, ins)).unwrap_or_default(),
 			TT::InsSUB => data.match_reg_args()
 				.map(|(src,dst)| output.add_to_section(skey, Ins::SUB(src,dst)))
 				.unwrap_or_default(),
@@ -1190,85 +1271,52 @@ pub fn parser(tokens: &[Token]) -> Result<Output, Vec<String>> {
 			TT::InsSUBV => data.match_reg_args()
 				.map(|(src,dst)| output.add_to_section(skey, Ins::SUBV(src,dst)))
 				.unwrap_or_default(),
-			TT::InsSWAP => || -> Option<()> {
-				data.match_token(TT::SymDot)?;
-				let sz = data.match_size()?;
-				let (src,dst) = data.match_reg_args()?;
-				Some(output.add_to_section(skey, Ins::SWAP(sz,src,dst)))
-			}().unwrap_or_default(),
+			TT::InsSWAP => data.match_token(TT::SymDot).map(|_| ())
+				.and_then(|_| data.match_size())
+				.and_then(|sz| data.match_reg_args().map(|pair| (sz, pair)))
+				.map(|(sz,(src,dst))| Ins::SWAP(sz,src,dst))
+				.map(|ins| output.add_to_section(skey, ins))
+				.unwrap_or_default(),
 			TT::InsTAS => data.match_tokens(&[TT::SymDot, TT::SymByte, TT::SymAddress])
 				.and_then(|_| data.match_reg())
 				.map(Ins::TAS)
 				.map(|ins| output.add_to_section(skey, ins))
 				.unwrap_or_default(),
-			TT::InsTRAPA => data.match_number()
+			TT::InsTRAPA => data.match_token(TT::SymImmediate).map(|_| ())
+				.and_then(|_| data.match_signed(Size::Byte))
 				.and_then(|num| data.assert_within_u8(num))
 				.map(Ins::TRAPA)
 				.map(|ins| output.add_to_section(skey, ins))
 				.unwrap_or_default(),
-			TT::InsTST => match data.next().get_type() {
-				TT::IdNumber => data.number_pos()
-					.and_then(|num| data.assert_within_u8(num))
-					.and_then(|imm| data.match_token(TT::SymComma).map(|_| imm))
-					.and_then(|imm| data.match_r0().map(|_| imm))
-					.map(Ins::TST_Imm),
-				TT::IdRegister => data.reg()
-					.and_then(|src| data.match_token(TT::SymComma).map(|_| src))
-					.zip(data.match_reg())
-					.map(|(src,dst)| Ins::TST_Reg(src,dst)),
-				TT::SymDot => || -> Option<Ins> {
-					data.match_token(TT::SymByte)?;
-					let num = data.match_number()?;
-					let imm = data.assert_within_u8(num)?;
-					data.match_tokens(&[TT::SymComma,TT::SymAddress,TT::SymOParen])?;
-					data.match_r0()?;
-					data.match_tokens(&[TT::SymComma,TT::SymGBR,TT::SymCParen])?;
-					Some(Ins::TST_Byte(imm))
-				}(),
-				_ => error!(Ins, data, "Valid TST source argument: Number or Register"),
-			}.map(|ins| output.add_to_section(skey, ins)).unwrap_or_default(),
-			TT::InsXOR => match data.next().get_type() {
-				TT::IdNumber => data.number_pos()
-					.and_then(|num| data.assert_within_u8(num))
-					.and_then(|imm| data.match_token(TT::SymComma).map(|_| imm))
-					.and_then(|imm| data.match_r0().map(|_| imm))
-					.map(Ins::XOR_Imm),
-				TT::IdRegister => data.reg()
-					.and_then(|src| data.match_token(TT::SymComma).map(|_| src))
-					.zip(data.match_reg())
-					.map(|(src,dst)| Ins::XOR_Reg(src,dst)),
-				TT::SymDot => || -> Option<Ins> {
-					data.match_token(TT::SymByte)?;
-					let num = data.match_number()?;
-					let imm = data.assert_within_u8(num)?;
-					data.match_tokens(&[TT::SymComma,TT::SymAddress,TT::SymOParen])?;
-					data.match_r0()?;
-					data.match_tokens(&[TT::SymComma,TT::SymGBR,TT::SymCParen])?;
-					Some(Ins::XOR_Byte(imm))
-				}(),
-				_ => error!(Ins, data, "Valid XOR source argument: Number or Register"),
-			}.map(|ins| output.add_to_section(skey, ins)).unwrap_or_default(),
+			TT::InsTST => data.logic_ins(Ins::TST_Imm, Ins::TST_Reg, Ins::TST_Byte, "TST")
+				.map(|ins| output.add_to_section(skey, ins))
+				.unwrap_or_default(),
+			TT::InsXOR => data.logic_ins(Ins::XOR_Imm, Ins::XOR_Reg, Ins::XOR_Byte, "XOR")
+				.map(|ins| output.add_to_section(skey, ins))
+				.unwrap_or_default(),
 			TT::InsXTRCT => data.match_reg_args()
 				.map(|(src,dst)| output.add_to_section(skey, Ins::XTRCT(src,dst)))
 				.unwrap_or_default(),
 			TT::SymConst => data.size()
 				.and_then(|sz| match data.next().get_type() {
-					TT::IdNumber => data.number()
+					TT::IdNumber => data.signed(sz)
 						.and_then(|num| match sz {
 							Size::Byte => data.assert_within_i8(num).map(|n| n as i64),
 							Size::Word => data.assert_within_i16(num).map(|n| n as i64),
 							Size::Long => data.assert_within_i32(num).map(|n| n as i64),
-						}?;
-						Some(Ins::Const_Imm(sz, imm))
-					}(),
+						})
+						.map(|imm| Ins::Const_Imm(sz,imm)),
 					TT::IdLabel => data.curr().get_id()
 						.map(|label| Ins::Const_Label(sz,label))
-						.or_else(|| error!(Ins, data, "identifier with label")),
+						.ok_or_else(|| {
+							data.next_line();
+							data.expected("identifier with label")
+						}),
 					_ => error!(Ins, data, "integer literal or label"),
 				})
 				.map(|ins| output.add_to_section(skey, ins)).unwrap_or_default(),
 			TT::SymNewline => {} // skip newlines
-			TT::SymOrg => data.match_number_pos()
+			TT::SymOrg => data.match_unsigned(Size::Long)
 				.map(|addr| skey = addr as u64)
 				.unwrap_or_default(),
 			_ => {
