@@ -10,6 +10,12 @@ pub(crate) struct Token {
 	pos: u16,
 }
 
+impl std::cmp::PartialEq for Token {
+	fn eq(&self, rhs: &Self) -> bool {
+		self.get_type() == rhs.get_type() && self.ex == rhs.ex
+	}
+}
+
 impl Token {
 	fn new(tt: TokenType, line: usize, pos: usize) -> Self {
 		Self {
@@ -17,6 +23,16 @@ impl Token {
 			ex: None,
 			line: line as u16 + 1,
 			pos: pos as u16,
+		}
+	}
+
+	#[cfg(test)]
+	fn test(tt: TokenType, input: &str) -> Self {
+		Self {
+			tt,
+			ex: Some(input.into()),
+			line: 0,
+			pos: 0,
 		}
 	}
 
@@ -298,6 +314,31 @@ fn next(idx: &mut usize, chars: &mut impl Iterator<Item = (usize, char)>) {
 	chars.next();
 }
 
+fn skip_while<I: Iterator<Item = (usize, char)>>(
+	cur_idx: usize,
+	chars: &mut std::iter::Peekable<I>,
+	char_idx: &mut usize,
+	pred: fn(char) -> bool,
+) -> usize {
+	let mut index = cur_idx + 1;
+	loop {
+		match chars.peek() {
+			Some((idx, ch)) => {
+				index = *idx;
+				if !pred(*ch) {
+					break;
+				}
+				next(char_idx, chars);
+			}
+			None => {
+				index += 1;
+				break;
+			}
+		}
+	}
+	index - cur_idx
+}
+
 fn tokenize<'a, I: Iterator<Item = (usize, char)>>(
 	input: &'a str,
 	cur_idx: usize,
@@ -305,15 +346,8 @@ fn tokenize<'a, I: Iterator<Item = (usize, char)>>(
 	char_idx: &mut usize,
 	pred: fn(char) -> bool,
 ) -> &'a str {
-	let mut index = cur_idx + 1;
-	while let Some((idx, ch)) = chars.peek() {
-		index = *idx;
-		if !pred(*ch) {
-			break;
-		}
-		next(char_idx, chars);
-	}
-	&input[cur_idx..][..index - cur_idx]
+	let len = skip_while(cur_idx, chars, char_idx, pred);
+	&input[cur_idx..][..len]
 }
 
 fn next_line<I: Iterator<Item = (usize, char)>>(
@@ -321,16 +355,7 @@ fn next_line<I: Iterator<Item = (usize, char)>>(
 	chars: &mut std::iter::Peekable<I>,
 	char_idx: &mut usize,
 ) -> usize {
-	let mut index = cur_idx + 1;
-	while let Some((cmt_idx, cmt_char)) = chars.peek() {
-		*char_idx += 1;
-		index = *cmt_idx;
-		if *cmt_char == '\n' {
-			break;
-		}
-		next(char_idx, chars);
-	}
-	index - cur_idx
+	skip_while(cur_idx, chars, char_idx, |ch| ch != '\n')
 }
 
 pub(crate) fn lexer(input: &str) -> Vec<Token> {
@@ -564,4 +589,221 @@ pub(crate) fn lexer(input: &str) -> Vec<Token> {
 	}
 
 	results
+}
+
+#[cfg(test)]
+mod can_lex {
+	use super::lexer;
+	use super::{Token, TokenType};
+
+	fn match_token(input: &str, tt: TokenType) {
+		let out = lexer(input);
+		assert_eq!(out.len(), 1);
+		assert_eq!(out[0], Token::test(tt, input));
+	}
+
+	#[test]
+	fn comment() {
+		match_token("; add and tst subv", TokenType::IdComment);
+	}
+
+	#[test]
+	fn label() {
+		match_token("StUfF", TokenType::IdLabel);
+	}
+
+	#[test]
+	fn number() {
+		let tt = TokenType::IdNumber;
+		let out = lexer("34 $2e %101");
+		assert_eq!(out.len(), 3);
+		assert_eq!(out[0], Token::test(tt, "34"));
+		assert_eq!(out[1], Token::test(tt, "$2e"));
+		assert_eq!(out[2], Token::test(tt, "%101"));
+	}
+
+	#[test]
+	fn register() {
+		let tt = TokenType::IdRegister;
+		let out = lexer("r0 r1 r2 r3 r4 r5 r6 r7 r8 r9 r10 r11 R12 R13 R14 r15 PC");
+		assert_eq!(out.len(), 17);
+		assert_eq!(out[0], Token::test(tt, "r0"));
+		assert_eq!(out[1], Token::test(tt, "r1"));
+		assert_eq!(out[2], Token::test(tt, "r2"));
+		assert_eq!(out[3], Token::test(tt, "r3"));
+		assert_eq!(out[4], Token::test(tt, "r4"));
+		assert_eq!(out[5], Token::test(tt, "r5"));
+		assert_eq!(out[6], Token::test(tt, "r6"));
+		assert_eq!(out[7], Token::test(tt, "r7"));
+		assert_eq!(out[8], Token::test(tt, "r8"));
+		assert_eq!(out[9], Token::test(tt, "r9"));
+		assert_eq!(out[10], Token::test(tt, "r10"));
+		assert_eq!(out[11], Token::test(tt, "r11"));
+		assert_eq!(out[12], Token::test(tt, "R12"));
+		assert_eq!(out[13], Token::test(tt, "R13"));
+		assert_eq!(out[14], Token::test(tt, "R14"));
+		assert_eq!(out[15], Token::test(tt, "r15"));
+		assert_eq!(out[16], Token::test(TokenType::SymPC, "PC"));
+	}
+
+	#[test]
+	fn unknown() {
+		match_token("^?^", TokenType::IdUnknown);
+	}
+
+	#[test]
+	fn add() {
+		let tt = TokenType::InsAdd;
+		match_token("add", tt);
+		match_token("adD", tt);
+		match_token("aDd", tt);
+		match_token("aDD", tt);
+		match_token("Add", tt);
+		match_token("AdD", tt);
+		match_token("ADd", tt);
+		match_token("ADD", tt);
+	}
+
+	#[test]
+	fn addc() {
+		let tt = TokenType::InsAddC;
+		match_token("addc", tt);
+		match_token("addC", tt);
+		match_token("adDc", tt);
+		match_token("adDC", tt);
+		match_token("aDdc", tt);
+		match_token("aDdC", tt);
+		match_token("aDDc", tt);
+		match_token("aDDC", tt);
+		match_token("Addc", tt);
+		match_token("AddC", tt);
+		match_token("AdDc", tt);
+		match_token("AdDC", tt);
+		match_token("ADdc", tt);
+		match_token("ADdC", tt);
+		match_token("ADDc", tt);
+		match_token("ADDC", tt);
+	}
+
+	#[test]
+	fn addv() {
+		let tt = TokenType::InsAddV;
+		match_token("addv", tt);
+		match_token("addV", tt);
+		match_token("adDv", tt);
+		match_token("adDV", tt);
+		match_token("aDdv", tt);
+		match_token("aDdV", tt);
+		match_token("aDDv", tt);
+		match_token("aDDV", tt);
+		match_token("Addv", tt);
+		match_token("AddV", tt);
+		match_token("AdDv", tt);
+		match_token("AdDV", tt);
+		match_token("ADdv", tt);
+		match_token("ADdV", tt);
+		match_token("ADDv", tt);
+		match_token("ADDV", tt);
+	}
+
+	/*
+		InsAdd,
+		InsAddC,
+		InsAddV,
+		InsAnd,
+		InsBf,
+		InsBra,
+		InsBraF,
+		InsBsr,
+		InsBsrF,
+		InsBt,
+		InsClrMac,
+		InsClrT,
+		InsCmp,
+		InsDiv0S,
+		InsDiv0U,
+		InsDiv1,
+		InsDMulS,
+		InsDMulU,
+		InsDT,
+		InsExtS,
+		InsExtU,
+		InsJmp,
+		InsJsr,
+		InsLdc,
+		InsLds,
+		InsMac,
+		InsMov,
+		InsMovA,
+		InsMovT,
+		InsMul,
+		InsMulS,
+		InsMulU,
+		InsNeg,
+		InsNegC,
+		InsNop,
+		InsNot,
+		InsOr,
+		InsRotCL,
+		InsRotCR,
+		InsRotL,
+		InsRotR,
+		InsRte,
+		InsRts,
+		InsSetT,
+		InsShAL,
+		InsShAR,
+		InsShLL,
+		InsShLL16,
+		InsShLL2,
+		InsShLL8,
+		InsShLR,
+		InsShLR16,
+		InsShLR2,
+		InsShLR8,
+		InsSleep,
+		InsStc,
+		InsSts,
+		InsSub,
+		InsSubC,
+		InsSubV,
+		InsSwap,
+		InsTas,
+		InsTrapA,
+		InsTst,
+		InsXor,
+		InsXtrct,
+		SymAddress,
+		SymByte,
+		SymCParen,
+		SymColon,
+		SymComma,
+		SymConst,
+		SymDash,
+		SymDelay,
+		SymDot,
+		SymEQ,
+		SymEqual,
+		SymGBR,
+		SymGE,
+		SymGT,
+		SymHI,
+		SymHS,
+		SymImmediate,
+		SymLong,
+		SymMACH,
+		SymMACL,
+		SymNewline,
+		SymOParen,
+		SymOrg,
+		SymPL,
+		SymPR,
+		SymPZ,
+		SymPlus,
+		SymSR,
+		SymStr,
+		SymSlash,
+		SymVBR,
+		SymWord,
+	*/
 }
