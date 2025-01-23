@@ -1,0 +1,4 @@
+hard_tabs = true
+newline_style = "Unix"
+overflow_delimited_expr = true
+tab_spaces = 2

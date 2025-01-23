@@ -1,4 +1,3 @@
-
 use std::fmt;
 
 use crate::Label;
@@ -12,11 +11,7 @@ pub(crate) struct Token {
 }
 
 impl Token {
-	fn new(
-		tt: TokenType,
-		line: usize,
-		pos: usize,
-	) -> Self {
+	fn new(tt: TokenType, line: usize, pos: usize) -> Self {
 		Self {
 			tt,
 			ex: None,
@@ -51,8 +46,8 @@ impl Token {
 		self.tt
 	}
 
-	pub(crate) fn pos(&self) -> (u16,u16) {
-		(self.line,self.pos)
+	pub(crate) fn pos(&self) -> (u16, u16) {
+		(self.line, self.pos)
 	}
 }
 
@@ -77,79 +72,79 @@ impl fmt::Debug for Token {
 	}
 }
 
-#[derive(Debug,Clone,Copy,PartialEq,Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum TokenType {
 	IdComment,
 	IdLabel,
 	IdNumber,
 	IdRegister,
 	IdUnknown,
-	InsADD,
-	InsADDC,
-	InsADDV,
-	InsAND,
-	InsBF,
-	InsBRA,
-	InsBRAF,
-	InsBSR,
-	InsBSRF,
-	InsBT,
-	InsCLRMAC,
-	InsCLRT,
-	InsCMP,
-	InsDIV0S,
-	InsDIV0U,
-	InsDIV1,
-	InsDMULS,
-	InsDMULU,
+	InsAdd,
+	InsAddC,
+	InsAddV,
+	InsAnd,
+	InsBf,
+	InsBra,
+	InsBraF,
+	InsBsr,
+	InsBsrF,
+	InsBt,
+	InsClrMac,
+	InsClrT,
+	InsCmp,
+	InsDiv0S,
+	InsDiv0U,
+	InsDiv1,
+	InsDMulS,
+	InsDMulU,
 	InsDT,
-	InsEXTS,
-	InsEXTU,
-	InsJMP,
-	InsJSR,
-	InsLDC,
-	InsLDS,
-	InsMAC,
-	InsMOV,
-	InsMOVA,
-	InsMOVT,
-	InsMUL,
-	InsMULS,
-	InsMULU,
-	InsNEG,
-	InsNEGC,
-	InsNOP,
-	InsNOT,
-	InsOR,
-	InsROTCL,
-	InsROTCR,
-	InsROTL,
-	InsROTR,
-	InsRTE,
-	InsRTS,
-	InsSETT,
-	InsSHAL,
-	InsSHAR,
-	InsSHLL,
-	InsSHLL16,
-	InsSHLL2,
-	InsSHLL8,
-	InsSHLR,
-	InsSHLR16,
-	InsSHLR2,
-	InsSHLR8,
-	InsSLEEP,
-	InsSTC,
-	InsSTS,
-	InsSUB,
-	InsSUBC,
-	InsSUBV,
-	InsSWAP,
-	InsTAS,
-	InsTRAPA,
-	InsTST,
-	InsXOR,
-	InsXTRCT,
+	InsExtS,
+	InsExtU,
+	InsJmp,
+	InsJsr,
+	InsLdc,
+	InsLds,
+	InsMac,
+	InsMov,
+	InsMovA,
+	InsMovT,
+	InsMul,
+	InsMulS,
+	InsMulU,
+	InsNeg,
+	InsNegC,
+	InsNop,
+	InsNot,
+	InsOr,
+	InsRotCL,
+	InsRotCR,
+	InsRotL,
+	InsRotR,
+	InsRte,
+	InsRts,
+	InsSetT,
+	InsShAL,
+	InsShAR,
+	InsShLL,
+	InsShLL16,
+	InsShLL2,
+	InsShLL8,
+	InsShLR,
+	InsShLR16,
+	InsShLR2,
+	InsShLR8,
+	InsSleep,
+	InsStc,
+	InsSts,
+	InsSub,
+	InsSubC,
+	InsSubV,
+	InsSwap,
+	InsTas,
+	InsTrapA,
+	InsTst,
+	InsXor,
+	InsXtrct,
 	SymAddress,
 	SymByte,
 	SymCParen,
@@ -179,7 +174,7 @@ pub(crate) enum TokenType {
 	SymPZ,
 	SymPlus,
 	SymSR,
-	SymSTR,
+	SymStr,
 	SymSlash,
 	SymVBR,
 	SymWord,
@@ -194,72 +189,72 @@ impl fmt::Display for TokenType {
 			TT::IdNumber => "Number (bin/dec/hex)",
 			TT::IdRegister => "Register (R0-15,PC)",
 			TT::IdUnknown => "Unknown",
-			TT::InsADD => "ADD",
-			TT::InsADDC => "ADDC",
-			TT::InsADDV => "ADDV",
-			TT::InsAND => "AND",
-			TT::InsBF => "BF",
-			TT::InsBRA => "BRA",
-			TT::InsBRAF => "BRAF",
-			TT::InsBSR => "BSR",
-			TT::InsBSRF => "BSRF",
-			TT::InsBT => "BT",
-			TT::InsCLRMAC => "CLRMAC",
-			TT::InsCLRT => "CLRT",
-			TT::InsCMP => "CMP",
-			TT::InsDIV0S => "DIV0S",
-			TT::InsDIV0U => "DIV0U",
-			TT::InsDIV1 => "DIV1",
-			TT::InsDMULS => "DMULS",
-			TT::InsDMULU => "DMULU",
+			TT::InsAdd => "ADD",
+			TT::InsAddC => "ADDC",
+			TT::InsAddV => "ADDV",
+			TT::InsAnd => "AND",
+			TT::InsBf => "BF",
+			TT::InsBra => "BRA",
+			TT::InsBraF => "BRAF",
+			TT::InsBsr => "BSR",
+			TT::InsBsrF => "BSRF",
+			TT::InsBt => "BT",
+			TT::InsClrMac => "CLRMAC",
+			TT::InsClrT => "CLRT",
+			TT::InsCmp => "CMP",
+			TT::InsDiv0S => "DIV0S",
+			TT::InsDiv0U => "DIV0U",
+			TT::InsDiv1 => "DIV1",
+			TT::InsDMulS => "DMULS",
+			TT::InsDMulU => "DMULU",
 			TT::InsDT => "DT",
-			TT::InsEXTS => "EXTS",
-			TT::InsEXTU => "EXTU",
-			TT::InsJMP => "JMP",
-			TT::InsJSR => "JSR",
-			TT::InsLDC => "LDC",
-			TT::InsLDS => "LDS",
-			TT::InsMAC => "MAC",
-			TT::InsMOV => "MOV",
-			TT::InsMOVA => "MOVA",
-			TT::InsMOVT => "MOVT",
-			TT::InsMUL => "MUL",
-			TT::InsMULS => "MULS",
-			TT::InsMULU => "MULU",
-			TT::InsNEG => "NEG",
-			TT::InsNEGC => "NEGC",
-			TT::InsNOP => "NOP",
-			TT::InsNOT => "NOT",
-			TT::InsOR => "OR",
-			TT::InsROTCL => "ROTCL",
-			TT::InsROTCR => "ROTCR",
-			TT::InsROTL => "ROTL",
-			TT::InsROTR => "ROTR",
-			TT::InsRTE => "RTE",
-			TT::InsRTS => "RTS",
-			TT::InsSETT => "SETT",
-			TT::InsSHAL => "SHAL",
-			TT::InsSHAR => "SHAR",
-			TT::InsSHLL => "SHLL",
-			TT::InsSHLL16 => "SHLL16",
-			TT::InsSHLL2 => "SHLL2",
-			TT::InsSHLL8 => "SHLL8",
-			TT::InsSHLR => "SHLR",
-			TT::InsSHLR16 => "SHLR16",
-			TT::InsSHLR2 => "SHLR2",
-			TT::InsSHLR8 => "SHLR8",
-			TT::InsSLEEP => "SLEEP",
-			TT::InsSTC => "STC",
-			TT::InsSTS => "STS",
-			TT::InsSUB => "SUB",
-			TT::InsSUBC => "SUBC",
-			TT::InsSUBV => "SUBV",
-			TT::InsSWAP => "SWAP",
-			TT::InsTAS => "TAS",
-			TT::InsTRAPA => "TRAPA",
-			TT::InsTST => "TST",
-			TT::InsXOR => "XOR",
-			TT::InsXTRCT => "XTRCT",
+			TT::InsExtS => "EXTS",
+			TT::InsExtU => "EXTU",
+			TT::InsJmp => "JMP",
+			TT::InsJsr => "JSR",
+			TT::InsLdc => "LDC",
+			TT::InsLds => "LDS",
+			TT::InsMac => "MAC",
+			TT::InsMov => "MOV",
+			TT::InsMovA => "MOVA",
+			TT::InsMovT => "MOVT",
+			TT::InsMul => "MUL",
+			TT::InsMulS => "MULS",
+			TT::InsMulU => "MULU",
+			TT::InsNeg => "NEG",
+			TT::InsNegC => "NEGC",
+			TT::InsNop => "NOP",
+			TT::InsNot => "NOT",
+			TT::InsOr => "OR",
+			TT::InsRotCL => "ROTCL",
+			TT::InsRotCR => "ROTCR",
+			TT::InsRotL => "ROTL",
+			TT::InsRotR => "ROTR",
+			TT::InsRte => "RTE",
+			TT::InsRts => "RTS",
+			TT::InsSetT => "SETT",
+			TT::InsShAL => "SHAL",
+			TT::InsShAR => "SHAR",
+			TT::InsShLL => "SHLL",
+			TT::InsShLL16 => "SHLL16",
+			TT::InsShLL2 => "SHLL2",
+			TT::InsShLL8 => "SHLL8",
+			TT::InsShLR => "SHLR",
+			TT::InsShLR16 => "SHLR16",
+			TT::InsShLR2 => "SHLR2",
+			TT::InsShLR8 => "SHLR8",
+			TT::InsSleep => "SLEEP",
+			TT::InsStc => "STC",
+			TT::InsSts => "STS",
+			TT::InsSub => "SUB",
+			TT::InsSubC => "SUBC",
+			TT::InsSubV => "SUBV",
+			TT::InsSwap => "SWAP",
+			TT::InsTas => "TAS",
+			TT::InsTrapA => "TRAPA",
+			TT::InsTst => "TST",
+			TT::InsXor => "XOR",
+			TT::InsXtrct => "XTRCT",
 			TT::SymAddress => "@",
 			TT::SymByte => "b",
 			TT::SymCParen => ")",
@@ -289,7 +284,7 @@ impl fmt::Display for TokenType {
 			TT::SymPZ => "PZ",
 			TT::SymPlus => "+",
 			TT::SymSR => "SR",
-			TT::SymSTR => "STR",
+			TT::SymStr => "STR",
 			TT::SymSlash => "/",
 			TT::SymVBR => "VBR",
 			TT::SymWord => "w",
@@ -298,15 +293,12 @@ impl fmt::Display for TokenType {
 	}
 }
 
-fn next(
-	idx: &mut usize,
-	chars: &mut impl Iterator<Item=(usize,char)>,
-) {
+fn next(idx: &mut usize, chars: &mut impl Iterator<Item = (usize, char)>) {
 	*idx += 1;
 	chars.next();
 }
 
-fn tokenize<'a, I: Iterator<Item=(usize,char)>>(
+fn tokenize<'a, I: Iterator<Item = (usize, char)>>(
 	input: &'a str,
 	cur_idx: usize,
 	chars: &mut std::iter::Peekable<I>,
@@ -314,7 +306,7 @@ fn tokenize<'a, I: Iterator<Item=(usize,char)>>(
 	pred: fn(char) -> bool,
 ) -> &'a str {
 	let mut index = cur_idx + 1;
-	while let Some((idx,ch)) = chars.peek() {
+	while let Some((idx, ch)) = chars.peek() {
 		index = *idx;
 		if !pred(*ch) {
 			break;
@@ -324,13 +316,13 @@ fn tokenize<'a, I: Iterator<Item=(usize,char)>>(
 	&input[cur_idx..][..index - cur_idx]
 }
 
-fn next_line<I: Iterator<Item=(usize,char)>>(
+fn next_line<I: Iterator<Item = (usize, char)>>(
 	cur_idx: usize,
 	chars: &mut std::iter::Peekable<I>,
 	char_idx: &mut usize,
 ) -> usize {
 	let mut index = cur_idx + 1;
-	while let Some((cmt_idx,cmt_char)) = chars.peek() {
+	while let Some((cmt_idx, cmt_char)) = chars.peek() {
 		*char_idx += 1;
 		index = *cmt_idx;
 		if *cmt_char == '\n' {
@@ -369,13 +361,11 @@ pub(crate) fn lexer(input: &str) -> Vec<Token> {
 				results.push(Token::new(TT::SymPlus, line_idx, char_idx));
 			}
 			'-' => {
-				let token = tokenize(input,
-					cur_idx, &mut chars, &mut char_idx,
-					|ch| ('0'..='9').contains(&ch) || '_' == ch || '-' == ch
-				);
+				let token = tokenize(input, cur_idx, &mut chars, &mut char_idx, |ch| {
+					ch.is_ascii_digit() || '_' == ch || '-' == ch
+				});
 				if token.len() > 1 {
-					let s = id_storage.entry(token)
-						.or_insert_with(|| token.into());
+					let s = id_storage.entry(token).or_insert_with(|| token.into());
 					results.push(Token::num(s.clone(), line_idx, char_idx - token.len()));
 				} else {
 					results.push(Token::new(TT::SymDash, line_idx, char_idx));
@@ -403,11 +393,10 @@ pub(crate) fn lexer(input: &str) -> Vec<Token> {
 			}
 			'0'..='9' => {
 				next(&mut char_idx, &mut chars);
-				let token = tokenize(input,
-					cur_idx, &mut chars, &mut char_idx,
-					|ch| ('0'..='9').contains(&ch) || '_' == ch);
-				let s = id_storage.entry(token)
-					.or_insert_with(|| token.into());
+				let token = tokenize(input, cur_idx, &mut chars, &mut char_idx, |ch| {
+					ch.is_ascii_digit() || '_' == ch
+				});
+				let s = id_storage.entry(token).or_insert_with(|| token.into());
 				results.push(Token::num(s.clone(), line_idx, char_idx - token.len() + 1));
 			}
 			'=' => {
@@ -424,24 +413,18 @@ pub(crate) fn lexer(input: &str) -> Vec<Token> {
 			}
 			'$' => {
 				next(&mut char_idx, &mut chars);
-				let token = tokenize(input,
-					cur_idx, &mut chars, &mut char_idx,
-					|ch| ('0'..='9').contains(&ch)
-						|| ('a'..='f').contains(&ch)
-						|| ('A'..='F').contains(&ch)
-						|| '_' == ch
-				);
-				let s = id_storage.entry(token)
-					.or_insert_with(|| token.into());
+				let token = tokenize(input, cur_idx, &mut chars, &mut char_idx, |ch| {
+					ch.is_ascii_digit() || ('a'..='f').contains(&ch) || ('A'..='F').contains(&ch) || '_' == ch
+				});
+				let s = id_storage.entry(token).or_insert_with(|| token.into());
 				results.push(Token::num(s.clone(), line_idx, char_idx - token.len() + 1));
 			}
 			'%' => {
 				next(&mut char_idx, &mut chars);
-				let token = tokenize(input,
-					cur_idx, &mut chars, &mut char_idx,
-					|ch| ['0','1'].contains(&ch) || '_' == ch);
-				let s = id_storage.entry(token)
-					.or_insert_with(|| token.into());
+				let token = tokenize(input, cur_idx, &mut chars, &mut char_idx, |ch| {
+					['0', '1'].contains(&ch) || '_' == ch
+				});
+				let s = id_storage.entry(token).or_insert_with(|| token.into());
 				results.push(Token::num(s.clone(), line_idx, char_idx - token.len() + 1));
 			}
 			';' => {
@@ -449,76 +432,73 @@ pub(crate) fn lexer(input: &str) -> Vec<Token> {
 				let size = next_line(cur_idx, &mut chars, &mut char_idx);
 				let token = &input[cur_idx..][..size];
 				// NOTE - srenshaw - We just assume every comment is unique.
-				results.push(Token::comment(token.into(), line_idx, char_idx_s+1));
+				results.push(Token::comment(token.into(), line_idx, char_idx_s + 1));
 			}
 
 			c if c.is_alphabetic() => {
-				let token = tokenize(input,
-					cur_idx, &mut chars, &mut char_idx,
-					|ch| ('a'..='z').contains(&ch)
-						|| ('A'..='Z').contains(&ch)
-						|| ('0'..='9').contains(&ch)
-						|| '_' == ch);
+				let token = tokenize(input, cur_idx, &mut chars, &mut char_idx, |ch| {
+					ch.is_ascii_lowercase() || ch.is_ascii_uppercase() || ch.is_ascii_digit() || '_' == ch
+				});
 				let tt = match token.to_lowercase().as_str() {
-					"add" => TT::InsADD,
-					"addc" => TT::InsADDC,
-					"addv" => TT::InsADDV,
-					"and" => TT::InsAND,
+					"add" => TT::InsAdd,
+					"addc" => TT::InsAddC,
+					"addv" => TT::InsAddV,
+					"and" => TT::InsAnd,
 					"b" => TT::SymByte,
-					"bf" => TT::InsBF,
-					"bra" => TT::InsBRA,
-					"braf" => TT::InsBRAF,
-					"bsr" => TT::InsBSR,
-					"bsrf" => TT::InsBSRF,
-					"bt" => TT::InsBT,
-					"clrmac" => TT::InsCLRMAC,
-					"clrt" => TT::InsCLRT,
-					"cmp" => TT::InsCMP,
+					"bf" => TT::InsBf,
+					"bra" => TT::InsBra,
+					"braf" => TT::InsBraF,
+					"bsr" => TT::InsBsr,
+					"bsrf" => TT::InsBsrF,
+					"bt" => TT::InsBt,
+					"clrmac" => TT::InsClrMac,
+					"clrt" => TT::InsClrT,
+					"cmp" => TT::InsCmp,
 					"dc" => TT::SymConst,
-					"div0s" => TT::InsDIV0S,
-					"div0u" => TT::InsDIV0U,
-					"div1" => TT::InsDIV1,
-					"dmuls" => TT::InsDMULS,
-					"dmulu" => TT::InsDMULU,
+					"div0s" => TT::InsDiv0S,
+					"div0u" => TT::InsDiv0U,
+					"div1" => TT::InsDiv1,
+					"dmuls" => TT::InsDMulS,
+					"dmulu" => TT::InsDMulU,
 					"dt" => TT::InsDT,
 					"eq" => TT::SymEQ,
-					"exts" => TT::InsEXTS,
-					"extu" => TT::InsEXTU,
+					"exts" => TT::InsExtS,
+					"extu" => TT::InsExtU,
 					"gbr" => TT::SymGBR,
 					"ge" => TT::SymGE,
 					"gt" => TT::SymGT,
 					"hi" => TT::SymHI,
 					"hs" => TT::SymHS,
-					"jmp" => TT::InsJMP,
-					"jsr" => TT::InsJSR,
+					"jmp" => TT::InsJmp,
+					"jsr" => TT::InsJsr,
 					"l" => TT::SymLong,
-					"ldc" => TT::InsLDC,
-					"lds" => TT::InsLDS,
-					"mac" => TT::InsMAC,
+					"ldc" => TT::InsLdc,
+					"lds" => TT::InsLds,
+					"mac" => TT::InsMac,
 					"mach" => TT::SymMACH,
 					"macl" => TT::SymMACL,
-					"mov" => TT::InsMOV,
-					"mova" => TT::InsMOVA,
-					"movt" => TT::InsMOVT,
-					"mul" => TT::InsMUL,
-					"muls" => TT::InsMULS,
-					"mulu" => TT::InsMULU,
-					"neg" => TT::InsNEG,
-					"negc" => TT::InsNEGC,
-					"nop" => TT::InsNOP,
-					"not" => TT::InsNOT,
-					"or" => TT::InsOR,
+					"mov" => TT::InsMov,
+					"mova" => TT::InsMovA,
+					"movt" => TT::InsMovT,
+					"mul" => TT::InsMul,
+					"muls" => TT::InsMulS,
+					"mulu" => TT::InsMulU,
+					"neg" => TT::InsNeg,
+					"negc" => TT::InsNegC,
+					"nop" => TT::InsNop,
+					"not" => TT::InsNot,
+					"or" => TT::InsOr,
 					"org" => TT::SymOrg,
 					"pc" => TT::SymPC,
 					"pl" => TT::SymPL,
 					"pr" => TT::SymPR,
 					"pz" => TT::SymPZ,
-					"rotcl" => TT::InsROTCL,
-					"rotcr" => TT::InsROTCR,
-					"rotl" => TT::InsROTL,
-					"rotr" => TT::InsROTR,
-					"rte" => TT::InsRTE,
-					"rts" => TT::InsRTS,
+					"rotcl" => TT::InsRotCL,
+					"rotcr" => TT::InsRotCR,
+					"rotl" => TT::InsRotL,
+					"rotr" => TT::InsRotR,
+					"rte" => TT::InsRte,
+					"rts" => TT::InsRts,
 					"r0" => TT::IdRegister,
 					"r1" => TT::IdRegister,
 					"r2" => TT::IdRegister,
@@ -536,45 +516,48 @@ pub(crate) fn lexer(input: &str) -> Vec<Token> {
 					"r14" => TT::IdRegister,
 					"r15" => TT::IdRegister,
 					"s" => TT::SymDelay,
-					"sett" => TT::InsSETT,
-					"shal" => TT::InsSHAL,
-					"shar" => TT::InsSHAR,
-					"shll" => TT::InsSHLL,
-					"shll16" => TT::InsSHLL16,
-					"shll2" => TT::InsSHLL2,
-					"shll8" => TT::InsSHLL8,
-					"shlr" => TT::InsSHLR,
-					"shlr16" => TT::InsSHLR16,
-					"shlr2" => TT::InsSHLR2,
-					"shlr8" => TT::InsSHLR8,
-					"sleep" => TT::InsSLEEP,
+					"sett" => TT::InsSetT,
+					"shal" => TT::InsShAL,
+					"shar" => TT::InsShAR,
+					"shll" => TT::InsShLL,
+					"shll16" => TT::InsShLL16,
+					"shll2" => TT::InsShLL2,
+					"shll8" => TT::InsShLL8,
+					"shlr" => TT::InsShLR,
+					"shlr16" => TT::InsShLR16,
+					"shlr2" => TT::InsShLR2,
+					"shlr8" => TT::InsShLR8,
+					"sleep" => TT::InsSleep,
 					"sr" => TT::SymSR,
-					"stc" => TT::InsSTC,
-					"str" => TT::SymSTR,
-					"sts" => TT::InsSTS,
-					"sub" => TT::InsSUB,
-					"subc" => TT::InsSUBC,
-					"subv" => TT::InsSUBV,
-					"swap" => TT::InsSWAP,
-					"tas" => TT::InsTAS,
-					"trapa" => TT::InsTRAPA,
-					"tst" => TT::InsTST,
+					"stc" => TT::InsStc,
+					"str" => TT::SymStr,
+					"sts" => TT::InsSts,
+					"sub" => TT::InsSub,
+					"subc" => TT::InsSubC,
+					"subv" => TT::InsSubV,
+					"swap" => TT::InsSwap,
+					"tas" => TT::InsTas,
+					"trapa" => TT::InsTrapA,
+					"tst" => TT::InsTst,
 					"vbr" => TT::SymVBR,
 					"w" => TT::SymWord,
-					"xor" => TT::InsXOR,
-					"xtrct" => TT::InsXTRCT,
+					"xor" => TT::InsXor,
+					"xtrct" => TT::InsXtrct,
 					_ => TT::IdLabel,
 				};
-				let s = id_storage.entry(token)
-					.or_insert_with(|| token.into());
-				results.push(Token::ident(tt, s.clone(), line_idx, char_idx - token.len() + 1));
+				let s = id_storage.entry(token).or_insert_with(|| token.into());
+				results.push(Token::ident(
+					tt,
+					s.clone(),
+					line_idx,
+					char_idx - token.len() + 1,
+				));
 			}
 			_ => {
 				let size = next_line(cur_idx, &mut chars, &mut char_idx);
 				char_idx += size;
 				let token = &input[cur_idx..][..size];
-				let s = id_storage.entry(token)
-					.or_insert_with(|| token.into());
+				let s = id_storage.entry(token).or_insert_with(|| token.into());
 				results.push(Token::ident(TT::IdUnknown, s.clone(), line_idx, char_idx));
 			}
 		}
@@ -582,4 +565,3 @@ pub(crate) fn lexer(input: &str) -> Vec<Token> {
 
 	results
 }
-
