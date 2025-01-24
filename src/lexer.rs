@@ -587,7 +587,12 @@ mod can_lex {
 	use super::{Token, TokenType};
 
 	fn token_test(tt: TokenType, s: &str) -> Token {
-		Token { tt, ex: Some(s.into()), line: 0, pos: 0 }
+		Token {
+			tt,
+			ex: Some(s.into()),
+			line: 0,
+			pos: 0,
+		}
 	}
 
 	fn match_token(input: &str, tt: TokenType) {
@@ -1110,7 +1115,12 @@ mod can_lex {
 	fn match_symbol(s: &str, tt: TokenType) {
 		let out = lexer(s);
 		assert_eq!(out.len(), 1);
-		assert_eq!(out[0], Token { tt, ex: None, line: 0, pos: 0 });
+		assert_eq!(out[0], Token {
+			tt,
+			ex: None,
+			line: 0,
+			pos: 0
+		});
 	}
 
 	#[test]
