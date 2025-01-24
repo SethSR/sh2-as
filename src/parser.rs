@@ -3,7 +3,7 @@ use crate::Label;
 
 pub(crate) type Reg = u8;
 
-#[derive(Clone)]
+#[derive(Clone, PartialEq, Eq)]
 pub(crate) enum Arg {
 	DirReg(Reg),
 	DispR0(Reg),
@@ -43,7 +43,7 @@ pub(crate) enum Size {
 
 #[allow(non_camel_case_types)]
 //#[allow(upper_case_acronyms)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 //    | Instruction       | Bit Layout       | Operation          | Cycles  | T Bit  |
 pub(crate) enum Ins {
 	/// | #imm,Rn           | 0111nnnniiiiiiii | Rn+imm -> Rn       | 1       | -      |
@@ -373,7 +373,7 @@ pub(crate) enum Ins {
 	Label(Label),
 }
 
-#[derive(Clone)]
+#[derive(Clone, PartialEq, Eq)]
 pub(crate) enum State {
 	/// Instruction completed for output
 	Complete(u16),
@@ -452,8 +452,11 @@ impl Parser<'_> {
 		self.index >= self.tokens.len()
 	}
 
+	fn try_peek(&self, i: usize) -> Option<&Token> {
+		self.tokens.get(self.index + i)
+	}
 	fn peek(&self, i: usize) -> &Token {
-		&self.tokens[self.index + i]
+		self.try_peek(i).unwrap()
 	}
 	fn curr(&self) -> &Token {
 		self.peek(0)
@@ -478,10 +481,14 @@ impl Parser<'_> {
 	}
 
 	fn next_line(&mut self) {
-		while self.peek(1).get_type() != TokenType::SymNewline {
+		loop {
+			let Some(tok) = self.try_peek(1) else { break };
+			let tok = tok.clone();
 			self.next();
+			if tok.get_type() == TokenType::SymNewline {
+				break;
+			}
 		}
-		self.next();
 	}
 
 	fn to_i64(txt: &str, radix: u32, sz: Size, is_signed: bool) -> Result<i64, String> {
@@ -1450,5 +1457,53 @@ pub fn parser(tokens: &[Token]) -> Result<Output, Vec<String>> {
 		Ok(output)
 	} else {
 		Err(data.errors)
+	}
+}
+
+#[cfg(test)]
+mod can_parse {
+	use crate::lexer::lexer;
+	use super::*;
+
+	fn single_inst(input: &str, state: Ins) -> Result<(), Vec<String>> {
+		let tokens = lexer(input);
+		let out = parser(&tokens)?;
+		assert!(out.labels.is_empty(), "output labels not empty");
+		assert!(out.values.is_empty(), "output values not empty");
+		assert_eq!(out.sections.len(), 1, "more than 1 output section");
+		let states = &out.sections[&0];
+		assert_eq!(states.len(), 1, "expected 1 output instruction");
+		assert_eq!(states[0], State::Incomplete(state));
+		Ok(())
+	}
+
+	#[test]
+	fn add1() -> Result<(), Vec<String>> {
+		single_inst("ADD R0,R1", Ins::AddReg(0,1))
+	}
+
+	#[test]
+	fn add2() -> Result<(), Vec<String>> {
+		single_inst("ADD #$01,R2", Ins::AddImm(1,2))
+	}
+
+	// FIXME - srenshaw - why is the parser not returning an error here?
+/*
+	#[test]
+	fn add3() -> Result<(), Vec<String>> {
+		let input = "ADD #$FE,R3";
+		let tokens = lexer(input);
+		let out = parser(&tokens)?;
+		assert!(out.labels.is_empty(), "output labels not empty");
+		assert!(out.values.is_empty(), "output values not empty");
+		assert_eq!(out.sections.len(), 1, "more than 1 output section");
+		//assert_eq!(out.sections[&0], "ERROR: Expected '', Found ''");
+		Ok(())
+	}
+*/
+
+	#[test]
+	fn add4() -> Result<(), Vec<String>> {
+		single_inst("ADD #-2,R2", Ins::AddImm(-2,2))
 	}
 }
