@@ -26,16 +26,6 @@ impl Token {
 		}
 	}
 
-	#[cfg(test)]
-	fn test(tt: TokenType, input: &str) -> Self {
-		Self {
-			tt,
-			ex: Some(input.into()),
-			line: 0,
-			pos: 0,
-		}
-	}
-
 	fn ident(tt: TokenType, s: Label, line: usize, pos: usize) -> Self {
 		let mut this = Self::new(tt, line, pos);
 		this.ex = Some(s);
@@ -596,10 +586,14 @@ mod can_lex {
 	use super::lexer;
 	use super::{Token, TokenType};
 
+	fn token_test(tt: TokenType, s: &str) -> Token {
+		Token { tt, ex: Some(s.into()), line: 0, pos: 0 }
+	}
+
 	fn match_token(input: &str, tt: TokenType) {
 		let out = lexer(input);
 		assert_eq!(out.len(), 1);
-		assert_eq!(out[0], Token::test(tt, input));
+		assert_eq!(out[0], token_test(tt, input));
 	}
 
 	#[test]
@@ -617,9 +611,9 @@ mod can_lex {
 		let tt = TokenType::IdNumber;
 		let out = lexer("34 $2e %101");
 		assert_eq!(out.len(), 3);
-		assert_eq!(out[0], Token::test(tt, "34"));
-		assert_eq!(out[1], Token::test(tt, "$2e"));
-		assert_eq!(out[2], Token::test(tt, "%101"));
+		assert_eq!(out[0], token_test(tt, "34"));
+		assert_eq!(out[1], token_test(tt, "$2e"));
+		assert_eq!(out[2], token_test(tt, "%101"));
 	}
 
 	#[test]
@@ -627,23 +621,23 @@ mod can_lex {
 		let tt = TokenType::IdRegister;
 		let out = lexer("r0 r1 r2 r3 r4 r5 r6 r7 r8 r9 r10 r11 R12 R13 R14 r15 PC");
 		assert_eq!(out.len(), 17);
-		assert_eq!(out[0], Token::test(tt, "r0"));
-		assert_eq!(out[1], Token::test(tt, "r1"));
-		assert_eq!(out[2], Token::test(tt, "r2"));
-		assert_eq!(out[3], Token::test(tt, "r3"));
-		assert_eq!(out[4], Token::test(tt, "r4"));
-		assert_eq!(out[5], Token::test(tt, "r5"));
-		assert_eq!(out[6], Token::test(tt, "r6"));
-		assert_eq!(out[7], Token::test(tt, "r7"));
-		assert_eq!(out[8], Token::test(tt, "r8"));
-		assert_eq!(out[9], Token::test(tt, "r9"));
-		assert_eq!(out[10], Token::test(tt, "r10"));
-		assert_eq!(out[11], Token::test(tt, "r11"));
-		assert_eq!(out[12], Token::test(tt, "R12"));
-		assert_eq!(out[13], Token::test(tt, "R13"));
-		assert_eq!(out[14], Token::test(tt, "R14"));
-		assert_eq!(out[15], Token::test(tt, "r15"));
-		assert_eq!(out[16], Token::test(TokenType::SymPC, "PC"));
+		assert_eq!(out[0], token_test(tt, "r0"));
+		assert_eq!(out[1], token_test(tt, "r1"));
+		assert_eq!(out[2], token_test(tt, "r2"));
+		assert_eq!(out[3], token_test(tt, "r3"));
+		assert_eq!(out[4], token_test(tt, "r4"));
+		assert_eq!(out[5], token_test(tt, "r5"));
+		assert_eq!(out[6], token_test(tt, "r6"));
+		assert_eq!(out[7], token_test(tt, "r7"));
+		assert_eq!(out[8], token_test(tt, "r8"));
+		assert_eq!(out[9], token_test(tt, "r9"));
+		assert_eq!(out[10], token_test(tt, "r10"));
+		assert_eq!(out[11], token_test(tt, "r11"));
+		assert_eq!(out[12], token_test(tt, "R12"));
+		assert_eq!(out[13], token_test(tt, "R13"));
+		assert_eq!(out[14], token_test(tt, "R14"));
+		assert_eq!(out[15], token_test(tt, "r15"));
+		assert_eq!(out[16], token_test(TokenType::SymPC, "PC"));
 	}
 
 	#[test]
@@ -655,12 +649,6 @@ mod can_lex {
 	fn add() {
 		let tt = TokenType::InsAdd;
 		match_token("add", tt);
-		match_token("adD", tt);
-		match_token("aDd", tt);
-		match_token("aDD", tt);
-		match_token("Add", tt);
-		match_token("AdD", tt);
-		match_token("ADd", tt);
 		match_token("ADD", tt);
 	}
 
@@ -668,20 +656,6 @@ mod can_lex {
 	fn addc() {
 		let tt = TokenType::InsAddC;
 		match_token("addc", tt);
-		match_token("addC", tt);
-		match_token("adDc", tt);
-		match_token("adDC", tt);
-		match_token("aDdc", tt);
-		match_token("aDdC", tt);
-		match_token("aDDc", tt);
-		match_token("aDDC", tt);
-		match_token("Addc", tt);
-		match_token("AddC", tt);
-		match_token("AdDc", tt);
-		match_token("AdDC", tt);
-		match_token("ADdc", tt);
-		match_token("ADdC", tt);
-		match_token("ADDc", tt);
 		match_token("ADDC", tt);
 	}
 
@@ -689,121 +663,631 @@ mod can_lex {
 	fn addv() {
 		let tt = TokenType::InsAddV;
 		match_token("addv", tt);
-		match_token("addV", tt);
-		match_token("adDv", tt);
-		match_token("adDV", tt);
-		match_token("aDdv", tt);
-		match_token("aDdV", tt);
-		match_token("aDDv", tt);
-		match_token("aDDV", tt);
-		match_token("Addv", tt);
-		match_token("AddV", tt);
-		match_token("AdDv", tt);
-		match_token("AdDV", tt);
-		match_token("ADdv", tt);
-		match_token("ADdV", tt);
-		match_token("ADDv", tt);
 		match_token("ADDV", tt);
 	}
 
-	/*
-		InsAdd,
-		InsAddC,
-		InsAddV,
-		InsAnd,
-		InsBf,
-		InsBra,
-		InsBraF,
-		InsBsr,
-		InsBsrF,
-		InsBt,
-		InsClrMac,
-		InsClrT,
-		InsCmp,
-		InsDiv0S,
-		InsDiv0U,
-		InsDiv1,
-		InsDMulS,
-		InsDMulU,
-		InsDT,
-		InsExtS,
-		InsExtU,
-		InsJmp,
-		InsJsr,
-		InsLdc,
-		InsLds,
-		InsMac,
-		InsMov,
-		InsMovA,
-		InsMovT,
-		InsMul,
-		InsMulS,
-		InsMulU,
-		InsNeg,
-		InsNegC,
-		InsNop,
-		InsNot,
-		InsOr,
-		InsRotCL,
-		InsRotCR,
-		InsRotL,
-		InsRotR,
-		InsRte,
-		InsRts,
-		InsSetT,
-		InsShAL,
-		InsShAR,
-		InsShLL,
-		InsShLL16,
-		InsShLL2,
-		InsShLL8,
-		InsShLR,
-		InsShLR16,
-		InsShLR2,
-		InsShLR8,
-		InsSleep,
-		InsStc,
-		InsSts,
-		InsSub,
-		InsSubC,
-		InsSubV,
-		InsSwap,
-		InsTas,
-		InsTrapA,
-		InsTst,
-		InsXor,
-		InsXtrct,
-		SymAddress,
-		SymByte,
-		SymCParen,
-		SymColon,
-		SymComma,
-		SymConst,
-		SymDash,
-		SymDelay,
-		SymDot,
-		SymEQ,
-		SymEqual,
-		SymGBR,
-		SymGE,
-		SymGT,
-		SymHI,
-		SymHS,
-		SymImmediate,
-		SymLong,
-		SymMACH,
-		SymMACL,
-		SymNewline,
-		SymOParen,
-		SymOrg,
-		SymPL,
-		SymPR,
-		SymPZ,
-		SymPlus,
-		SymSR,
-		SymStr,
-		SymSlash,
-		SymVBR,
-		SymWord,
-	*/
+	#[test]
+	fn and() {
+		let tt = TokenType::InsAnd;
+		match_token("and", tt);
+		match_token("AND", tt);
+	}
+
+	#[test]
+	fn bf() {
+		let tt = TokenType::InsBf;
+		match_token("bf", tt);
+		match_token("BF", tt);
+	}
+
+	#[test]
+	fn bra() {
+		let tt = TokenType::InsBra;
+		match_token("bra", tt);
+		match_token("BRA", tt);
+	}
+
+	#[test]
+	fn braf() {
+		let tt = TokenType::InsBraF;
+		match_token("braf", tt);
+		match_token("BRAF", tt);
+	}
+
+	#[test]
+	fn bsr() {
+		let tt = TokenType::InsBsr;
+		match_token("bsr", tt);
+		match_token("BSR", tt);
+	}
+
+	#[test]
+	fn bsrf() {
+		let tt = TokenType::InsBsrF;
+		match_token("bsrf", tt);
+		match_token("BSRF", tt);
+	}
+
+	#[test]
+	fn bt() {
+		let tt = TokenType::InsBt;
+		match_token("bt", tt);
+		match_token("BT", tt);
+	}
+
+	#[test]
+	fn clrmac() {
+		let tt = TokenType::InsClrMac;
+		match_token("clrmac", tt);
+		match_token("CLRMAC", tt);
+	}
+
+	#[test]
+	fn clrt() {
+		let tt = TokenType::InsClrT;
+		match_token("clrt", tt);
+		match_token("CLRT", tt);
+	}
+
+	#[test]
+	fn cmp() {
+		let tt = TokenType::InsCmp;
+		match_token("cmp", tt);
+		match_token("CMP", tt);
+	}
+
+	#[test]
+	fn div0s() {
+		let tt = TokenType::InsDiv0S;
+		match_token("div0s", tt);
+		match_token("DIV0S", tt);
+	}
+
+	#[test]
+	fn div0u() {
+		let tt = TokenType::InsDiv0U;
+		match_token("div0u", tt);
+		match_token("DIV0U", tt);
+	}
+
+	#[test]
+	fn div1() {
+		let tt = TokenType::InsDiv1;
+		match_token("div1", tt);
+		match_token("DIV1", tt);
+	}
+
+	#[test]
+	fn dmuls() {
+		let tt = TokenType::InsDMulS;
+		match_token("dmuls", tt);
+		match_token("DMULS", tt);
+	}
+
+	#[test]
+	fn dmulu() {
+		let tt = TokenType::InsDMulU;
+		match_token("dmulu", tt);
+		match_token("DMULU", tt);
+	}
+
+	#[test]
+	fn dt() {
+		let tt = TokenType::InsDT;
+		match_token("dt", tt);
+		match_token("DT", tt);
+	}
+
+	#[test]
+	fn exts() {
+		let tt = TokenType::InsExtS;
+		match_token("exts", tt);
+		match_token("EXTS", tt);
+	}
+
+	#[test]
+	fn extu() {
+		let tt = TokenType::InsExtU;
+		match_token("extu", tt);
+		match_token("EXTU", tt);
+	}
+
+	#[test]
+	fn jmp() {
+		let tt = TokenType::InsJmp;
+		match_token("jmp", tt);
+		match_token("JMP", tt);
+	}
+
+	#[test]
+	fn jsr() {
+		let tt = TokenType::InsJsr;
+		match_token("jsr", tt);
+		match_token("JSR", tt);
+	}
+
+	#[test]
+	fn ldc() {
+		let tt = TokenType::InsLdc;
+		match_token("ldc", tt);
+		match_token("LDC", tt);
+	}
+
+	#[test]
+	fn lds() {
+		let tt = TokenType::InsLds;
+		match_token("lds", tt);
+		match_token("LDS", tt);
+	}
+
+	#[test]
+	fn mac() {
+		let tt = TokenType::InsMac;
+		match_token("mac", tt);
+		match_token("MAC", tt);
+	}
+
+	#[test]
+	fn mov() {
+		let tt = TokenType::InsMov;
+		match_token("mov", tt);
+		match_token("MOV", tt);
+	}
+
+	#[test]
+	fn mova() {
+		let tt = TokenType::InsMovA;
+		match_token("mova", tt);
+		match_token("MOVA", tt);
+	}
+
+	#[test]
+	fn movt() {
+		let tt = TokenType::InsMovT;
+		match_token("movt", tt);
+		match_token("MOVT", tt);
+	}
+
+	#[test]
+	fn mul() {
+		let tt = TokenType::InsMul;
+		match_token("mul", tt);
+		match_token("MUL", tt);
+	}
+
+	#[test]
+	fn muls() {
+		let tt = TokenType::InsMulS;
+		match_token("muls", tt);
+		match_token("MULS", tt);
+	}
+
+	#[test]
+	fn mulu() {
+		let tt = TokenType::InsMulU;
+		match_token("mulu", tt);
+		match_token("MULU", tt);
+	}
+
+	#[test]
+	fn neg() {
+		let tt = TokenType::InsNeg;
+		match_token("neg", tt);
+		match_token("NEG", tt);
+	}
+
+	#[test]
+	fn negc() {
+		let tt = TokenType::InsNegC;
+		match_token("negc", tt);
+		match_token("NEGC", tt);
+	}
+
+	#[test]
+	fn nop() {
+		let tt = TokenType::InsNop;
+		match_token("nop", tt);
+		match_token("NOP", tt);
+	}
+
+	#[test]
+	fn not() {
+		let tt = TokenType::InsNot;
+		match_token("not", tt);
+		match_token("NOT", tt);
+	}
+
+	#[test]
+	fn or() {
+		let tt = TokenType::InsOr;
+		match_token("or", tt);
+		match_token("OR", tt);
+	}
+
+	#[test]
+	fn rotcl() {
+		let tt = TokenType::InsRotCL;
+		match_token("rotcl", tt);
+		match_token("ROTCL", tt);
+	}
+
+	#[test]
+	fn rotcr() {
+		let tt = TokenType::InsRotCR;
+		match_token("rotcr", tt);
+		match_token("ROTCR", tt);
+	}
+
+	#[test]
+	fn rotl() {
+		let tt = TokenType::InsRotL;
+		match_token("rotl", tt);
+		match_token("ROTL", tt);
+	}
+
+	#[test]
+	fn rotr() {
+		let tt = TokenType::InsRotR;
+		match_token("rotr", tt);
+		match_token("ROTR", tt);
+	}
+
+	#[test]
+	fn rte() {
+		let tt = TokenType::InsRte;
+		match_token("rte", tt);
+		match_token("RTE", tt);
+	}
+
+	#[test]
+	fn rts() {
+		let tt = TokenType::InsRts;
+		match_token("rts", tt);
+		match_token("RTS", tt);
+	}
+
+	#[test]
+	fn sett() {
+		let tt = TokenType::InsSetT;
+		match_token("sett", tt);
+		match_token("SEtt", tt);
+	}
+
+	#[test]
+	fn shal() {
+		let tt = TokenType::InsShAL;
+		match_token("shal", tt);
+		match_token("SHAL", tt);
+	}
+
+	#[test]
+	fn shar() {
+		let tt = TokenType::InsShAR;
+		match_token("shar", tt);
+		match_token("SHAR", tt);
+	}
+
+	#[test]
+	fn shll() {
+		let tt = TokenType::InsShLL;
+		match_token("shll", tt);
+		match_token("SHLL", tt);
+	}
+
+	#[test]
+	fn shll16() {
+		let tt = TokenType::InsShLL16;
+		match_token("shll16", tt);
+		match_token("SHLL16", tt);
+	}
+
+	#[test]
+	fn shll2() {
+		let tt = TokenType::InsShLL2;
+		match_token("shll2", tt);
+		match_token("SHLL2", tt);
+	}
+
+	#[test]
+	fn shll8() {
+		let tt = TokenType::InsShLL8;
+		match_token("shll8", tt);
+		match_token("SHLL8", tt);
+	}
+
+	#[test]
+	fn shlr() {
+		let tt = TokenType::InsShLR;
+		match_token("shlr", tt);
+		match_token("SHLR", tt);
+	}
+
+	#[test]
+	fn shlr16() {
+		let tt = TokenType::InsShLR16;
+		match_token("shlr16", tt);
+		match_token("SHLR16", tt);
+	}
+
+	#[test]
+	fn shlr2() {
+		let tt = TokenType::InsShLR2;
+		match_token("shlr2", tt);
+		match_token("SHLR2", tt);
+	}
+
+	#[test]
+	fn shlr8() {
+		let tt = TokenType::InsShLR8;
+		match_token("shlr8", tt);
+		match_token("SHLR8", tt);
+	}
+
+	#[test]
+	fn sleep() {
+		let tt = TokenType::InsSleep;
+		match_token("sleep", tt);
+		match_token("SLEEP", tt);
+	}
+
+	#[test]
+	fn stc() {
+		let tt = TokenType::InsStc;
+		match_token("stc", tt);
+		match_token("STC", tt);
+	}
+
+	#[test]
+	fn sts() {
+		let tt = TokenType::InsSts;
+		match_token("sts", tt);
+		match_token("STS", tt);
+	}
+
+	#[test]
+	fn sub() {
+		let tt = TokenType::InsSub;
+		match_token("sub", tt);
+		match_token("SUB", tt);
+	}
+
+	#[test]
+	fn subc() {
+		let tt = TokenType::InsSubC;
+		match_token("subc", tt);
+		match_token("SUBC", tt);
+	}
+
+	#[test]
+	fn subv() {
+		let tt = TokenType::InsSubV;
+		match_token("subv", tt);
+		match_token("SUBV", tt);
+	}
+
+	#[test]
+	fn swap() {
+		let tt = TokenType::InsSwap;
+		match_token("swap", tt);
+		match_token("SWAP", tt);
+	}
+
+	#[test]
+	fn tas() {
+		let tt = TokenType::InsTas;
+		match_token("tas", tt);
+		match_token("TAS", tt);
+	}
+
+	#[test]
+	fn trapa() {
+		let tt = TokenType::InsTrapA;
+		match_token("trapa", tt);
+		match_token("TRAPA", tt);
+	}
+
+	#[test]
+	fn tst() {
+		let tt = TokenType::InsTst;
+		match_token("tst", tt);
+		match_token("TST", tt);
+	}
+
+	#[test]
+	fn xor() {
+		let tt = TokenType::InsXor;
+		match_token("xor", tt);
+		match_token("XOR", tt);
+	}
+
+	#[test]
+	fn xtrct() {
+		let tt = TokenType::InsXtrct;
+		match_token("xtrct", tt);
+		match_token("XTRCT", tt);
+	}
+
+	fn match_symbol(s: &str, tt: TokenType) {
+		let out = lexer(s);
+		assert_eq!(out.len(), 1);
+		assert_eq!(out[0], Token { tt, ex: None, line: 0, pos: 0 });
+	}
+
+	#[test]
+	fn address() {
+		match_symbol("@", TokenType::SymAddress);
+	}
+
+	#[test]
+	fn byte() {
+		match_token("b", TokenType::SymByte);
+		match_token("B", TokenType::SymByte);
+	}
+
+	#[test]
+	fn cparen() {
+		match_symbol(")", TokenType::SymCParen);
+	}
+
+	#[test]
+	fn colon() {
+		match_symbol(":", TokenType::SymColon);
+	}
+
+	#[test]
+	fn comma() {
+		match_symbol(",", TokenType::SymComma);
+	}
+
+	#[test]
+	fn declare_const() {
+		match_token("dc", TokenType::SymConst);
+		match_token("DC", TokenType::SymConst);
+	}
+
+	#[test]
+	fn dash() {
+		match_symbol("-", TokenType::SymDash);
+	}
+
+	#[test]
+	fn delay() {
+		match_token("s", TokenType::SymDelay);
+		match_token("S", TokenType::SymDelay);
+	}
+
+	#[test]
+	fn dot() {
+		match_symbol(".", TokenType::SymDot);
+	}
+
+	#[test]
+	fn eq() {
+		match_token("eq", TokenType::SymEQ);
+		match_token("EQ", TokenType::SymEQ);
+	}
+
+	#[test]
+	fn equal() {
+		match_symbol("=", TokenType::SymEqual);
+	}
+
+	#[test]
+	fn gbr() {
+		match_token("gbr", TokenType::SymGBR);
+		match_token("GBR", TokenType::SymGBR);
+	}
+
+	#[test]
+	fn ge() {
+		match_token("ge", TokenType::SymGE);
+		match_token("GE", TokenType::SymGE);
+	}
+
+	#[test]
+	fn gt() {
+		match_token("gt", TokenType::SymGT);
+		match_token("GT", TokenType::SymGT);
+	}
+
+	#[test]
+	fn hi() {
+		match_token("hi", TokenType::SymHI);
+		match_token("HI", TokenType::SymHI);
+	}
+
+	#[test]
+	fn hs() {
+		match_token("hs", TokenType::SymHS);
+		match_token("HS", TokenType::SymHS);
+	}
+
+	#[test]
+	fn immediate() {
+		match_symbol("#", TokenType::SymImmediate);
+	}
+
+	#[test]
+	fn long() {
+		match_token("l", TokenType::SymLong);
+	}
+
+	#[test]
+	fn mach() {
+		match_token("mach", TokenType::SymMACH);
+		match_token("MACH", TokenType::SymMACH);
+	}
+
+	#[test]
+	fn macl() {
+		match_token("macl", TokenType::SymMACL);
+		match_token("MACL", TokenType::SymMACL);
+	}
+
+	#[test]
+	fn newline() {
+		match_symbol("\n", TokenType::SymNewline);
+	}
+
+	#[test]
+	fn oparen() {
+		match_symbol("(", TokenType::SymOParen);
+	}
+
+	#[test]
+	fn org() {
+		match_token("org", TokenType::SymOrg);
+		match_token("ORG", TokenType::SymOrg);
+	}
+
+	#[test]
+	fn pl() {
+		match_token("pl", TokenType::SymPL);
+		match_token("PL", TokenType::SymPL);
+	}
+
+	#[test]
+	fn pr() {
+		match_token("pr", TokenType::SymPR);
+		match_token("PR", TokenType::SymPR);
+	}
+
+	#[test]
+	fn pz() {
+		match_token("pz", TokenType::SymPZ);
+		match_token("PZ", TokenType::SymPZ);
+	}
+
+	#[test]
+	fn plus() {
+		match_symbol("+", TokenType::SymPlus);
+	}
+
+	#[test]
+	fn sr() {
+		match_token("sr", TokenType::SymSR);
+		match_token("SR", TokenType::SymSR);
+	}
+
+	#[test]
+	fn str() {
+		match_token("str", TokenType::SymStr);
+		match_token("STR", TokenType::SymStr);
+	}
+
+	#[test]
+	fn slash() {
+		match_symbol("/", TokenType::SymSlash);
+	}
+
+	#[test]
+	fn vbr() {
+		match_token("vbr", TokenType::SymVBR);
+		match_token("VBR", TokenType::SymVBR);
+	}
+
+	#[test]
+	fn word() {
+		match_token("w", TokenType::SymWord);
+	}
 }
