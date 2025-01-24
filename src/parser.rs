@@ -696,6 +696,7 @@ impl Parser<'_> {
 			TokenType::IdRegister,
 			&TokenType::IdRegister.to_string(),
 		)?;
+		self.next();
 		self.reg_args()
 	}
 
@@ -1462,32 +1463,49 @@ pub fn parser(tokens: &[Token]) -> Result<Output, Vec<String>> {
 
 #[cfg(test)]
 mod can_parse {
+	use std::collections::HashMap;
+
 	use crate::lexer::lexer;
+
 	use super::*;
 
-	fn single_inst(input: &str, state: Ins) -> Result<(), Vec<String>> {
+	fn program(input: &str, expected: HashMap<u64, Vec<Ins>>) -> Result<(), Vec<String>> {
 		let tokens = lexer(input);
 		let out = parser(&tokens)?;
 		assert!(out.labels.is_empty(), "output labels not empty");
 		assert!(out.values.is_empty(), "output values not empty");
-		assert_eq!(out.sections.len(), 1, "more than 1 output section");
-		let states = &out.sections[&0];
-		assert_eq!(states.len(), 1, "expected 1 output instruction");
-		assert_eq!(states[0], State::Incomplete(state));
+		assert_eq!(out.sections.len(), expected.len(),
+			"expected {} output section(s)", expected.len());
+		for (out_section, exp_section) in out.sections.into_iter().zip(expected) {
+			assert_eq!(out_section.0, exp_section.0, "section address mismatch");
+			assert_eq!(out_section.1.len(), exp_section.1.len(),
+				"expected {} output instruction(s)", exp_section.1.len());
+			for (state, ins) in out_section.1.into_iter().zip(exp_section.1) {
+				assert_eq!(state, State::Incomplete(ins.clone()));
+			}
+		}
 		Ok(())
+	}
+
+	fn section(input: &str, expected: &[Ins]) -> Result<(), Vec<String>> {
+		program(input, [(0, expected.to_vec())].into())
+	}
+
+	fn inst(input: &str, ins: Ins) -> Result<(), Vec<String>> {
+		section(input, &[ins])
 	}
 
 	#[test]
 	fn add1() -> Result<(), Vec<String>> {
-		single_inst("ADD R0,R1", Ins::AddReg(0,1))
+		inst("ADD R0,R1", Ins::AddReg(0,1))
 	}
 
 	#[test]
 	fn add2() -> Result<(), Vec<String>> {
-		single_inst("ADD #$01,R2", Ins::AddImm(1,2))
+		inst("ADD #$01,R2", Ins::AddImm(1,2))
 	}
 
-	// FIXME - srenshaw - why is the parser not returning an error here?
+	// FIXME - srenshaw - Why is the parser not returning an error here?
 /*
 	#[test]
 	fn add3() -> Result<(), Vec<String>> {
@@ -1504,6 +1522,39 @@ mod can_parse {
 
 	#[test]
 	fn add4() -> Result<(), Vec<String>> {
-		single_inst("ADD #-2,R2", Ins::AddImm(-2,2))
+		inst("ADD #-2,R2", Ins::AddImm(-2,2))
+	}
+
+	#[test]
+	fn addc() -> Result<(), Vec<String>> {
+		inst("ADDC R3,R1", Ins::AddC(3,1))
+	}
+
+	#[test]
+	fn addv() -> Result<(), Vec<String>> {
+		inst("ADDV R0,R1", Ins::AddV(0,1))
+	}
+
+	#[test]
+	fn and_reg_reg() -> Result<(), Vec<String>> {
+		inst("AND R0,R1", Ins::AndReg(0,1))
+	}
+
+	#[test]
+	fn and_imm() -> Result<(), Vec<String>> {
+		inst("AND #$0F,R0", Ins::AndImm(0x0F))
+	}
+
+	#[test]
+	// FIXME - srenshaw - Why is the parser not returning the correct errors?
+	//#[should_panic(expected = "'AND #imm,R?' requires r0 as the destination register")]
+	#[should_panic]
+	fn and_imm_requires_r0() {
+		let _ = inst("AND #$0F,R4", Ins::AndImm(0x0F));
+	}
+
+	#[test]
+	fn and_byte() -> Result<(), Vec<String>> {
+		inst("AND.B #$80,@(R0,GBR)", Ins::AndByte(0x80))
 	}
 }
