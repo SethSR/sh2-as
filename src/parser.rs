@@ -913,10 +913,10 @@ pub fn parser(tokens: &[Token]) -> Result<Output, Vec<String>> {
 				.match_reg_args()
 				.map(|(src, dst)| output.add_to_section(skey, Ins::AddV(src, dst)))
 				.unwrap_or_default(),
-			TT::InsAnd => data
-				.logic_ins(Ins::AndImm, Ins::AndReg, Ins::AndByte, "AND")
-				.map(|ins| output.add_to_section(skey, ins))
-				.unwrap_or_default(),
+			TT::InsAnd => match data.logic_ins(Ins::AndImm, Ins::AndReg, Ins::AndByte, "AND") {
+				Err(e) => data.errors.push(e),
+				Ok(ins) => output.add_to_section(skey, ins),
+			},
 			TT::InsBf => data
 				.simple_branch_ins(Ins::Bf, Ins::BfS)
 				.map(|ins| output.add_to_section(skey, ins))
@@ -1469,34 +1469,80 @@ mod can_parse {
 
 	use super::*;
 
-	fn program(input: &str, expected: HashMap<u64, Vec<Ins>>) -> Result<(), Vec<String>> {
+	type SectionMap<T> = HashMap<u64, Vec<T>>;
+	type LabelMap = HashMap<Label, Option<u32>>;
+	type ValueMap = HashMap<Label, i8>;
+
+	type SectionPair<T> = <SectionMap<T> as IntoIterator>::Item;
+
+	fn check_inst(state: State, ins: Ins) {
+		assert_eq!(state, State::Incomplete(ins));
+	}
+	fn check_inst_p((state, ins): (State, Ins)) {
+		check_inst(state, ins);
+	}
+
+	fn check_section(p_addr: u64, p_section: Vec<State>, e_addr: u64, e_section: Vec<Ins>) {
+		assert_eq!(p_addr, e_addr, "section address mismatch");
+		let ps_len = p_section.len();
+		let es_len = e_section.len();
+		assert_eq!(ps_len, es_len, "expected {} output instruction(s)", es_len);
+		p_section.into_iter().zip(e_section).for_each(check_inst_p);
+	}
+	fn check_section_p((p_section, e_section): (SectionPair<State>, SectionPair<Ins>)) {
+		check_section(p_section.0, p_section.1, e_section.0, e_section.1);
+	}
+
+	fn check_sections(p_sections: SectionMap<State>, e_sections: SectionMap<Ins>) {
+		let ps_len = p_sections.len();
+		let es_len = e_sections.len();
+		assert_eq!(ps_len, es_len, "expected {} output section(s)", es_len);
+		p_sections
+			.into_iter()
+			.zip(e_sections)
+			.for_each(check_section_p);
+	}
+
+	fn single_section(ins_seq: &[Ins]) -> SectionMap<Ins> {
+		[(0, ins_seq.to_vec())].into()
+	}
+
+	fn check_labels(p_labels: LabelMap, e_labels: &[Label]) {
+		let pl_len = p_labels.len();
+		let el_len = e_labels.len();
+		assert_eq!(pl_len, el_len, "expected {} output label(s)", el_len);
+		assert!(
+			e_labels.into_iter().all(|lbl| p_labels.contains_key(lbl)),
+			"unmatched labels"
+		);
+	}
+
+	fn check_values(p_values: ValueMap, e_values: ValueMap) {
+		let pv_len = p_values.len();
+		let ev_len = e_values.len();
+		assert_eq!(pv_len, ev_len, "expected {} output value(s)", ev_len);
+		assert!(
+			e_values.keys().all(|lbl| p_values.contains_key(lbl)),
+			"unmatched values"
+		);
+	}
+
+	fn check_program(
+		input: &str,
+		e_labels: &[Label],
+		e_values: ValueMap,
+		e_sections: SectionMap<Ins>,
+	) -> Result<(), Vec<String>> {
 		let tokens = lexer(input);
 		let out = parser(&tokens)?;
-		assert!(out.labels.is_empty(), "output labels not empty");
-		assert!(out.values.is_empty(), "output values not empty");
-		assert_eq!(
-			out.sections.len(),
-			expected.len(),
-			"expected {} output section(s)",
-			expected.len()
-		);
-		for (out_section, exp_section) in out.sections.into_iter().zip(expected) {
-			assert_eq!(out_section.0, exp_section.0, "section address mismatch");
-			assert_eq!(
-				out_section.1.len(),
-				exp_section.1.len(),
-				"expected {} output instruction(s)",
-				exp_section.1.len()
-			);
-			for (state, ins) in out_section.1.into_iter().zip(exp_section.1) {
-				assert_eq!(state, State::Incomplete(ins.clone()));
-			}
-		}
+		check_labels(out.labels, e_labels);
+		check_values(out.values, e_values);
+		check_sections(out.sections, e_sections);
 		Ok(())
 	}
 
 	fn section(input: &str, expected: &[Ins]) -> Result<(), Vec<String>> {
-		program(input, [(0, expected.to_vec())].into())
+		check_program(input, &[], [].into(), [(0, expected.to_vec())].into())
 	}
 
 	fn inst(input: &str, ins: Ins) -> Result<(), Vec<String>> {
@@ -1558,11 +1604,39 @@ mod can_parse {
 	//#[should_panic(expected = "'AND #imm,R?' requires r0 as the destination register")]
 	#[should_panic]
 	fn and_imm_requires_r0() {
-		let _ = inst("AND #$0F,R4", Ins::AndImm(0x0F));
+		match inst("AND #$0F,R4", Ins::AndImm(0x0F)) {
+			Err(errors) => {
+				assert_eq!(errors.len(), 1);
+				panic!("{}", errors[0]);
+			}
+			Ok(_) => {}
+		}
 	}
 
 	#[test]
 	fn and_byte() -> Result<(), Vec<String>> {
 		inst("AND.B #$80,@(R0,GBR)", Ins::AndByte(0x80))
+	}
+
+	#[test]
+	fn bf() -> Result<(), Vec<String>> {
+		check_program(
+			"CLRT
+BT TRGET_T
+BF TRGET_F
+NOP
+NOP
+TRGET_F:",
+			&["TRGET_F".into()],
+			[].into(),
+			single_section(&[
+				Ins::ClrT,
+				Ins::Bt("TRGET_T".into()),
+				Ins::Bf("TRGET_F".into()),
+				Ins::Nop,
+				Ins::Nop,
+				Ins::Label("TRGET_F".into()),
+			]),
+		)
 	}
 }
