@@ -1319,12 +1319,12 @@ TRGET:
 			[].into(),
 			single_section(&[
 				Ins::Bsr("TRGET".into()),
-				Ins::MovReg(3,4),
-				Ins::AddReg(0,1),
+				Ins::MovReg(3, 4),
+				Ins::AddReg(0, 1),
 				Ins::Label("TRGET".into()),
-				Ins::MovReg(2,3),
+				Ins::MovReg(2, 3),
 				Ins::Rts,
-				Ins::MovImm(1,0),
+				Ins::MovImm(1, 0),
 			]),
 		)
 	}
@@ -1368,7 +1368,7 @@ TRGET_T:",
 				Ins::BfS("TRGET_F".into()),
 				Ins::Nop,
 				Ins::BtS("TRGET_T".into()),
-				Ins::AddReg(0,1),
+				Ins::AddReg(0, 1),
 				Ins::Nop,
 				Ins::Label("TRGET_T".into()),
 			]),
@@ -1383,12 +1383,7 @@ TRGET_T:",
 	MAC.W @R0+,@R1+",
 			&[],
 			[].into(),
-			single_section(&[
-				Ins::ClrMac,
-				Ins::MacWord(0,1),
-				Ins::MacWord(0,1),
-			]),
+			single_section(&[Ins::ClrMac, Ins::MacWord(0, 1), Ins::MacWord(0, 1)]),
 		)
 	}
 }
-

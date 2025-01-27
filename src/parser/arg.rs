@@ -1,6 +1,5 @@
-
-use crate::Label;
 use crate::parser::Reg;
+use crate::Label;
 
 #[derive(Clone, PartialEq, Eq)]
 pub(crate) enum Arg {
