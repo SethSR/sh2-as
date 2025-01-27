@@ -1262,4 +1262,28 @@ TRGET_F:",
 			]),
 		)
 	}
+
+	#[test]
+	fn bfs() -> Result<(), Vec<Error>> {
+		check_program(
+			"CLRT
+BT/S TRGET_T
+NOP
+BF/S TRGET_F
+ADD R0,R1
+NOP
+TRGET_F:",
+			&["TRGET_F".into()],
+			[].into(),
+			single_section(&[
+				Ins::ClrT,
+				Ins::BtS("TRGET_T".into()),
+				Ins::Nop,
+				Ins::BfS("TRGET_F".into()),
+				Ins::AddReg(0, 1),
+				Ins::Nop,
+				Ins::Label("TRGET_F".into()),
+			]),
+		)
+	}
 }
