@@ -1304,4 +1304,30 @@ TRGET:",
 			]),
 		)
 	}
+
+	#[test]
+	fn bsr() -> Result<(), Vec<Error>> {
+		check_program(
+			"BSR TRGET
+	MOV R3,R4
+	ADD R0,R1
+
+TRGET:
+	MOV R2,R3
+	RTS
+	MOV #1,R0",
+			&["TRGET".into()],
+			[].into(),
+			single_section(&[
+				Ins::Bsr("TRGET".into()),
+				Ins::MovReg(3,4),
+				Ins::AddReg(0,1),
+				Ins::Label("TRGET".into()),
+				Ins::MovReg(2,3),
+				Ins::Rts,
+				Ins::MovImm(1,0),
+			]),
+		)
+	}
 }
+
