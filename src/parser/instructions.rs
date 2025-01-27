@@ -1,4 +1,3 @@
-
 use crate::parser::{Arg, Label, Reg, Size};
 
 #[allow(non_camel_case_types)]
@@ -332,5 +331,3 @@ pub(crate) enum Ins {
 	Const_Label(Size, Label),
 	Label(Label),
 }
-
-

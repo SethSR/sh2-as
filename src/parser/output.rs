@@ -1,4 +1,3 @@
-
 use crate::parser::{Ins, Label, State};
 
 #[derive(Default)]
