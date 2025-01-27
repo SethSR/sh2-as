@@ -194,13 +194,13 @@ GetJoyWait:
 		mov.b @(5,r13),r0  ;%RLDUSABC
 		shlr2 r0
 		shlr2 r0           ;Get %----RLDU
-		and %0000_1111,r0
+		and #%0000_1111,r0
 		mov r0,r1
 
 		mov.b @(5,r13),r0  ;%RLDUSABC
 		shll2 r0
 		shll2 r0           ;Get %SABC----
-		and %1111_0000,r0
+		and #%1111_0000,r0
 		or r1,r0
 		mov r0,r1          ;Now we have %SABCRLDU
 

@@ -448,7 +448,7 @@ impl Parser<'_> {
 			_ => error!(
 				Ins,
 				self,
-				&format!("Valid {ins_name} source argument: Number or Register")
+				&format!("Register, size-specifier, or #<immediate> for {ins_name}")
 			),
 		}
 	}
