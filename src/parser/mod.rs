@@ -20,16 +20,72 @@ pub(crate) enum Size {
 	Long,
 }
 
+#[derive(Debug)]
+pub(crate) enum Error {
+	Expected(Token, String),
+	ExpectedNum(Token, String, i64),
+	NumTokExpected(Token),
+	NumParse(std::num::ParseIntError),
+	LabelDefined(Label),
+	UnknownToken(Token),
+	UnexpectedToken(Token),
+}
+
+impl std::error::Error for Error {}
+
+impl std::fmt::Display for Error {
+	fn fmt(&self, fmt: &mut std::fmt::Formatter) -> std::fmt::Result {
+		write!(fmt, "ERROR: ")?;
+		match self {
+			Self::Expected(tok, msg) => {
+				let (line, pos) = tok.pos();
+				write!(fmt, "Expected '{msg}', Found '{tok}' @ [{line}:{pos}]")
+			}
+			Self::ExpectedNum(tok, msg, num) => {
+				let (line, pos) = tok.pos();
+				write!(
+					fmt,
+					"Expected '{msg}', Found '{tok}' ({num}) @ [{line}:{pos}]"
+				)
+			}
+			Self::NumTokExpected(tok) => {
+				let (line, pos) = tok.pos();
+				write!(fmt, "Number token is missing the referent @ [{line},{pos}]")
+			}
+			Self::NumParse(e) => {
+				write!(fmt, "{e}")
+			}
+			Self::LabelDefined(lbl) => {
+				write!(fmt, "Label '{lbl}' already defined")
+			}
+			Self::UnknownToken(tok) => {
+				let (line, pos) = tok.pos();
+				write!(fmt, "unknown item '{tok}' @ [{line}:{pos}]")
+			}
+			Self::UnexpectedToken(tok) => {
+				let (line, pos) = tok.pos();
+				write!(fmt, "unexpected {tok} @ [{line}:{pos}]")
+			}
+		}
+	}
+}
+
+impl From<std::num::ParseIntError> for Error {
+	fn from(other: std::num::ParseIntError) -> Self {
+		Self::NumParse(other)
+	}
+}
+
 struct Parser<'tok> {
 	index: usize,
 	tokens: &'tok [Token],
-	errors: Vec<String>,
+	errors: Vec<Error>,
 }
 
 macro_rules! error {
 	($t:ty, $data:expr, $msg:expr) => {{
 		$data.next_line();
-		Err::<$t, std::string::String>($data.expected($msg))
+		Err::<$t, Error>($data.expected($msg))
 	}};
 }
 
@@ -48,16 +104,14 @@ impl Parser<'_> {
 		self.peek(0)
 	}
 
-	fn expected(&mut self, msg: &str) -> String {
+	fn expected(&mut self, msg: &str) -> Error {
 		let tok = self.curr().clone();
-		let (line, pos) = tok.pos();
 		match tok.get_type() {
-			TokenType::IdNumber => {
-				let num = self.signed(Size::Long);
-				let num = num.expect("unable to parse number");
-				format!("ERROR: Expected '{msg}', Found '{tok}' ({num}) @ [{line}:{pos}]")
-			}
-			_ => format!("ERROR: Expected '{msg}', Found '{tok}' @ [{line}:{pos}]"),
+			TokenType::IdNumber => match self.signed(Size::Long) {
+				Err(_) => Error::NumTokExpected(tok),
+				Ok(num) => Error::ExpectedNum(tok, msg.into(), num),
+			},
+			_ => Error::Expected(tok, msg.into()),
 		}
 	}
 
@@ -77,36 +131,35 @@ impl Parser<'_> {
 		}
 	}
 
-	fn to_i64(txt: &str, radix: u32, sz: Size, is_signed: bool) -> Result<i64, String> {
+	fn to_i64(txt: &str, radix: u32, sz: Size, is_signed: bool) -> Result<i64, Error> {
 		let txt = txt.replace('_', "");
-		if is_signed {
+		let out = if is_signed {
 			match sz {
-				Size::Byte => i8::from_str_radix(&txt, radix).map(|n| n as i64),
-				Size::Word => i16::from_str_radix(&txt, radix).map(|n| n as i64),
-				Size::Long => i32::from_str_radix(&txt, radix).map(|n| n as i64),
+				Size::Byte => i8::from_str_radix(&txt, radix).map(|n| n as i64)?,
+				Size::Word => i16::from_str_radix(&txt, radix).map(|n| n as i64)?,
+				Size::Long => i32::from_str_radix(&txt, radix).map(|n| n as i64)?,
 			}
-			.map_err(|e| format!("{e}"))
 		} else {
 			match sz {
-				Size::Byte => u8::from_str_radix(&txt, radix).map(|n| n as i64),
-				Size::Word => u16::from_str_radix(&txt, radix).map(|n| n as i64),
-				Size::Long => u32::from_str_radix(&txt, radix).map(|n| n as i64),
+				Size::Byte => u8::from_str_radix(&txt, radix).map(|n| n as i64)?,
+				Size::Word => u16::from_str_radix(&txt, radix).map(|n| n as i64)?,
+				Size::Long => u32::from_str_radix(&txt, radix).map(|n| n as i64)?,
 			}
-			.map_err(|e| format!("{e}"))
-		}
+		};
+		Ok(out)
 	}
 
-	fn i64_from_dec(txt: &str, sz: Size, is_signed: bool) -> Result<i64, String> {
+	fn i64_from_dec(txt: &str, sz: Size, is_signed: bool) -> Result<i64, Error> {
 		Self::to_i64(txt, 10, sz, is_signed)
 	}
-	fn i64_from_bin(txt: &str, sz: Size) -> Result<i64, String> {
+	fn i64_from_bin(txt: &str, sz: Size) -> Result<i64, Error> {
 		Self::to_i64(&txt[1..], 2, sz, false)
 	}
-	fn i64_from_hex(txt: &str, sz: Size) -> Result<i64, String> {
+	fn i64_from_hex(txt: &str, sz: Size) -> Result<i64, Error> {
 		Self::to_i64(&txt[1..], 16, sz, false)
 	}
 
-	fn unsigned(&mut self, sz: Size) -> Result<i64, String> {
+	fn unsigned(&mut self, sz: Size) -> Result<i64, Error> {
 		let txt = self.curr().to_string();
 		match txt.chars().next() {
 			Some('%') => Self::i64_from_bin(&txt, sz),
@@ -116,7 +169,7 @@ impl Parser<'_> {
 		}
 	}
 
-	fn signed(&mut self, sz: Size) -> Result<i64, String> {
+	fn signed(&mut self, sz: Size) -> Result<i64, Error> {
 		let txt = self.curr().to_string();
 		match txt.chars().next() {
 			Some('%') => Self::i64_from_bin(&txt, sz),
@@ -127,16 +180,17 @@ impl Parser<'_> {
 		}
 	}
 
-	fn reg(&self) -> Result<Reg, String> {
+	fn reg(&self) -> Result<Reg, Error> {
 		let txt = self.curr().to_string();
-		if txt.to_lowercase() == "pc" {
-			Ok(15)
+		let out = if txt.to_lowercase() == "pc" {
+			15
 		} else {
-			txt[1..].parse::<u8>().map_err(|e| format!("{e}"))
-		}
+			txt[1..].parse::<u8>()?
+		};
+		Ok(out)
 	}
 
-	fn address(&mut self) -> Result<Arg, String> {
+	fn address(&mut self) -> Result<Arg, Error> {
 		use TokenType as TT;
 
 		match self.next().get_type() {
@@ -190,7 +244,7 @@ impl Parser<'_> {
 		}
 	}
 
-	fn match_size(&mut self) -> Result<Size, String> {
+	fn match_size(&mut self) -> Result<Size, Error> {
 		match self.next().get_type() {
 			TokenType::SymByte => Ok(Size::Byte),
 			TokenType::SymWord => Ok(Size::Word),
@@ -199,7 +253,7 @@ impl Parser<'_> {
 		}
 	}
 
-	fn size(&mut self) -> Result<Size, String> {
+	fn size(&mut self) -> Result<Size, Error> {
 		self.match_token(TokenType::SymDot)?;
 		self.match_size()
 	}
@@ -209,7 +263,7 @@ impl Parser<'_> {
 		offset: usize,
 		tt: TokenType,
 		msg: &str,
-	) -> Result<(), String> {
+	) -> Result<(), Error> {
 		if self.peek(offset).get_type() != tt {
 			error!((), self, msg)
 		} else {
@@ -217,45 +271,43 @@ impl Parser<'_> {
 		}
 	}
 
-	fn match_token_or_err<'a>(&'a mut self, tt: TokenType, msg: &str) -> Result<&'a Token, String> {
+	fn match_token_or_err<'a>(&'a mut self, tt: TokenType, msg: &str) -> Result<&'a Token, Error> {
 		self.assert_token_with_offset_or_err(1, tt, msg)?;
 		Ok(self.next())
 	}
 
-	fn match_ident_or_err(&mut self, msg: &str) -> Result<Label, String> {
+	fn match_ident_or_err(&mut self, msg: &str) -> Result<Label, Error> {
 		self.assert_token_with_offset_or_err(1, TokenType::IdLabel, msg)?;
 		Ok(self.next().get_id().unwrap())
 	}
 
-	fn match_token(&mut self, tt: TokenType) -> Result<&Token, String> {
-		self
-			.match_token_or_err(tt, &tt.to_string())
-			.map_err(|s| s.to_string())
+	fn match_token(&mut self, tt: TokenType) -> Result<&Token, Error> {
+		self.match_token_or_err(tt, &tt.to_string())
 	}
 
-	fn match_tokens(&mut self, tts: &[TokenType]) -> Result<(), String> {
+	fn match_tokens(&mut self, tts: &[TokenType]) -> Result<(), Error> {
 		for tt in tts {
 			self.match_token(*tt)?;
 		}
 		Ok(())
 	}
 
-	fn match_unsigned(&mut self, sz: Size) -> Result<i64, String> {
+	fn match_unsigned(&mut self, sz: Size) -> Result<i64, Error> {
 		self.match_token(TokenType::IdNumber)?;
 		self.unsigned(sz)
 	}
 
-	fn match_signed(&mut self, sz: Size) -> Result<i64, String> {
+	fn match_signed(&mut self, sz: Size) -> Result<i64, Error> {
 		self.match_token(TokenType::IdNumber)?;
 		self.signed(sz)
 	}
 
-	fn match_reg(&mut self) -> Result<Reg, String> {
+	fn match_reg(&mut self) -> Result<Reg, Error> {
 		self.match_token(TokenType::IdRegister)?;
 		self.reg()
 	}
 
-	fn assert_r0(&mut self, reg: u8) -> Result<(), String> {
+	fn assert_r0(&mut self, reg: u8) -> Result<(), Error> {
 		if reg == 0 {
 			Ok(())
 		} else {
@@ -263,20 +315,20 @@ impl Parser<'_> {
 		}
 	}
 
-	fn match_r0(&mut self) -> Result<(), String> {
+	fn match_r0(&mut self) -> Result<(), Error> {
 		let reg = self.match_reg()?;
 		self.assert_r0(reg)?;
 		Ok(())
 	}
 
-	fn reg_args(&mut self) -> Result<(Reg, Reg), String> {
+	fn reg_args(&mut self) -> Result<(Reg, Reg), Error> {
 		let src = self.reg()?;
 		self.match_token(TokenType::SymComma)?;
 		let dst = self.match_reg()?;
 		Ok((src, dst))
 	}
 
-	fn match_reg_args(&mut self) -> Result<(Reg, Reg), String> {
+	fn match_reg_args(&mut self) -> Result<(Reg, Reg), Error> {
 		self.assert_token_with_offset_or_err(
 			1,
 			TokenType::IdRegister,
@@ -286,7 +338,7 @@ impl Parser<'_> {
 		self.reg_args()
 	}
 
-	fn assert_within_i4(&mut self, value: i64) -> Result<i8, String> {
+	fn assert_within_i4(&mut self, value: i64) -> Result<i8, Error> {
 		if (-8..7).contains(&value) {
 			Ok(((value as u8) & 0x0F) as i8)
 		} else {
@@ -294,7 +346,7 @@ impl Parser<'_> {
 		}
 	}
 
-	fn assert_within_i8(&mut self, value: i64) -> Result<i8, String> {
+	fn assert_within_i8(&mut self, value: i64) -> Result<i8, Error> {
 		if (i8::MIN as i64..i8::MAX as i64).contains(&value) {
 			Ok(value as i8)
 		} else {
@@ -306,7 +358,7 @@ impl Parser<'_> {
 		}
 	}
 
-	fn assert_within_i16(&mut self, value: i64) -> Result<i16, String> {
+	fn assert_within_i16(&mut self, value: i64) -> Result<i16, Error> {
 		if (i16::MIN as i64..i16::MAX as i64).contains(&value) {
 			Ok(value as i16)
 		} else {
@@ -318,7 +370,7 @@ impl Parser<'_> {
 		}
 	}
 
-	fn assert_within_i32(&mut self, value: i64) -> Result<i32, String> {
+	fn assert_within_i32(&mut self, value: i64) -> Result<i32, Error> {
 		if (i32::MIN as i64..i32::MAX as i64).contains(&value) {
 			Ok(value as i32)
 		} else {
@@ -330,7 +382,7 @@ impl Parser<'_> {
 		}
 	}
 
-	fn assert_within_u8(&mut self, value: i64) -> Result<u8, String> {
+	fn assert_within_u8(&mut self, value: i64) -> Result<u8, Error> {
 		if (u8::MIN as i64..u8::MAX as i64).contains(&value) {
 			Ok(value as u8)
 		} else {
@@ -342,7 +394,7 @@ impl Parser<'_> {
 		&mut self,
 		fn_fast: impl Fn(Label) -> Ins,
 		fn_delay: impl Fn(Label) -> Ins,
-	) -> Result<Ins, String> {
+	) -> Result<Ins, Error> {
 		use TokenType as TT;
 		match self.next().get_type() {
 			TT::IdLabel => self.curr().get_id().map(fn_fast).ok_or_else(|| {
@@ -353,7 +405,6 @@ impl Parser<'_> {
 				.match_token(TT::SymDelay)
 				.map(|_| ())
 				.and_then(|_| self.match_ident_or_err("Label"))
-				.map_err(|e| self.expected(&e))
 				.map(fn_delay),
 			_ => error!(Ins, self, "Label"),
 		}
@@ -365,7 +416,7 @@ impl Parser<'_> {
 		fn_reg: impl Fn(Reg, Reg) -> Ins,
 		fn_byte: impl Fn(u8) -> Ins,
 		ins_name: &str,
-	) -> Result<Ins, String> {
+	) -> Result<Ins, Error> {
 		use TokenType as TT;
 		match self.next().get_type() {
 			// INS r#,r#
@@ -402,7 +453,7 @@ impl Parser<'_> {
 		}
 	}
 
-	fn dmul_ins(&mut self, fn_ins: impl Fn(Reg, Reg) -> Ins) -> Result<Ins, String> {
+	fn dmul_ins(&mut self, fn_ins: impl Fn(Reg, Reg) -> Ins) -> Result<Ins, Error> {
 		self.size().and_then(|sz| {
 			if sz == Size::Long {
 				self.match_reg_args().map(|(src, dst)| fn_ins(src, dst))
@@ -412,7 +463,7 @@ impl Parser<'_> {
 		})
 	}
 
-	fn ext_ins(&mut self, fn_ins: impl Fn(Size, Reg, Reg) -> Ins) -> Result<Ins, String> {
+	fn ext_ins(&mut self, fn_ins: impl Fn(Size, Reg, Reg) -> Ins) -> Result<Ins, Error> {
 		self.size().and_then(|sz| {
 			if sz == Size::Long {
 				error!(Ins, self, "Size specifier Byte('b') or Word('w')")
@@ -429,7 +480,7 @@ impl Parser<'_> {
 ///
 /// Given a sequence of valid tokens, the parser should return either a section and label table for
 /// the analysis stage, or a sequence of all errors encountered while parsing the input.
-pub fn parser(tokens: &[Token]) -> Result<Output, Vec<String>> {
+pub fn parser(tokens: &[Token]) -> Result<Output, Vec<Error>> {
 	let mut skey = 0;
 	let mut output = Output::default();
 
@@ -456,9 +507,7 @@ pub fn parser(tokens: &[Token]) -> Result<Output, Vec<String>> {
 						.unwrap_or_default(),
 					TT::SymColon => {
 						if output.labels.contains_key(&lbl) {
-							data
-								.errors
-								.push(format!("ERROR: Label '{lbl}' already defined"));
+							data.errors.push(Error::LabelDefined(lbl));
 							data.next_line();
 							continue;
 						}
@@ -473,12 +522,7 @@ pub fn parser(tokens: &[Token]) -> Result<Output, Vec<String>> {
 					}
 				}
 			}
-			TT::IdUnknown => {
-				let (line, pos) = cur_tok.pos();
-				data
-					.errors
-					.push(format!("ERROR: unknown item '{cur_tok}' @ [{line}:{pos}]"));
-			}
+			TT::IdUnknown => data.errors.push(Error::UnknownToken(cur_tok.clone())),
 			TT::InsAdd => match data.next().get_type() {
 				TT::SymImmediate => data
 					.match_signed(Size::Byte)
@@ -530,7 +574,7 @@ pub fn parser(tokens: &[Token]) -> Result<Output, Vec<String>> {
 			TT::InsClrMac => output.add_to_section(skey, Ins::ClrMac),
 			TT::InsClrT => output.add_to_section(skey, Ins::ClrT),
 			TT::InsCmp => {
-				let mut func = || -> Result<Ins, String> {
+				let mut func = || -> Result<Ins, Error> {
 					data.match_token(TT::SymSlash)?;
 					match data.next().get_type() {
 						TT::SymEQ => {
@@ -760,7 +804,7 @@ pub fn parser(tokens: &[Token]) -> Result<Output, Vec<String>> {
 			TT::InsMov => match data.next().get_type() {
 				// MOV Rm,Rn
 				TT::IdRegister => data.reg_args().map(|(src, dst)| Ins::MovReg(src, dst)),
-				TT::SymDot => || -> Result<Ins, String> {
+				TT::SymDot => || -> Result<Ins, Error> {
 					let size = data.match_size()?;
 
 					let src = match data.next().get_type() {
@@ -902,12 +946,12 @@ pub fn parser(tokens: &[Token]) -> Result<Output, Vec<String>> {
 				.map(|reg| output.add_to_section(skey, Ins::ShLR16(reg)))
 				.unwrap_or_default(),
 			TT::InsSleep => output.add_to_section(skey, Ins::Sleep),
-			TT::InsStc => || -> Result<Ins, String> {
-				fn comma_reg(p: &mut Parser) -> Result<Reg, String> {
+			TT::InsStc => || -> Result<Ins, Error> {
+				fn comma_reg(p: &mut Parser) -> Result<Reg, Error> {
 					p.match_token(TT::SymComma)?;
 					p.match_reg()
 				}
-				fn pre_dec(p: &mut Parser) -> Result<Reg, String> {
+				fn pre_dec(p: &mut Parser) -> Result<Reg, Error> {
 					p.match_tokens(&[TT::SymComma, TT::SymAddress, TT::SymDash])?;
 					p.match_reg()
 				}
@@ -929,12 +973,12 @@ pub fn parser(tokens: &[Token]) -> Result<Output, Vec<String>> {
 			}()
 			.map(|ins| output.add_to_section(skey, ins))
 			.unwrap_or_default(),
-			TT::InsSts => || -> Result<Ins, String> {
-				fn comma_reg(p: &mut Parser) -> Result<Reg, String> {
+			TT::InsSts => || -> Result<Ins, Error> {
+				fn comma_reg(p: &mut Parser) -> Result<Reg, Error> {
 					p.match_token(TT::SymComma)?;
 					p.match_reg()
 				}
-				fn pre_dec(p: &mut Parser) -> Result<Reg, String> {
+				fn pre_dec(p: &mut Parser) -> Result<Reg, Error> {
 					p.match_tokens(&[TT::SymComma, TT::SymAddress, TT::SymDash])?;
 					p.match_reg()
 				}
@@ -1030,12 +1074,7 @@ pub fn parser(tokens: &[Token]) -> Result<Output, Vec<String>> {
 				.match_unsigned(Size::Long)
 				.map(|addr| skey = addr as u64)
 				.unwrap_or_default(),
-			_ => {
-				let (line, pos) = cur_tok.pos();
-				data
-					.errors
-					.push(format!("unexpected {cur_tok} @ [{line}:{pos}]"));
-			}
+			_ => data.errors.push(Error::UnexpectedToken(cur_tok.clone())),
 		}
 		data.index += 1;
 	}
@@ -1118,7 +1157,7 @@ mod can_parse {
 		e_labels: &[Label],
 		e_values: ValueMap,
 		e_sections: SectionMap<Ins>,
-	) -> Result<(), Vec<String>> {
+	) -> Result<(), Vec<Error>> {
 		let tokens = lexer(input);
 		let out = parser(&tokens)?;
 		check_labels(out.labels, e_labels);
@@ -1127,21 +1166,21 @@ mod can_parse {
 		Ok(())
 	}
 
-	fn section(input: &str, expected: &[Ins]) -> Result<(), Vec<String>> {
+	fn section(input: &str, expected: &[Ins]) -> Result<(), Vec<Error>> {
 		check_program(input, &[], [].into(), [(0, expected.to_vec())].into())
 	}
 
-	fn inst(input: &str, ins: Ins) -> Result<(), Vec<String>> {
+	fn inst(input: &str, ins: Ins) -> Result<(), Vec<Error>> {
 		section(input, &[ins])
 	}
 
 	#[test]
-	fn add1() -> Result<(), Vec<String>> {
+	fn add1() -> Result<(), Vec<Error>> {
 		inst("ADD R0,R1", Ins::AddReg(0, 1))
 	}
 
 	#[test]
-	fn add2() -> Result<(), Vec<String>> {
+	fn add2() -> Result<(), Vec<Error>> {
 		inst("ADD #$01,R2", Ins::AddImm(1, 2))
 	}
 
@@ -1161,34 +1200,32 @@ mod can_parse {
 	*/
 
 	#[test]
-	fn add4() -> Result<(), Vec<String>> {
+	fn add4() -> Result<(), Vec<Error>> {
 		inst("ADD #-2,R2", Ins::AddImm(-2, 2))
 	}
 
 	#[test]
-	fn addc() -> Result<(), Vec<String>> {
+	fn addc() -> Result<(), Vec<Error>> {
 		inst("ADDC R3,R1", Ins::AddC(3, 1))
 	}
 
 	#[test]
-	fn addv() -> Result<(), Vec<String>> {
+	fn addv() -> Result<(), Vec<Error>> {
 		inst("ADDV R0,R1", Ins::AddV(0, 1))
 	}
 
 	#[test]
-	fn and_reg_reg() -> Result<(), Vec<String>> {
+	fn and_reg_reg() -> Result<(), Vec<Error>> {
 		inst("AND R0,R1", Ins::AndReg(0, 1))
 	}
 
 	#[test]
-	fn and_imm() -> Result<(), Vec<String>> {
+	fn and_imm() -> Result<(), Vec<Error>> {
 		inst("AND #$0F,R0", Ins::AndImm(0x0F))
 	}
 
 	#[test]
-	// FIXME - srenshaw - Why is the parser not returning the correct errors?
-	//#[should_panic(expected = "'AND #imm,R?' requires r0 as the destination register")]
-	#[should_panic]
+	#[should_panic(expected = "Expected 'R0', Found 'R4' @ [1:10]")]
 	fn and_imm_requires_r0() {
 		match inst("AND #$0F,R4", Ins::AndImm(0x0F)) {
 			Err(errors) => {
@@ -1200,12 +1237,12 @@ mod can_parse {
 	}
 
 	#[test]
-	fn and_byte() -> Result<(), Vec<String>> {
+	fn and_byte() -> Result<(), Vec<Error>> {
 		inst("AND.B #$80,@(R0,GBR)", Ins::AndByte(0x80))
 	}
 
 	#[test]
-	fn bf() -> Result<(), Vec<String>> {
+	fn bf() -> Result<(), Vec<Error>> {
 		check_program(
 			"CLRT
 BT TRGET_T
