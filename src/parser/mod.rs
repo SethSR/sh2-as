@@ -1376,5 +1376,21 @@ TRGET_T:",
 			]),
 		)
 	}
+
+	#[test]
+	fn clrmac() -> TestResult {
+		check_program(
+			"CLRMAC
+	MAC.W @R0+,@R1+
+	MAC.W @R0+,@R1+",
+			&[],
+			[].into(),
+			single_section(&[
+				Ins::ClrMac,
+				Ins::MacWord(0,1),
+				Ins::MacWord(0,1),
+			]),
+		)
+	}
 }
 
