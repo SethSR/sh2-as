@@ -1139,7 +1139,7 @@ mod can_parse {
 		let el_len = e_labels.len();
 		assert_eq!(pl_len, el_len, "expected {} output label(s)", el_len);
 		assert!(
-			e_labels.into_iter().all(|lbl| p_labels.contains_key(lbl)),
+			e_labels.iter().all(|lbl| p_labels.contains_key(lbl)),
 			"unmatched labels"
 		);
 	}
@@ -1229,12 +1229,9 @@ mod can_parse {
 	#[test]
 	#[should_panic(expected = "Expected 'R0', Found 'R4' @ [1:10]")]
 	fn and_imm_requires_r0() {
-		match inst("AND #$0F,R4", Ins::AndImm(0x0F)) {
-			Err(errors) => {
-				assert_eq!(errors.len(), 1);
-				panic!("{}", errors[0]);
-			}
-			Ok(_) => {}
+		if let Err(errors) = inst("AND #$0F,R4", Ins::AndImm(0x0F)) {
+			assert_eq!(errors.len(), 1);
+			panic!("{}", errors[0]);
 		}
 	}
 
