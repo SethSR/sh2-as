@@ -1286,4 +1286,22 @@ TRGET_F:",
 			]),
 		)
 	}
+
+	#[test]
+	fn bra() -> Result<(), Vec<Error>> {
+		check_program(
+			"BRA TRGET
+ADD R0,R1
+NOP
+TRGET:",
+			&["TRGET".into()],
+			[].into(),
+			single_section(&[
+				Ins::Bra("TRGET".into()),
+				Ins::AddReg(0, 1),
+				Ins::Nop,
+				Ins::Label("TRGET".into()),
+			]),
+		)
+	}
 }
