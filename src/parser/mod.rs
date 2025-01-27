@@ -1353,5 +1353,28 @@ TRGET_T:",
 			]),
 		)
 	}
+
+	#[test]
+	fn bts() -> TestResult {
+		check_program(
+			"SETT
+	BF/S TRGET_F
+	NOP
+	BT/S TRGET_T
+	ADD R0,R1
+	NOP
+TRGET_T:",
+			&["TRGET_T".into()],
+			[].into(),
+			single_section(&[
+				Ins::SetT,
+				Ins::BfS("TRGET_F".into()),
+				Ins::Nop,
+				Ins::BtS("TRGET_T".into()),
+				Ins::Nop,
+				Ins::Label("TRGET_T".into()),
+			]),
+		)
+	}
 }
 
