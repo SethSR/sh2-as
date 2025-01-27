@@ -1094,6 +1094,8 @@ mod can_parse {
 
 	use super::*;
 
+	type TestResult = Result<(), Vec<Error>>;
+
 	type SectionMap<T> = HashMap<u64, Vec<T>>;
 	type LabelMap = HashMap<Label, Option<u32>>;
 	type ValueMap = HashMap<Label, i8>;
@@ -1157,7 +1159,7 @@ mod can_parse {
 		e_labels: &[Label],
 		e_values: ValueMap,
 		e_sections: SectionMap<Ins>,
-	) -> Result<(), Vec<Error>> {
+	) -> TestResult {
 		let tokens = lexer(input);
 		let out = parser(&tokens)?;
 		check_labels(out.labels, e_labels);
@@ -1166,28 +1168,28 @@ mod can_parse {
 		Ok(())
 	}
 
-	fn section(input: &str, expected: &[Ins]) -> Result<(), Vec<Error>> {
+	fn section(input: &str, expected: &[Ins]) -> TestResult {
 		check_program(input, &[], [].into(), [(0, expected.to_vec())].into())
 	}
 
-	fn inst(input: &str, ins: Ins) -> Result<(), Vec<Error>> {
+	fn inst(input: &str, ins: Ins) -> TestResult {
 		section(input, &[ins])
 	}
 
 	#[test]
-	fn add1() -> Result<(), Vec<Error>> {
+	fn add1() -> TestResult {
 		inst("ADD R0,R1", Ins::AddReg(0, 1))
 	}
 
 	#[test]
-	fn add2() -> Result<(), Vec<Error>> {
+	fn add2() -> TestResult {
 		inst("ADD #$01,R2", Ins::AddImm(1, 2))
 	}
 
 	// FIXME - srenshaw - Why is the parser not returning an error here?
 	/*
 		#[test]
-		fn add3() -> Result<(), Vec<String>> {
+		fn add3() -> TestResult {
 			let input = "ADD #$FE,R3";
 			let tokens = lexer(input);
 			let out = parser(&tokens)?;
@@ -1200,27 +1202,27 @@ mod can_parse {
 	*/
 
 	#[test]
-	fn add4() -> Result<(), Vec<Error>> {
+	fn add4() -> TestResult {
 		inst("ADD #-2,R2", Ins::AddImm(-2, 2))
 	}
 
 	#[test]
-	fn addc() -> Result<(), Vec<Error>> {
+	fn addc() -> TestResult {
 		inst("ADDC R3,R1", Ins::AddC(3, 1))
 	}
 
 	#[test]
-	fn addv() -> Result<(), Vec<Error>> {
+	fn addv() -> TestResult {
 		inst("ADDV R0,R1", Ins::AddV(0, 1))
 	}
 
 	#[test]
-	fn and_reg_reg() -> Result<(), Vec<Error>> {
+	fn and_reg_reg() -> TestResult {
 		inst("AND R0,R1", Ins::AndReg(0, 1))
 	}
 
 	#[test]
-	fn and_imm() -> Result<(), Vec<Error>> {
+	fn and_imm() -> TestResult {
 		inst("AND #$0F,R0", Ins::AndImm(0x0F))
 	}
 
@@ -1237,12 +1239,12 @@ mod can_parse {
 	}
 
 	#[test]
-	fn and_byte() -> Result<(), Vec<Error>> {
+	fn and_byte() -> TestResult {
 		inst("AND.B #$80,@(R0,GBR)", Ins::AndByte(0x80))
 	}
 
 	#[test]
-	fn bf() -> Result<(), Vec<Error>> {
+	fn bf() -> TestResult {
 		check_program(
 			"CLRT
 BT TRGET_T
@@ -1264,7 +1266,7 @@ TRGET_F:",
 	}
 
 	#[test]
-	fn bfs() -> Result<(), Vec<Error>> {
+	fn bfs() -> TestResult {
 		check_program(
 			"CLRT
 BT/S TRGET_T
@@ -1288,7 +1290,7 @@ TRGET_F:",
 	}
 
 	#[test]
-	fn bra() -> Result<(), Vec<Error>> {
+	fn bra() -> TestResult {
 		check_program(
 			"BRA TRGET
 ADD R0,R1
@@ -1306,7 +1308,7 @@ TRGET:",
 	}
 
 	#[test]
-	fn bsr() -> Result<(), Vec<Error>> {
+	fn bsr() -> TestResult {
 		check_program(
 			"BSR TRGET
 	MOV R3,R4
@@ -1326,6 +1328,28 @@ TRGET:
 				Ins::MovReg(2,3),
 				Ins::Rts,
 				Ins::MovImm(1,0),
+			]),
+		)
+	}
+
+	#[test]
+	fn bt() -> TestResult {
+		check_program(
+			"SETT
+	BF TRGET_F
+	BT TRGET_T
+	NOP
+	NOP
+TRGET_T:",
+			&["TRGET_T".into()],
+			[].into(),
+			single_section(&[
+				Ins::SetT,
+				Ins::Bf("TRGET_F".into()),
+				Ins::Bt("TRGET_T".into()),
+				Ins::Nop,
+				Ins::Nop,
+				Ins::Label("TRGET_T".into()),
 			]),
 		)
 	}
