@@ -29,7 +29,15 @@ fn main() -> miette::Result<()> {
 
 	let file = std::fs::read_to_string(source).into_diagnostic()?;
 
-	let tokens = lexer(&file);
+	let tokens = match lexer(&file) {
+		Ok(tokens) => tokens,
+		Err(errors) => {
+			for error in errors {
+				eprintln!("{error}");
+			}
+			return Ok(());
+		}
+	};
 
 	for token in &tokens {
 		if token.get_type() == TokenType::IdUnknown || !is_silent {
