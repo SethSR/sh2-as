@@ -76,7 +76,10 @@ impl std::fmt::Display for Error {
 			}
 			Self::NumTooLarge(tok, sz) => {
 				let (line, pos) = tok.pos();
-				write!(fmt, "{tok} is too large for this operation, expected a {sz:?} @ [{line},{pos}]")
+				write!(
+					fmt,
+					"{tok} is too large for this operation, expected a {sz:?} @ [{line},{pos}]"
+				)
 			}
 		}
 	}
@@ -123,7 +126,7 @@ impl Parser<'_> {
 			TokenType::IdBinary => match self.binary(Size::Long) {
 				Err(_) => Error::NumTokExpected(tok),
 				Ok(num) => Error::ExpectedNum(tok, msg.into(), num),
-			}
+			},
 			TokenType::IdDecimal => match self.signed(Size::Long) {
 				Err(_) => Error::NumTokExpected(tok),
 				Ok(num) => Error::ExpectedNum(tok, msg.into(), num),
@@ -188,10 +191,12 @@ impl Parser<'_> {
 		}
 
 		fn calc_imm(txt: &str, limit: usize) -> Option<i64> {
-			let (val,cnt) = txt.chars().fold((0,0), |(acc,cnt), ch| match parse_ch(ch) {
-				Some(n) => (acc * 2 + n, cnt+1),
-				None => (acc, cnt),
-			});
+			let (val, cnt) = txt
+				.chars()
+				.fold((0, 0), |(acc, cnt), ch| match parse_ch(ch) {
+					Some(n) => (acc * 2 + n, cnt + 1),
+					None => (acc, cnt),
+				});
 			if cnt > limit {
 				None
 			} else {
@@ -1572,4 +1577,3 @@ TRGET_T:",
 		)
 	}
 }
-
