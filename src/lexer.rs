@@ -15,7 +15,9 @@ impl fmt::Display for Error {
 		write!(fmt, "ERROR: ")?;
 		match self {
 			Self::NegBinary(line, pos) => write!(fmt, "Binary values cannot be negated @ [{line}:{pos}]"),
-			Self::NegHexadecimal(line, pos) => write!(fmt, "Hexadecimal values cannot be negated @ [{line}:{pos}]"),
+			Self::NegHexadecimal(line, pos) => {
+				write!(fmt, "Hexadecimal values cannot be negated @ [{line}:{pos}]")
+			}
 		}
 	}
 }
@@ -51,7 +53,7 @@ impl Token {
 	}
 
 	fn num(s: Label, line: usize, pos: usize) -> Self {
-		let mut this = Self::new(TokenType::IdNumber, line, pos);
+		let mut this = Self::new(TokenType::IdDecimal, line, pos);
 		this.ex = Some(s);
 		this
 	}
@@ -98,9 +100,11 @@ impl fmt::Debug for Token {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum TokenType {
+	IdBinary,
 	IdComment,
+	IdDecimal,
+	IdHexadecimal,
 	IdLabel,
-	IdNumber,
 	IdRegister,
 	IdUnknown,
 	InsAdd,
@@ -208,9 +212,11 @@ impl fmt::Display for TokenType {
 	fn fmt(&self, fmt: &mut fmt::Formatter) -> fmt::Result {
 		use TokenType as TT;
 		let s = match self {
+			TT::IdBinary => "Binary",
 			TT::IdComment => "Comment",
+			TT::IdDecimal => "Decimal",
+			TT::IdHexadecimal => "Hexadecimal",
 			TT::IdLabel => "Label",
-			TT::IdNumber => "Number (bin/dec/hex)",
 			TT::IdRegister => "Register (R0-15,PC)",
 			TT::IdUnknown => "Unknown",
 			TT::InsAdd => "ADD",
@@ -445,11 +451,16 @@ pub(crate) fn lexer(input: &str) -> Result<Vec<Token>, Vec<Error>> {
 					next(&mut char_idx, &mut chars);
 					continue;
 				}
-				let token = tokenize(input, cur_idx, &mut chars, &mut char_idx, |ch| {
+				let token = tokenize(input, cur_idx + 1, &mut chars, &mut char_idx, |ch| {
 					ch.is_ascii_digit() || ('a'..='f').contains(&ch) || ('A'..='F').contains(&ch) || '_' == ch
 				});
 				let s = id_storage.entry(token).or_insert_with(|| token.into());
-				results.push(Token::num(s.clone(), line_idx, char_idx - token.len() + 1));
+				results.push(Token {
+					tt: TokenType::IdHexadecimal,
+					ex: Some(s.clone()),
+					line: line_idx as u16,
+					pos: (char_idx - token.len() + 1) as u16,
+				});
 			}
 			'%' => {
 				next(&mut char_idx, &mut chars);
@@ -458,11 +469,16 @@ pub(crate) fn lexer(input: &str) -> Result<Vec<Token>, Vec<Error>> {
 					next(&mut char_idx, &mut chars);
 					continue;
 				}
-				let token = tokenize(input, cur_idx, &mut chars, &mut char_idx, |ch| {
+				let token = tokenize(input, cur_idx + 1, &mut chars, &mut char_idx, |ch| {
 					['0', '1'].contains(&ch) || '_' == ch
 				});
 				let s = id_storage.entry(token).or_insert_with(|| token.into());
-				results.push(Token::num(s.clone(), line_idx, char_idx - token.len() + 1));
+				results.push(Token {
+					tt: TokenType::IdBinary,
+					ex: Some(s.clone()),
+					line: line_idx as u16,
+					pos: (char_idx - token.len() + 1) as u16,
+				});
 			}
 			';' => {
 				let char_idx_s = char_idx;
@@ -649,10 +665,10 @@ mod can_lex {
 	}
 
 	#[test]
-	fn number() -> TestResult {
+	fn decimal() -> TestResult {
 		let out = lexer("34")?;
 		assert_eq!(out.len(), 1);
-		assert_eq!(out[0], token_test(TokenType::IdNumber, "34"));
+		assert_eq!(out[0], token_test(TokenType::IdDecimal, "34"));
 		Ok(())
 	}
 
@@ -661,7 +677,7 @@ mod can_lex {
 		let out = lexer("-52")?;
 		assert_eq!(out.len(), 2);
 		assert_eq!(out[0], symbol_test(TokenType::SymDash));
-		assert_eq!(out[1], token_test(TokenType::IdNumber, "52"));
+		assert_eq!(out[1], token_test(TokenType::IdDecimal, "52"));
 		Ok(())
 	}
 
@@ -669,9 +685,9 @@ mod can_lex {
 	fn number_no_mid_dash() -> TestResult {
 		let out = lexer("2-3")?;
 		assert_eq!(out.len(), 3);
-		assert_eq!(out[0], token_test(TokenType::IdNumber, "2"));
+		assert_eq!(out[0], token_test(TokenType::IdDecimal, "2"));
 		assert_eq!(out[1], symbol_test(TokenType::SymDash));
-		assert_eq!(out[2], token_test(TokenType::IdNumber, "3"));
+		assert_eq!(out[2], token_test(TokenType::IdDecimal, "3"));
 		Ok(())
 	}
 
@@ -679,12 +695,12 @@ mod can_lex {
 	fn number_hex() -> TestResult {
 		let out = lexer("$2e")?;
 		assert_eq!(out.len(), 1);
-		assert_eq!(out[0], token_test(TokenType::IdNumber, "$2e"));
+		assert_eq!(out[0], token_test(TokenType::IdHexadecimal, "2e"));
 		Ok(())
 	}
 
 	#[test]
-	#[should_panic(expected="ERROR: Hexadecimal values cannot be negated @ [0:1]")]
+	#[should_panic(expected = "ERROR: Hexadecimal values cannot be negated @ [0:1]")]
 	fn number_hex_no_neg() {
 		if let Err(es) = lexer("$-2e") {
 			assert_eq!(es.len(), 1, "should have 1 error");
@@ -696,12 +712,12 @@ mod can_lex {
 	fn number_bin() -> TestResult {
 		let out = lexer("%101")?;
 		assert_eq!(out.len(), 1);
-		assert_eq!(out[0], token_test(TokenType::IdNumber, "%101"));
+		assert_eq!(out[0], token_test(TokenType::IdBinary, "101"));
 		Ok(())
 	}
 
 	#[test]
-	#[should_panic(expected="ERROR: Binary values cannot be negated @ [0:1]")]
+	#[should_panic(expected = "ERROR: Binary values cannot be negated @ [0:1]")]
 	fn number_bin_no_neg() {
 		if let Err(es) = lexer("%-101") {
 			assert_eq!(es.len(), 1, "should have 1 error");

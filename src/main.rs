@@ -18,6 +18,8 @@ type SectionMap = HashMap<u64, Vec<State>>;
 type LabelMap = HashMap<Label, Option<u32>>;
 
 fn main() -> miette::Result<()> {
+	tracing_subscriber::fmt::init();
+
 	let mut args = std::env::args();
 	args.next();
 
@@ -25,7 +27,7 @@ fn main() -> miette::Result<()> {
 	let target = args.next().unwrap_or("asm.out".to_string());
 
 	// TODO - srenshaw - Change this to a CLI option.
-	let is_silent = false;
+	let is_silent = true;
 
 	let file = std::fs::read_to_string(source).into_diagnostic()?;
 
