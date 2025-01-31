@@ -329,9 +329,9 @@ ins = {
 	ins_xtrct
 }
 
-dir_constant = { (^"dc.b" | ^"dc.w" | ^"dc.l") ~ imm_signed }
-dir_org = { sym_org ~ imm_signed }
-dir_value = { lbl ~ "=" ~ ("-"? ~ dec) }
+dir_constant = { sym_const ~ (sym_byte | sym_word | sym_long) ~ imm_signed }
+dir_org      = { sym_org ~ imm_signed }
+dir_value    = { lbl ~ "=" ~ (("-"? ~ dec) | lbl) }
 
 dir = {
 	dir_constant
