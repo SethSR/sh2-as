@@ -1,3 +1,4 @@
+/*
 use std::collections::HashMap;
 
 use miette::IntoDiagnostic;
@@ -86,3 +87,95 @@ fn main() -> miette::Result<()> {
 
 	Ok(())
 }
+*/
+
+use std::fs::read_to_string;
+
+use pest::Parser;
+use pest_derive::Parser;
+
+#[derive(Parser)]
+#[grammar = "sh2.pest"]
+struct Sh2Parser;
+
+fn main() {
+	let mut args = std::env::args();
+	args.next();
+
+	let source = args.next().expect("missing source file");
+	let input = read_to_string(&source).expect("unable to read source file");
+
+	let output = Sh2Parser::parse(Rule::program, &input);
+	println!("{output:?}");
+}
+
+#[cfg(test)]
+mod can_parse {
+	use super::*;
+
+	macro_rules! check {
+		($rule:expr, $input:expr) => {{
+			if let Err(e) = Sh2Parser::parse($rule, $input) {
+				panic!("{e}");
+			}
+		}}
+	}
+
+	#[test]
+	fn org() {
+		check!(Rule::dir_org, "org $06004000");
+	}
+
+	#[test]
+	fn add_reg() {
+		check!(Rule::ins_add, "add r3,pc");
+		check!(Rule::ins_add, "add r5,r12");
+	}
+
+	#[test]
+	fn add_imm() {
+		check!(Rule::ins_add, "add #30,r2");
+		check!(Rule::ins_add, "add #$FE,r8");
+		check!(Rule::ins_add, "add #%101,r8");
+	}
+
+	#[test]
+	fn addc() {
+		check!(Rule::ins_addc, "addc r3,r1");
+	}
+
+	#[test]
+	fn addv() {
+		check!(Rule::ins_addv, "addv r4,r12");
+	}
+
+	#[test]
+	fn and() {
+		check!(Rule::ins_and, "and r3,r14");
+		check!(Rule::ins_and, "and #$2,r0");
+		check!(Rule::ins_and, "and #%10,r0");
+		check!(Rule::ins_and, "and #5,r0");
+		check!(Rule::ins_and, "and.b #$32,@(r0,gbr)");
+	}
+
+	#[test]
+	fn bf() {
+		check!(Rule::ins_bf, "bf trget_f");
+	}
+
+	#[test]
+	fn bfs() {
+		check!(Rule::ins_bf, "bf/s trget_f");
+	}
+
+	#[test]
+	fn bra() {
+		check!(Rule::ins_bra, "bra trget");
+	}
+
+	#[test]
+	fn braf() {
+		check!(Rule::ins_braf, "braf r4");
+	}
+}
+

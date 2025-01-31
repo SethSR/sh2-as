@@ -1,0 +1,353 @@
+
+COMMENT = { ";" ~ (!NEWLINE ~ ANY)* ~ &NEWLINE }
+WHITESPACE = { " " | sym_tab }
+
+sym_add    = { ^"add" }
+sym_addc   = { ^"addc" }
+sym_addr   = { "@" }
+sym_addv   = { ^"addv" }
+sym_and    = { ^"and" }
+sym_bf     = { ^"bf" }
+sym_bin    = { "%" }
+sym_bra    = { ^"bra" }
+sym_braf   = { ^"braf" }
+sym_bsr    = { ^"bsr" }
+sym_bsrf   = { ^"bsrf" }
+sym_bt     = { ^"bt" }
+sym_byte   = { ^".b" }
+sym_clrmac = { ^"clrmac" }
+sym_clrt   = { ^"clrt" }
+sym_cmp    = { ^"cmp" }
+sym_colon  = { ":" }
+sym_comma  = { "," }
+sym_const  = { ^"dc" }
+sym_cparen = { ")" }
+sym_dash   = { "-" }
+sym_delay  = { ^"/s" }
+sym_div0u  = { ^"div0u" }
+sym_div0s  = { ^"div0s" }
+sym_div1   = { ^"div1" }
+sym_dmuls  = { ^"dmuls" }
+sym_dmulu  = { ^"dmulu" }
+sym_dt     = { ^"dt" }
+sym_eq     = { ^"/eq" }
+sym_equal  = { "=" }
+sym_exts   = { ^"exts" }
+sym_extu   = { ^"extu" }
+sym_gbr    = { ^"gbr" }
+sym_ge     = { ^"/ge" }
+sym_gt     = { ^"/gt" }
+sym_hash   = { "#" }
+sym_hex    = { "$" }
+sym_hi     = { ^"/hi" }
+sym_hs     = { ^"/hs" }
+sym_imm    = { "#" }
+sym_jmp    = { ^"jmp" }
+sym_jsr    = { ^"jsr" }
+sym_ldc    = { ^"ldc" }
+sym_lds    = { ^"lds" }
+sym_long   = { ^".l" }
+sym_mac    = { ^"mac" }
+sym_mach   = { ^"mach" }
+sym_macl   = { ^"macl" }
+sym_mov    = { ^"mov" }
+sym_mova   = { ^"mova" }
+sym_movt   = { ^"movt" }
+sym_mul    = { ^"mul" }
+sym_muls   = { ^"muls" }
+sym_mulu   = { ^"mulu" }
+sym_neg    = { ^"neg" }
+sym_negc   = { ^"negc" }
+sym_nop    = { ^"nop" }
+sym_not    = { ^"not" }
+sym_oparen = { "(" }
+sym_or     = { ^"or" }
+sym_org    = { ^"org" }
+sym_pc     = { ^"pc" }
+sym_pl     = { ^"/pl" }
+sym_plus   = { "+" }
+sym_pr     = { ^"pr" }
+sym_pz     = { ^"/pz" }
+sym_r0     = { ^"r0" }
+sym_rotcl  = { ^"rotcl" }
+sym_rotcr  = { ^"rotcr" }
+sym_rotl   = { ^"rotl" }
+sym_rotr   = { ^"rotr" }
+sym_rte    = { ^"rte" }
+sym_rts    = { ^"rts" }
+sym_sett   = { ^"sett" }
+sym_shal   = { ^"shal" }
+sym_shar   = { ^"shar" }
+sym_shll   = { ^"shll" }
+sym_shll16 = { ^"shll16" }
+sym_shll2  = { ^"shll2" }
+sym_shll8  = { ^"shll8" }
+sym_shlr   = { ^"shlr" }
+sym_shlr16 = { ^"shlr16" }
+sym_shlr2  = { ^"shlr2" }
+sym_shlr8  = { ^"shlr8" }
+sym_sleep  = { ^"sleep" }
+sym_sp     = { ^"sp" }
+sym_sr     = { ^"sr" }
+sym_stc    = { ^"stc" }
+sym_str    = { ^"str" }
+sym_sts    = { ^"sts" }
+sym_sub    = { ^"sub" }
+sym_subc   = { ^"subc" }
+sym_subv   = { ^"subv" }
+sym_swap   = { ^"swap" }
+sym_tab    = { "\t" }
+sym_tas    = { ^"tas" }
+sym_trapa  = { ^"trapa" }
+sym_tst    = { ^"tst" }
+sym_vbr    = { ^"vbr" }
+sym_word   = { ^".w" }
+sym_xor    = { ^"xor" }
+sym_xtrct  = { ^"xtrct" }
+
+size = { sym_byte | sym_word | sym_long }
+
+hex = { (ASCII_HEX_DIGIT | "_")+ }
+dec = { (ASCII_DIGIT | "_")+ }
+bin = { ('0'..'1' | "_")+ }
+
+imm_hex      = { sym_hex ~ hex }
+imm_bin      = { sym_bin ~ bin }
+imm_signed   = { imm_hex | imm_bin | ("-"? ~ dec) }
+imm_s        = { sym_hash ~ imm_signed }
+imm_u        = { sym_hash ~ (imm_hex | imm_bin | dec) }
+
+reg_num = { "1" ~ '0'..'5' | ASCII_DIGIT }
+reg = { ^"r" ~ reg_num | sym_pc | sym_sp }
+reg_pair = { reg ~ sym_comma ~ reg }
+
+disp8 = { imm_s }
+disp4 = { imm_s }
+
+imms_r0  = { imm_s ~ sym_comma ~ sym_r0 }
+imms_reg = { imm_s ~ sym_comma ~ reg }
+immu_r0  = { imm_u ~ sym_comma ~ sym_r0 }
+immu_reg = { imm_u ~ sym_comma ~ reg }
+
+reg_addr     = { sym_addr ~ reg }
+reg_post_inc = { sym_addr ~ reg ~ sym_plus }
+reg_pre_dec  = { sym_addr ~ sym_dash ~ reg }
+disp_reg     = { sym_addr ~ sym_oparen ~ disp4 ~ sym_comma ~ reg ~ sym_cparen }
+disp_r0      = { sym_addr ~ sym_oparen ~ sym_r0 ~ sym_comma ~ reg ~ sym_cparen }
+disp_gbr     = { sym_addr ~ sym_oparen ~ disp8 ~ sym_comma ~ sym_gbr ~ sym_cparen }
+r0_gbr       = { sym_addr ~ sym_oparen ~ sym_r0 ~ sym_comma ~ sym_gbr ~ sym_cparen }
+disp_pc      = { sym_addr ~ sym_oparen ~ disp8 ~ sym_comma ~ sym_pc ~ sym_cparen }
+
+reg_ctrl = { sym_gbr | sym_sr | sym_vbr }
+reg_spec = { sym_mach | sym_macl | sym_pr }
+
+ins_clrmac = { sym_clrmac }
+ins_clrt   = { sym_clrt }
+ins_div0u  = { sym_div0u }
+ins_nop    = { sym_nop }
+ins_rte    = { sym_rte }
+ins_rts    = { sym_rts }
+ins_sett   = { sym_sett }
+ins_sleep  = { sym_sleep }
+
+ins_braf   = { sym_braf   ~ reg }
+ins_bsrf   = { sym_bsrf   ~ reg }
+ins_dt     = { sym_dt     ~ reg }
+ins_movt   = { sym_movt   ~ reg }
+ins_rotcl  = { sym_rotcl  ~ reg }
+ins_rotcr  = { sym_rotcr  ~ reg }
+ins_rotl   = { sym_rotl   ~ reg }
+ins_rotr   = { sym_rotr   ~ reg }
+ins_shal   = { sym_shal   ~ reg }
+ins_shar   = { sym_shar   ~ reg }
+ins_shll   = { sym_shll   ~ reg }
+ins_shll16 = { sym_shll16 ~ reg }
+ins_shll2  = { sym_shll2  ~ reg }
+ins_shll8  = { sym_shll8  ~ reg }
+ins_shlr   = { sym_shlr   ~ reg }
+ins_shlr16 = { sym_shlr16 ~ reg }
+ins_shlr2  = { sym_shlr2  ~ reg }
+ins_shlr8  = { sym_shlr8  ~ reg }
+
+ins_addc  = { sym_addc  ~ reg_pair }
+ins_addv  = { sym_addv  ~ reg_pair }
+ins_div0s = { sym_div0s ~ reg_pair }
+ins_div1  = { sym_div1  ~ reg_pair }
+ins_neg   = { sym_neg   ~ reg_pair }
+ins_negc  = { sym_negc  ~ reg_pair }
+ins_not   = { sym_not   ~ reg_pair }
+ins_sub   = { sym_sub   ~ reg_pair }
+ins_subc  = { sym_subc  ~ reg_pair }
+ins_subv  = { sym_subv  ~ reg_pair }
+ins_xtrct = { sym_xtrct ~ reg_pair }
+
+ins_and      = { sym_and ~ (immu_r0 | reg_pair | sym_byte ~ imm_u ~ sym_comma ~ r0_gbr) }
+ins_or       = { sym_or  ~ (immu_r0 | reg_pair | sym_byte ~ imm_u ~ sym_comma ~ r0_gbr) }
+ins_tst      = { sym_tst ~ (immu_r0 | reg_pair | sym_byte ~ imm_u ~ sym_comma ~ r0_gbr) }
+ins_xor      = { sym_xor ~ (immu_r0 | reg_pair | sym_byte ~ imm_u ~ sym_comma ~ r0_gbr) }
+
+ins_add      = { sym_add ~ (imms_reg | reg_pair) }
+ins_bf       = { sym_bf ~ sym_delay? ~ lbl }
+ins_bt       = { sym_bt ~ sym_delay? ~ lbl }
+ins_bra      = { sym_bra ~ lbl }
+ins_bsr      = { sym_bsr ~ lbl }
+
+ins_cmp_eq = { sym_eq ~ (imms_r0 | reg_pair) }
+ins_cmp_r2 = { (sym_ge | sym_gt | sym_hi | sym_hs | sym_str) ~ reg_pair }
+ins_cmp_r1 = { (sym_pl | sym_pz) ~ reg }
+ins_cmp    = { sym_cmp ~ (ins_cmp_eq | ins_cmp_r2 | ins_cmp_r1) }
+
+ins_dmul = { (sym_dmuls | sym_dmulu) ~ sym_long ~ reg_pair }
+ins_ext  = { (sym_exts | sym_extu) ~ (sym_byte | sym_word) ~ reg_pair }
+ins_jmp   = { sym_jmp ~ reg_addr }
+ins_jsr   = { sym_jsr ~ reg_addr }
+ins_ldc   = { sym_ldc ~ reg ~ sym_comma ~ reg_ctrl }
+ins_lds   = { sym_lds ~ reg ~ sym_comma ~ reg_spec }
+ins_ldc_l = { sym_ldc ~ sym_long ~ reg_post_inc ~ sym_comma ~ reg_ctrl }
+ins_lds_l = { sym_lds ~ sym_long ~ reg_post_inc ~ sym_comma ~ reg_spec }
+ins_mac   = { sym_mac ~ (sym_long | sym_word) ~ reg_post_inc ~ sym_comma ~ reg_post_inc }
+ins_mova  = { sym_mova ~ disp_pc ~ sym_comma ~ sym_r0 }
+ins_mul   = { sym_mul ~ sym_long ~ reg_pair }
+ins_muls  = { sym_muls ~ sym_word ~ reg_pair }
+ins_mulu  = { sym_mulu ~ sym_word ~ reg_pair }
+ins_stc   = { sym_stc ~ reg_ctrl ~ sym_comma ~ reg }
+ins_sts   = { sym_sts ~ reg_spec ~ sym_comma ~ reg }
+ins_stc_l = { sym_stc ~ sym_long ~ reg_ctrl ~ sym_comma ~ reg_pre_dec }
+ins_sts_l = { sym_sts ~ sym_long ~ reg_spec ~ sym_comma ~ reg_pre_dec }
+ins_swap  = { sym_swap ~ (sym_byte | sym_word) ~ reg_pair }
+ins_tas   = { sym_tas ~ sym_byte ~ reg_addr }
+ins_trapa = { sym_trapa ~ imm_u }
+
+ins_mov_imm = { sym_mov ~ imms_reg }
+ins_mov_reg = { sym_mov ~ reg_pair }
+
+ins_mov_b_r0_args = { disp_gbr | disp_reg }
+ins_mov_b_reg_src = { disp_r0 | reg_post_inc | reg_addr }
+ins_mov_b_reg_dst = { disp_r0 | reg_pre_dec }
+ins_mov_b = {
+	sym_r0 ~ sym_comma ~ ins_mov_b_r0_args |
+	reg    ~ sym_comma ~ ins_mov_b_reg_dst |
+	ins_mov_b_r0_args ~ sym_comma ~ sym_r0 |
+	ins_mov_b_reg_src ~ sym_comma ~ reg
+}
+
+ins_mov_w_r0_src  = { disp_gbr | disp_reg }
+ins_mov_w_reg_src = { reg_addr | disp_r0 | disp_pc | reg_post_inc }
+ins_mov_w_reg_dst = { reg_addr | disp_r0 | disp_reg | reg_pre_dec }
+ins_mov_w = {
+	sym_r0 ~ sym_comma ~ disp_gbr          |
+	reg    ~ sym_comma ~ ins_mov_w_reg_dst |
+	ins_mov_w_r0_src  ~ sym_comma ~ sym_r0 |
+	ins_mov_w_reg_src ~ sym_comma ~ reg
+}
+
+ins_mov_l_args = { reg_addr | disp_reg | disp_r0 }
+ins_mov_l_src  = { ins_mov_l_args | disp_pc | reg_post_inc }
+ins_mov_l_dst  = { ins_mov_l_args | reg_pre_dec }
+ins_mov_l = {
+	sym_r0 ~ sym_comma ~ disp_gbr      |
+	reg    ~ sym_comma ~ ins_mov_l_dst |
+	disp_gbr      ~ sym_comma ~ sym_r0 |
+	ins_mov_l_src ~ sym_comma ~ reg
+}
+
+ins_mov = { sym_mov ~ (sym_byte ~ ins_mov_b | sym_word ~ ins_mov_w | sym_long ~ ins_mov_l) }
+
+/// Instructions
+///
+/// Ordered by approximate probability of use
+ins = {
+	ins_add |
+	ins_addc |
+	ins_addv |
+	ins_and |
+	ins_bf |
+	ins_bra |
+	ins_braf |
+	ins_bsr |
+	ins_bsrf |
+	ins_bt |
+	ins_clrmac |
+	ins_clrt |
+	ins_cmp |
+	ins_div0s |
+	ins_div0u |
+	ins_div1 |
+	ins_dmul |
+	ins_dt |
+	ins_ext |
+	ins_jmp |
+	ins_jsr |
+	ins_ldc |
+	ins_ldc_l |
+	ins_lds |
+	ins_lds_l |
+	ins_mac |
+	ins_mov_imm |
+	ins_mov_reg |
+	ins_mov |
+	ins_mova |
+	ins_movt |
+	ins_mul |
+	ins_muls |
+	ins_mulu |
+	ins_neg |
+	ins_negc |
+	ins_nop |
+	ins_not |
+	ins_or |
+	ins_rotcl |
+	ins_rotcr |
+	ins_rotl |
+	ins_rotr |
+	ins_rte |
+	ins_rts |
+	ins_sett |
+	ins_shal |
+	ins_shar |
+	ins_shll |
+	ins_shll16 |
+	ins_shll2 |
+	ins_shll8 |
+	ins_shlr |
+	ins_shlr16 |
+	ins_shlr2 |
+	ins_shlr8 |
+	ins_sleep |
+	ins_stc |
+	ins_stc_l |
+	ins_sts |
+	ins_sts_l |
+	ins_sub |
+	ins_subc |
+	ins_subv |
+	ins_swap |
+	ins_tas |
+	ins_trapa |
+	ins_tst |
+	ins_xor |
+	ins_xtrct
+}
+
+dir_constant = { (^"dc.b" | ^"dc.w" | ^"dc.l") ~ imm_signed }
+dir_org = { sym_org ~ imm_signed }
+dir_value = { lbl ~ "=" ~ ("-"? ~ dec) }
+
+dir = {
+	dir_constant
+	| dir_org
+	| dir_value
+}
+
+lbl = { !ASCII_DIGIT ~ (ASCII_ALPHANUMERIC | "_")+ }
+
+lbl_line = @{ lbl ~ sym_colon }
+
+line = {
+	ins
+	| dir
+	| lbl_line
+}
+lines = { (line | NEWLINE)* }
+program = { SOI ~ lines ~ EOI }
+
