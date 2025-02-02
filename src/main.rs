@@ -89,14 +89,110 @@ fn main() -> miette::Result<()> {
 }
 */
 
+use std::collections::HashMap;
 use std::fs::read_to_string;
 
 use pest::Parser;
+use pest::iterators::Pair;
 use pest_derive::Parser;
+
+mod instructions;
+use instructions::Ins;
+
+mod arg;
+use arg::Arg;
+
+#[derive(Debug, PartialEq, Eq, Clone, Copy)]
+enum Size {
+	Byte,
+	Word,
+	Long,
+}
+
+type Reg = u8;
+type Label = std::rc::Rc<str>;
+
+enum LabelType {
+	Value(i32),
+	Addr(u32),
+}
 
 #[derive(Parser)]
 #[grammar = "sh2.pest"]
 struct Sh2Parser;
+
+fn reg(item: Pair<Rule>) -> Reg {
+	item.as_str()[1..].parse::<u8>().unwrap()
+}
+
+fn reg_or_sp(item: Pair<Rule>) -> Reg {
+	match item.as_rule() {
+		Rule::reg => reg(item),
+		Rule::sp => 15,
+		_ => unreachable!("unexpected token: {item}"),
+	}
+}
+
+fn hex8u(item: Pair<Rule>) -> u8 {
+	u8::from_str_radix(&item.as_str().replace('_',""), 16).unwrap()
+}
+
+fn hex16u(item: Pair<Rule>) -> u16 {
+	u16::from_str_radix(&item.as_str().replace('_',""), 16).unwrap()
+}
+
+fn hex32u(item: Pair<Rule>) -> u32 {
+	u32::from_str_radix(&item.as_str().replace('_',""), 16).unwrap()
+}
+
+fn hex8s(item: Pair<Rule>) -> i8 {
+	hex8u(item) as i8
+}
+
+fn hex16s(item: Pair<Rule>) -> i16 {
+	hex16u(item) as i16
+}
+
+fn hex32s(item: Pair<Rule>) -> i32 {
+	hex32u(item) as i32
+}
+
+fn bin8u(item: Pair<Rule>) -> u8 {
+	u8::from_str_radix(&item.as_str().replace('_',""), 2).unwrap()
+}
+
+fn bin16u(item: Pair<Rule>) -> u16 {
+	u16::from_str_radix(&item.as_str().replace('_',""), 2).unwrap()
+}
+
+fn bin32u(item: Pair<Rule>) -> u32 {
+	u32::from_str_radix(&item.as_str().replace('_',""), 2).unwrap()
+}
+
+
+fn bin8s(item: Pair<Rule>) -> i8 {
+	bin8u(item) as i8
+}
+
+fn bin16s(item: Pair<Rule>) -> i16 {
+	bin16u(item) as i16
+}
+
+fn bin32s(item: Pair<Rule>) -> i32 {
+	bin32u(item) as i32
+}
+
+fn dec8s(item: Pair<Rule>) -> i8 {
+	item.as_str().replace('_',"").parse::<i8>().unwrap()
+}
+
+fn dec16s(item: Pair<Rule>) -> i16 {
+	item.as_str().replace('_',"").parse::<i16>().unwrap()
+}
+
+fn dec32s(item: Pair<Rule>) -> i32 {
+	item.as_str().replace('_',"").parse::<i32>().unwrap()
+}
 
 fn main() {
 	let mut args = std::env::args();
@@ -105,9 +201,273 @@ fn main() {
 	let source = args.next().expect("missing source file");
 	let input = read_to_string(&source).expect("unable to read source file");
 
+	//let target = args.next().unwrap_or("asm.out".to_string());
+
+	let mut repetitions = None;
+	let mut skey = 0;
+
+	let mut sections = HashMap::<u32, Vec<Ins>>::default();
+	let mut labels = HashMap::<Label, LabelType>::default();
+
 	match Sh2Parser::parse(Rule::program, &input) {
-		Err(e) => panic!("{e}"),
-		Ok(_) => {}
+		Err(e) => eprintln!("{e}"),
+		Ok(results) => for line in results {
+			match line.as_rule() {
+				Rule::dir_constant_b => {
+					let mut args = line.into_inner();
+					let value = args.next().unwrap();
+					match value.as_rule() {
+						Rule::hex => {
+							let num = hex8s(value);
+							sections.entry(skey)
+								.or_insert(Vec::default())
+								.push(Ins::Const_Imm(Size::Byte, num as i64));
+						}
+						Rule::bin => {
+							let num = bin8s(value);
+							sections.entry(skey)
+								.or_insert(Vec::default())
+								.push(Ins::Const_Imm(Size::Byte, num as i64));
+						}
+						Rule::dec => {
+							let num = dec8s(value);
+							sections.entry(skey)
+								.or_insert(Vec::default())
+								.push(Ins::Const_Imm(Size::Byte, num as i64));
+						}
+						Rule::lbl => {
+							// TODO - srenshaw - If this label is already defined, then if it's a value label,
+							// use the defined value. If it's a address label, then use the address. If this
+							// label is not defined, then save it as a Const_Label for resolving later.
+							todo!("implement label constants");
+						}
+						_ => unreachable!("unexpected constant value: {value}"),
+					}
+				}
+				Rule::dir_constant_w => {
+					let mut args = line.into_inner();
+					let value = args.next().unwrap();
+					match value.as_rule() {
+						Rule::hex => {
+							let num = hex16s(value);
+							sections.entry(skey)
+								.or_insert(Vec::default())
+								.push(Ins::Const_Imm(Size::Word, num as i64));
+						}
+						Rule::bin => {
+							let num = bin16s(value);
+							sections.entry(skey)
+								.or_insert(Vec::default())
+								.push(Ins::Const_Imm(Size::Word, num as i64));
+						}
+						Rule::dec => {
+							let num = dec16s(value);
+							sections.entry(skey)
+								.or_insert(Vec::default())
+								.push(Ins::Const_Imm(Size::Word, num as i64));
+						}
+						Rule::lbl => {
+							// TODO - srenshaw - If this label is already defined, then if it's a value label,
+							// use the defined value. If it's a address label, then use the address. If this
+							// label is not defined, then save it as a Const_Label for resolving later.
+							todo!("implement label constants");
+						}
+						_ => unreachable!("unexpected constant value: {value}"),
+					}
+				}
+				Rule::dir_constant_l => {
+					let mut args = line.into_inner();
+					let value = args.next().unwrap();
+					match value.as_rule() {
+						Rule::hex => {
+							let num = hex32s(value);
+							sections.entry(skey)
+								.or_insert(Vec::default())
+								.push(Ins::Const_Imm(Size::Long, num as i64));
+						}
+						Rule::bin => {
+							let num = bin32s(value);
+							sections.entry(skey)
+								.or_insert(Vec::default())
+								.push(Ins::Const_Imm(Size::Long, num as i64));
+						}
+						Rule::dec => {
+							let num = dec32s(value);
+							sections.entry(skey)
+								.or_insert(Vec::default())
+								.push(Ins::Const_Imm(Size::Long, num as i64));
+						}
+						Rule::lbl => {
+							// TODO - srenshaw - If this label is already defined, then if it's a value label,
+							// use the defined value. If it's a address label, then use the address. If this
+							// label is not defined, then save it as a Const_Label for resolving later.
+							todo!("implement label constants");
+						}
+						_ => unreachable!("unexpected constant value: {value}"),
+					}
+				}
+				Rule::dir_org => {
+					let mut args = line.into_inner();
+					skey = args.next().unwrap().as_str().parse::<u32>().unwrap();
+					println!("set skey to {skey}");
+				}
+				Rule::dir_repeat => {
+					let mut args = line.into_inner();
+					repetitions = Some((
+						args.next().unwrap().as_str().parse::<u32>().unwrap(),
+						Vec::with_capacity(64),
+					));
+				}
+				Rule::dir_endr => {
+					if let Some((num, instrs)) = repetitions {
+						let section = sections.entry(skey).or_insert(Vec::default());
+						for _ in 0..num {
+							section.extend_from_slice(&instrs);
+						}
+						repetitions = None;
+					} else {
+						eprintln!("`end repeat` found with no preceding `repeat` directive.");
+					}
+				}
+				Rule::dir_binclude => {
+					// TODO - srenshaw - Enable this once we add actual error-handling.
+
+					//let mut args = line.into_inner();
+					//let file_path = args.next().unwrap().as_str();
+					//let file = std::fs::read(file_path).expect("unable to open file");
+					//println!("file size: {}", file.len());
+				}
+				Rule::ins_add => {
+					let mut args = line.into_inner();
+					let src = args.next().unwrap();
+					let ins = match src.as_rule() {
+						Rule::hex => {
+							let src = hex8s(src);
+							let dst = reg_or_sp(args.next().unwrap());
+							Ins::AddImm(src,dst)
+						}
+						Rule::bin => {
+							let src = bin8s(src);
+							let dst = reg_or_sp(args.next().unwrap());
+							Ins::AddImm(src,dst)
+						}
+						Rule::dec => {
+							let src = dec8s(src);
+							let dst = reg_or_sp(args.next().unwrap());
+							Ins::AddImm(src,dst)
+						}
+						Rule::reg => {
+							let src = reg(src);
+							let dst = reg_or_sp(args.next().unwrap());
+							Ins::AddReg(src,dst)
+						}
+						Rule::sp => {
+							let dst = reg_or_sp(args.next().unwrap());
+							Ins::AddReg(15,dst)
+						}
+						_ => unreachable!("unexpected ADD src: {src}"),
+					};
+					println!("{ins:?}");
+				}
+				Rule::ins_addc => {
+					let mut args = line.into_inner();
+					let src = reg_or_sp(args.next().unwrap());
+					let dst = reg_or_sp(args.next().unwrap());
+					let ins = Ins::AddC(src,dst);
+					println!("{ins:?}")
+				}
+				Rule::ins_addv => {
+					let mut args = line.into_inner();
+					let src = reg_or_sp(args.next().unwrap());
+					let dst = reg_or_sp(args.next().unwrap());
+					let ins = Ins::AddV(src,dst);
+					println!("{ins:?}");
+				}
+				Rule::ins_and => {}
+				Rule::ins_bf => {}
+				Rule::ins_bfs => {}
+				Rule::ins_bra => {}
+				Rule::ins_braf => {}
+				Rule::ins_bsr => {}
+				Rule::ins_bsrf => {}
+				Rule::ins_bt => {}
+				Rule::ins_bts => {}
+				Rule::ins_clrmac => {}
+				Rule::ins_clrt => {}
+				Rule::ins_cmp_eq => {}
+				Rule::ins_cmp_ge => {}
+				Rule::ins_cmp_gt => {}
+				Rule::ins_cmp_hi => {}
+				Rule::ins_cmp_hs => {}
+				Rule::ins_cmp_pl => {}
+				Rule::ins_cmp_pz => {}
+				Rule::ins_cmp_str => {}
+				Rule::ins_div0s => {}
+				Rule::ins_div0u => {}
+				Rule::ins_div1 => {}
+				Rule::ins_dmul => {}
+				Rule::ins_dt => {}
+				Rule::ins_ext => {}
+				Rule::ins_jmp => {}
+				Rule::ins_jsr => {}
+				Rule::ins_ldc => {}
+				Rule::ins_lds => {}
+				Rule::ins_mac => {}
+				Rule::ins_mov => {}
+				Rule::ins_mova => {}
+				Rule::ins_movt => {}
+				Rule::ins_mul => {}
+				Rule::ins_muls => {}
+				Rule::ins_mulu => {}
+				Rule::ins_neg => {}
+				Rule::ins_negc => {}
+				Rule::ins_nop => {}
+				Rule::ins_not => {}
+				Rule::ins_or => {}
+				Rule::ins_rotcl => {}
+				Rule::ins_rotcr => {}
+				Rule::ins_rotl => {}
+				Rule::ins_rotr => {}
+				Rule::ins_rte => {}
+				Rule::ins_rts => {}
+				Rule::ins_sett => {}
+				Rule::ins_shal => {}
+				Rule::ins_shar => {}
+				Rule::ins_shll => {}
+				Rule::ins_shll16 => {}
+				Rule::ins_shll2 => {}
+				Rule::ins_shll8 => {}
+				Rule::ins_shlr => {}
+				Rule::ins_shlr16 => {}
+				Rule::ins_shlr2 => {}
+				Rule::ins_shlr8 => {}
+				Rule::ins_sleep => {}
+				Rule::ins_stc => {}
+				Rule::ins_sts => {}
+				Rule::ins_sub => {}
+				Rule::ins_subc => {}
+				Rule::ins_subv => {}
+				Rule::ins_swap => {}
+				Rule::ins_tas => {}
+				Rule::ins_trapa => {}
+				Rule::ins_tst => {}
+				Rule::ins_xor => {}
+				Rule::ins_xtrct => {}
+				Rule::val_line => {
+					let mut args = line.into_inner();
+					let label = args.next().unwrap().as_str();
+					let value = args.next().unwrap().as_str();
+					println!("Value: {label} = {value}");
+				}
+				Rule::lbl_line => {
+					let s = line.as_str();
+					let label: Label = s[..s.len()-1].into();
+					println!("Label: {label}");
+				}
+				Rule::EOI => {}
+				_ => unreachable!("unexpected token found: {line}"),
+			}
+		}
 	}
 }
 

@@ -37,9 +37,9 @@ reg = { ^"r" ~ ("1" ~ '0'..'5' | ASCII_DIGIT) }
 
 /** Numbers & Immediates **/
 
-hex  = { (ASCII_HEX_DIGIT | "_")+ }
-bin  = { ('0'..'1' | "_")+ }
-dec  = { "-"? ~ (ASCII_DIGIT | "_")+ }
+hex  = @{ (ASCII_HEX_DIGIT | "_")+ }
+bin  = @{ ('0'..'1' | "_")+ }
+dec  = @{ "-"? ~ (ASCII_DIGIT | "_")+ }
 
 imm_hex = _{ "$" ~ hex }
 imm_bin = _{ "%" ~ bin }
@@ -179,6 +179,7 @@ ins_cmp = _{
 	| ins_cmp_pz
 }
 
+/// ins_add = imm__reg_or_sp | reg_or_sp__reg_or_sp
 ins_add   = { ^"add" ~ (imm__reg_or_sp | reg_or_sp__reg_or_sp) }
 ins_mul   = { (^"mul.l" | ^"mul")   ~ reg_or_sp__reg_or_sp }
 ins_muls  = { (^"muls.w" | ^"muls") ~ reg_or_sp__reg_or_sp }
@@ -291,7 +292,11 @@ ins = _{
 
 file_path = @{ "\"" ~ (!"\"" ~ ANY)+ ~ "\"" }
 
-dir_constant = { (^".dc.b" | ^".dc.w" | ^".dc.l") ~ num }
+dir_constant_b = { ^".dc.b" ~ num }
+dir_constant_w = { ^".dc.w" ~ num }
+dir_constant_l = { ^".dc.l" ~ num }
+dir_constant = _{ dir_constant_b | dir_constant_w | dir_constant_l }
+
 dir_org      = { ^".org" ~ num }
 dir_repeat   = { ^".arepeat" ~ num }
 dir_endr     = { ^".aendr" }

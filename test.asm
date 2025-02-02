@@ -55,29 +55,29 @@ VDP2_Reg_Base:
 	.dc.l $25F8_0000
 
 RAM_n_Screen_Config:
-	    ;%C-cc--VVRRRRRRRR     cc=0=5bit RGB
+	     ;%C-cc--VVRRRRRRRR     cc=0=5bit RGB
 	.dc.w %1000001111111111
 
 Map_Offset_Register:
-	    ;%-NNN-nnn-NNN-nnn
+	     ;%-NNN-nnn-NNN-nnn
 	.dc.w %0000000000000000
 
 Character_CTRL:
-	    ;%--CCNNES-cccnnes     c=colors (16/256/2k/32k/16m) e=1=bmp format
+	     ;%--CCNNES-cccnnes     c=colors (16/256/2k/32k/16m) e=1=bmp format
 	.dc.w %0000000000010010
 
 Screen_Display_Enable:
-	    ;%---RNNNN--rrnnnn RN=Transparency / rn=enabled
+	     ;%---RNNNN--rrnnnn RN=Transparency / rn=enabled
 	.dc.w %0000000100000001
 
 TV_Mode:
-	    ;%D------BLLVV-HHH      D=1=Screen on B=1=Blackout
+	     ;%D------BLLVV-HHH      D=1=Screen on B=1=Blackout
 	.dc.w %1000000000000000
 
 PaletteEntries:
 	.dc.w 4
 
-Palette: ;-BBBBBGGGGGRRRRR
+Palette:  ;-BBBBBGGGGGRRRRR
 	.dc.w   %0011110000000000   ;Our 4 colors!
 	.dc.w   %0000001111111111
 	.dc.w   %0111111111100000
