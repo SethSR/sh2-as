@@ -1,14 +1,14 @@
 
-	org $06004000  ;Base address for a BIN file
+	.org $06004000  ;Base address for a BIN file
 
 ;Set up the VDP2 registers
-	mov.l VDP2_Reg_Base,r11
+	mov.l #VDP2_Reg_Base,r11
 	add #$E,r11
-	mov.w RAM_n_Screen_Config,r6 ;Set RAM partitioning / screen mode
+	mov.w #RAM_n_Screen_Config,r6 ;Set RAM partitioning / screen mode
 	mov.w r6,@r11  ;$25F8_000E RAMCTL - RAM Control Register
 
 	add #$2E,r11
-	mov.w Map_Offset_Register,r2
+	mov.w #Map_Offset_Register,r2
 	mov.w r2,@r11  ;$25F8_003C MPOFN - Map Offset Register
 
 	add #$3C,r11
@@ -22,21 +22,21 @@
 	mov.w r2,@-r11 ;$25F8_0070 SCXINO - Scr Scroll (Horz Integer)
 
 	add #-72,r11
-	mov.w Character_CTRL,r2 ;nn=bmp size(512x256/512x512/1024x256/1024x512)
+	mov.w #Character_CTRL,r2 ;nn=bmp size(512x256/512x512/1024x256/1024x512)
 	mov.w r2,@r11  ;$25F8_0028 CHTCLA - Character ctrl (NBG0, NBG1)
 
 	add #-8,r11
-	mov.w Screen_Display_Enable,r8
+	mov.w #Screen_Display_Enable,r8
 	mov.w r8,@r11  ;$25F8_0020 BGON - Screen Display Enable
 
 	add #-32,r11
-	mov.l TV_Mode,r10 ;L=interlace V=Vres H=Hres
+	mov.l #TV_Mode,r10 ;L=interlace V=Vres H=Hres
 	mov.w r10,@r11 ;$25F8_0000 TVMD - TV Mode
 
 ;Set Palette
-	mov.l VDP2_CRAM_Base,r6
-	mov.l Palette,r8    ;Palette
-	mov.w PaletteEntries,r0          ;PaletteEntries
+	mov.l #VDP2_CRAM_Base,r6
+	mov.l #Palette,r8    ;Palette
+	mov.w #PaletteEntries,r0          ;PaletteEntries
 PaletteLoop:
 	mov.w @r8+,r1       ;-BBBBBGGGGGRRRRR
 	mov.w r1,@r6        ;Set a color
@@ -49,44 +49,44 @@ PaletteLoop:
 
 
 VDP2_CRAM_Base:
-	dc.l $25F0_0000
+	.dc.l $25F0_0000
 
 VDP2_Reg_Base:
-	dc.l $25F8_0000
+	.dc.l $25F8_0000
 
 RAM_n_Screen_Config:
 	    ;%C-cc--VVRRRRRRRR     cc=0=5bit RGB
-	dc.w %1000001111111111
+	.dc.w %1000001111111111
 
 Map_Offset_Register:
 	    ;%-NNN-nnn-NNN-nnn
-	dc.w %0000000000000000
+	.dc.w %0000000000000000
 
 Character_CTRL:
 	    ;%--CCNNES-cccnnes     c=colors (16/256/2k/32k/16m) e=1=bmp format
-	dc.w %0000000000010010
+	.dc.w %0000000000010010
 
 Screen_Display_Enable:
 	    ;%---RNNNN--rrnnnn RN=Transparency / rn=enabled
-	dc.w %0000000100000001
+	.dc.w %0000000100000001
 
 TV_Mode:
 	    ;%D------BLLVV-HHH      D=1=Screen on B=1=Blackout
-	dc.w %1000000000000000
+	.dc.w %1000000000000000
 
 PaletteEntries:
-	dc.w 4
+	.dc.w 4
 
 Palette: ;-BBBBBGGGGGRRRRR
-	dc.w   %0011110000000000   ;Our 4 colors!
-	dc.w   %0000001111111111
-	dc.w   %0111111111100000
-	dc.w   %0000000000011111
+	.dc.w   %0011110000000000   ;Our 4 colors!
+	.dc.w   %0000001111111111
+	.dc.w   %0111111111100000
+	.dc.w   %0000000000011111
 
 ShowSpriteXY:    ;R11=Width R10=Height
-	mov.l UserRam,r9      ;R14 points to our work RAM
+	mov.l #UserRam,r9      ;R14 points to our work RAM
 
-	mov.l $25E0_0000,r12  ;Cache through Addr (Data)
+	mov.l #$25E0_0000,r12  ;Cache through Addr (Data)
 
 	mov.l @(UserRam_PlayerX,r9),r0 ;+Xpos
 	add r0,r12
@@ -129,16 +129,16 @@ UserRam_PlayerX = 12
 UserRam_PlayerY = 16
 
 UserRam:
-	dc.l 0   ;VDP Stat cache
-	dc.l 0   ;Cursor Xpos
-	dc.l 0   ;Cursor Ypos
-	dc.l 0   ;Player X
-	dc.l 0   ;Player Y
-	dc.l 0
+	.dc.l 0   ;VDP Stat cache
+	.dc.l 0   ;Cursor Xpos
+	.dc.l 0   ;Cursor Ypos
+	.dc.l 0   ;Player X
+	.dc.l 0   ;Player Y
+	.dc.l 0
 
 ChibikoBmp:     ;1 byte per pixel - same as DOS VGA format
 	;TODO - srenshaw - Will need to implement this at some point.
-	;binclude "ResAll/Sprites/SpriteTestVGA.RAW"
+	.binclude "ResAll/Sprites/SpriteTestVGA.RAW"
 
 
 GetJoy:
@@ -146,50 +146,50 @@ GetJoy:
 
 ;Set up the ports
 		mov #%0000_0000,r0   ;All ports to input
-		mov $2010_0079,r1   ;DDR1 Data Dir %-DDDDDDD 1=output 0=input
+		mov #$2010_0079,r1   ;DDR1 Data Dir %-DDDDDDD 1=output 0=input
 		mov.b r0,@r1
 
 		mov #0,r0           ;0=SMPC / 1=SH2 direct
-		mov $2010_007D,r1   ;% - - - - - - IOSEL2 IOSEL1
+		mov #$2010_007D,r1   ;% - - - - - - IOSEL2 IOSEL1
 		mov.b r0,@r1
 
 		mov #0,r0           ;1=VDP Latch
-		mov $2010_007F,r1   ;% - - - - - - EXLE2 EXLE1
+		mov #$2010_007F,r1   ;% - - - - - - EXLE2 EXLE1
 		mov.b r0,@r1
 
 ;Send our command
 		mov.b #1,r0         ;Flag busy before our command
-		mov $2010_0063,r13 ;Status flag
+		mov #$2010_0063,r13 ;Status flag
 		mov.b r0,@r13
 
-		mov $2010_0001,r1  ;SMPC Status Acquisition Switch
+		mov #$2010_0001,r1  ;SMPC Status Acquisition Switch
 		mov #$00,r0         ;1=Get extra info (time reset etc.)
 		mov.b r0,@r1
 
-		mov $2010_0003,r1
+		mov #$2010_0003,r1
 		   ;BBbbP-O-    bb/BB=15/255/?/0 bytes.. p=peripheral data
-		mov %0000_1000,r0  ;0=Acquisition Time Optimization
+		mov #%0000_1000,r0  ;0=Acquisition Time Optimization
 		mov.b r0,@r1       ;GetPeripheral data 15 byte
 
-		mov $2010_0005,r1
-		mov $F0,r0         ;Fixed value
+		mov #$2010_0005,r1
+		mov #$F0,r0         ;Fixed value
 		mov.b r0,@r1
 
-		mov $2010_001F,r1  ;command
-		mov $10,r0         ;INTBACK - Interrupt Back
+		mov #$2010_001F,r1  ;command
+		mov #$10,r0         ;INTBACK - Interrupt Back
 		mov.b r0,@r1       ; (SMPC Status Acquisition)
 
 ;Wait for results
 
 GetJoyWait:
-		mov $2010_0063,r13 ;Status flag
+		mov #$2010_0063,r13 ;Status flag
 		mov.b @r13,r0
 		and #1,r0           ;Only bottom bit is defined
 		cmp/eq #1,r0        ;Wait for command completion
 		bt GetJoyWait
 
 
-		mov $2010_0020,r13
+		mov #$2010_0020,r13
 
 		mov.b @(5,r13),r0  ;%RLDUSABC
 		shlr2 r0
@@ -208,12 +208,12 @@ GetJoyWait:
 		shll2 r0
 		shll2 r0
 		shll r0            ;Get %---rXYZl --------
-		mov %00011111_00000000,r2
+		mov #%00011111_00000000,r2
 		and r2,r0
 		or r1,r0
 		mov r0,r1          ;Now we have %rXYZlSABCRLDU
 
-		mov $FFFFE000,r2   ;Fill unused bits
+		mov #$FFFFE000,r2   ;Fill unused bits
 		or r2,r0
 
 	lds.l @sp+,pr        ;Joy state in r0
