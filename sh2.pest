@@ -182,8 +182,10 @@ ins_cmp = _{
 	| ins_cmp_pz
 }
 
-/// ins_add = imm__reg_or_sp | reg_or_sp__reg_or_sp
-ins_add   = { ^"add" ~ (imm__reg_or_sp | reg_or_sp__reg_or_sp) }
+ins_add_imm = { ^"add" ~ imm__reg_or_sp }
+ins_add_reg = { ^"add" ~ reg_or_sp__reg_or_sp }
+ins_add = _{ ins_add_imm | ins_add_reg }
+
 ins_mul   = { (^"mul.l" | ^"mul")   ~ reg_or_sp__reg_or_sp }
 ins_muls  = { (^"muls.w" | ^"muls") ~ reg_or_sp__reg_or_sp }
 ins_mulu  = { (^"mulu.w" | ^"mulu") ~ reg_or_sp__reg_or_sp }

@@ -354,36 +354,18 @@ fn main() {
 					//let file = std::fs::read(file_path).expect("unable to open file");
 					//println!("file size: {}", file.len());
 				}
-				Rule::ins_add => {
+				Rule::ins_add_imm => {
 					let mut args = line.into_inner();
-					let src = args.next().unwrap();
-					let ins = match src.as_rule() {
-						Rule::hex => {
-							let src = hex8s(src);
-							let dst = reg_or_sp(args.next().unwrap());
-							Ins::AddImm(src,dst)
-						}
-						Rule::bin => {
-							let src = bin8s(src);
-							let dst = reg_or_sp(args.next().unwrap());
-							Ins::AddImm(src,dst)
-						}
-						Rule::dec => {
-							let src = dec8s(src);
-							let dst = reg_or_sp(args.next().unwrap());
-							Ins::AddImm(src,dst)
-						}
-						Rule::reg => {
-							let src = reg(src);
-							let dst = reg_or_sp(args.next().unwrap());
-							Ins::AddReg(src,dst)
-						}
-						Rule::sp => {
-							let dst = reg_or_sp(args.next().unwrap());
-							Ins::AddReg(15,dst)
-						}
-						_ => unreachable!("unexpected ADD src: {src}"),
-					};
+					let src = num8s(args.next().unwrap());
+					let dst = reg(args.next().unwrap());
+					let ins = Ins::AddImm(src,dst);
+					println!("{ins:?}");
+				}
+				Rule::ins_add_reg => {
+					let mut args = line.into_inner();
+					let src = reg(args.next().unwrap());
+					let dst = reg(args.next().unwrap());
+					let ins = Ins::AddReg(src,dst);
 					println!("{ins:?}");
 				}
 				Rule::ins_addc => {
