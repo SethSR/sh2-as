@@ -211,6 +211,24 @@ fn num8s(item: Pair<Rule>) -> i8 {
 	}
 }
 
+fn num16s(item: Pair<Rule>) -> i16 {
+	match item.as_rule() {
+		Rule::hex => hex16s(item),
+		Rule::bin => bin16s(item),
+		Rule::dec => dec16s(item),
+		_ => unreachable!("expected an 16-bit signed number"),
+	}
+}
+
+fn num32s(item: Pair<Rule>) -> i32 {
+	match item.as_rule() {
+		Rule::hex => hex32s(item),
+		Rule::bin => bin32s(item),
+		Rule::dec => dec32s(item),
+		_ => unreachable!("expected an 32-bit signed number"),
+	}
+}
+
 fn main() {
 	let mut args = std::env::args();
 	args.next();
@@ -234,20 +252,8 @@ fn main() {
 					let mut args = line.into_inner();
 					let value = args.next().unwrap();
 					match value.as_rule() {
-						Rule::hex => {
-							let num = hex8s(value);
-							sections.entry(skey)
-								.or_insert(Vec::default())
-								.push(Ins::Const_Imm(Size::Byte, num as i64));
-						}
-						Rule::bin => {
-							let num = bin8s(value);
-							sections.entry(skey)
-								.or_insert(Vec::default())
-								.push(Ins::Const_Imm(Size::Byte, num as i64));
-						}
-						Rule::dec => {
-							let num = dec8s(value);
+						Rule::hex | Rule::bin | Rule::dec => {
+							let num = num8s(value);
 							sections.entry(skey)
 								.or_insert(Vec::default())
 								.push(Ins::Const_Imm(Size::Byte, num as i64));
@@ -265,20 +271,8 @@ fn main() {
 					let mut args = line.into_inner();
 					let value = args.next().unwrap();
 					match value.as_rule() {
-						Rule::hex => {
-							let num = hex16s(value);
-							sections.entry(skey)
-								.or_insert(Vec::default())
-								.push(Ins::Const_Imm(Size::Word, num as i64));
-						}
-						Rule::bin => {
-							let num = bin16s(value);
-							sections.entry(skey)
-								.or_insert(Vec::default())
-								.push(Ins::Const_Imm(Size::Word, num as i64));
-						}
-						Rule::dec => {
-							let num = dec16s(value);
+						Rule::hex | Rule::bin | Rule::dec => {
+							let num = num16s(value);
 							sections.entry(skey)
 								.or_insert(Vec::default())
 								.push(Ins::Const_Imm(Size::Word, num as i64));
@@ -296,20 +290,8 @@ fn main() {
 					let mut args = line.into_inner();
 					let value = args.next().unwrap();
 					match value.as_rule() {
-						Rule::hex => {
-							let num = hex32s(value);
-							sections.entry(skey)
-								.or_insert(Vec::default())
-								.push(Ins::Const_Imm(Size::Long, num as i64));
-						}
-						Rule::bin => {
-							let num = bin32s(value);
-							sections.entry(skey)
-								.or_insert(Vec::default())
-								.push(Ins::Const_Imm(Size::Long, num as i64));
-						}
-						Rule::dec => {
-							let num = dec32s(value);
+						Rule::hex | Rule::bin | Rule::dec => {
+							let num = num32s(value);
 							sections.entry(skey)
 								.or_insert(Vec::default())
 								.push(Ins::Const_Imm(Size::Long, num as i64));
