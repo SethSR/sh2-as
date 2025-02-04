@@ -155,7 +155,10 @@ ins_swapb = { ^"swap.b" ~ reg_or_sp__reg_or_sp }
 ins_swapw = { ^"swap.w" ~ reg_or_sp__reg_or_sp }
 ins_xtrct = { ^"xtrct"  ~ reg_or_sp__reg_or_sp }
 
-ins_and = { ^"and.b" ~ imm__disp_r0_gbr | ^"and" ~ (imm__r0 | reg_or_sp__reg_or_sp) }
+ins_and_imm = { ^"and" ~ imm__r0 }
+ins_and_reg = { ^"and" ~ reg_or_sp__reg_or_sp }
+ins_and_byt = { ^"and.b" ~ imm__disp_r0_gbr }
+ins_and = _{ ins_and_byt | ins_and_imm | ins_and_reg }
 ins_or  = { ^"or.b"  ~ imm__disp_r0_gbr | ^"or"  ~ (imm__r0 | reg_or_sp__reg_or_sp) }
 ins_tst = { ^"tst.b" ~ imm__disp_r0_gbr | ^"tst" ~ (imm__r0 | reg_or_sp__reg_or_sp) }
 ins_xor = { ^"xor.b" ~ imm__disp_r0_gbr | ^"xor" ~ (imm__r0 | reg_or_sp__reg_or_sp) }

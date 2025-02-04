@@ -193,6 +193,24 @@ fn dec32s(item: Pair<Rule>) -> i32 {
 	item.as_str().replace('_',"").parse::<i32>().unwrap()
 }
 
+fn num8u(item: Pair<Rule>) -> u8 {
+	match item.as_rule() {
+		Rule::hex => hex8u(item),
+		Rule::bin => bin8u(item),
+		Rule::dec => dec8s(item).try_into().unwrap(),
+		_ => unreachable!("expected an 8-bit unsigned number"),
+	}
+}
+
+fn num8s(item: Pair<Rule>) -> i8 {
+	match item.as_rule() {
+		Rule::hex => hex8s(item),
+		Rule::bin => bin8s(item),
+		Rule::dec => dec8s(item),
+		_ => unreachable!("expected an 8-bit signed number"),
+	}
+}
+
 fn main() {
 	let mut args = std::env::args();
 	args.next();
@@ -382,56 +400,34 @@ fn main() {
 					let ins = Ins::AddV(src,dst);
 					println!("{ins:?}");
 				}
-				Rule::ins_and => {
+				Rule::ins_and_byt => {
 					let mut args = line.into_inner();
-					let src = args.next().unwrap();
-					match src.as_rule() {
-						Rule::hex => {
-							let src = hex8u(src);
-							let dst = args.next().unwrap();
-							let ins = match dst.as_rule() {
-								Rule::r0 => Ins::AndImm(src),
-								Rule::disp_r0_gbr => Ins::AndByte(src),
-								_ => unreachable!("error: AND #imm,<dst>"),
-							};
-							println!("{ins:?}");
-						}
-						Rule::bin => {
-							let src = bin8u(src);
-							let dst = args.next().unwrap();
-							let ins = match dst.as_rule() {
-								Rule::r0 => Ins::AndImm(src),
-								Rule::disp_r0_gbr => Ins::AndByte(src),
-								_ => unreachable!("error: AND #imm,<dst>"),
-							};
-							println!("{ins:?}");
-						}
-						Rule::dec => {
-							let src: u8 = dec8s(src).try_into().unwrap();
-							let dst = args.next().unwrap();
-							let ins = match dst.as_rule() {
-								Rule::r0 => Ins::AndImm(src),
-								Rule::disp_r0_gbr => Ins::AndByte(src),
-								_ => unreachable!("error: AND #imm,<dst>"),
-							};
-							println!("{ins:?}");
-						}
-						Rule::reg => {
-							let src = reg(src);
-							let dst = reg_or_sp(args.next().unwrap());
-							let ins = Ins::AndReg(src,dst);
-							println!("{ins:?}");
-						}
-						Rule::sp => {
-							let src = reg(src);
-							let dst = reg_or_sp(args.next().unwrap());
-							let ins = Ins::AndReg(src,dst);
-							println!("{ins:?}");
-						}
-						_ => unreachable!("unexpected")
-					}
+					let src = num8u(args.next().unwrap());
+					assert_eq!(
+						Rule::disp_r0_gbr,
+						args.next().unwrap().as_rule(),
+						"expected @(R0,GBR) as AND dst",
+					);
+					let ins = Ins::AndByte(src);
+					println!("{ins:?}");
 				}
-				Rule::ins_bf => {}
+				Rule::ins_and_imm => {
+					let mut args = line.into_inner();
+					let src = num8u(args.next().unwrap());
+					assert_eq!(0, reg(args.next().unwrap()), "expected R0 as AND dst");
+					let ins = Ins::AndImm(src);
+					println!("{ins:?}");
+				}
+				Rule::ins_and_reg => {
+					let mut args = line.into_inner();
+					let src = reg(args.next().unwrap());
+					let dst = reg(args.next().unwrap());
+					let ins = Ins::AndReg(src,dst);
+					println!("{ins:?}");
+				}
+				Rule::ins_bf => {
+					let mut args = line.into_inner();
+				}
 				Rule::ins_bfs => {}
 				Rule::ins_bra => {}
 				Rule::ins_braf => {}
