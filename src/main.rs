@@ -247,7 +247,7 @@ fn main() {
 	match Sh2Parser::parse(Rule::program, &input) {
 		Err(e) => eprintln!("{e}"),
 		Ok(results) => for line in results {
-			match line.as_rule() {
+			let ins = match line.as_rule() {
 				Rule::dir_constant_b => {
 					let mut args = line.into_inner();
 					let value = args.next().unwrap();
@@ -257,6 +257,7 @@ fn main() {
 							sections.entry(skey)
 								.or_insert(Vec::default())
 								.push(Ins::Const_Imm(Size::Byte, num as i64));
+							continue;
 						}
 						Rule::lbl => {
 							// TODO - srenshaw - If this label is already defined, then if it's a value label,
@@ -276,6 +277,7 @@ fn main() {
 							sections.entry(skey)
 								.or_insert(Vec::default())
 								.push(Ins::Const_Imm(Size::Word, num as i64));
+							continue;
 						}
 						Rule::lbl => {
 							// TODO - srenshaw - If this label is already defined, then if it's a value label,
@@ -295,6 +297,7 @@ fn main() {
 							sections.entry(skey)
 								.or_insert(Vec::default())
 								.push(Ins::Const_Imm(Size::Long, num as i64));
+							continue;
 						}
 						Rule::lbl => {
 							// TODO - srenshaw - If this label is already defined, then if it's a value label,
@@ -309,6 +312,7 @@ fn main() {
 					let mut args = line.into_inner();
 					skey = args.next().unwrap().as_str().parse::<u32>().unwrap();
 					println!("set skey to {skey}");
+					continue;
 				}
 				Rule::dir_repeat => {
 					let mut args = line.into_inner();
@@ -316,6 +320,7 @@ fn main() {
 						args.next().unwrap().as_str().parse::<u32>().unwrap(),
 						Vec::with_capacity(64),
 					));
+					continue;
 				}
 				Rule::dir_endr => {
 					if let Some((num, instrs)) = repetitions {
@@ -327,6 +332,7 @@ fn main() {
 					} else {
 						eprintln!("`end repeat` found with no preceding `repeat` directive.");
 					}
+					continue;
 				}
 				Rule::dir_binclude => {
 					// TODO - srenshaw - Enable this once we add actual error-handling.
@@ -335,34 +341,31 @@ fn main() {
 					//let file_path = args.next().unwrap().as_str();
 					//let file = std::fs::read(file_path).expect("unable to open file");
 					//println!("file size: {}", file.len());
+					continue;
 				}
 				Rule::ins_add_imm => {
 					let mut args = line.into_inner();
 					let src = num8s(args.next().unwrap());
 					let dst = reg(args.next().unwrap());
-					let ins = Ins::AddImm(src,dst);
-					println!("{ins:?}");
+					Ins::AddImm(src,dst)
 				}
 				Rule::ins_add_reg => {
 					let mut args = line.into_inner();
 					let src = reg(args.next().unwrap());
 					let dst = reg(args.next().unwrap());
-					let ins = Ins::AddReg(src,dst);
-					println!("{ins:?}");
+					Ins::AddReg(src,dst)
 				}
 				Rule::ins_addc => {
 					let mut args = line.into_inner();
 					let src = reg_or_sp(args.next().unwrap());
 					let dst = reg_or_sp(args.next().unwrap());
-					let ins = Ins::AddC(src,dst);
-					println!("{ins:?}")
+					Ins::AddC(src,dst)
 				}
 				Rule::ins_addv => {
 					let mut args = line.into_inner();
 					let src = reg_or_sp(args.next().unwrap());
 					let dst = reg_or_sp(args.next().unwrap());
-					let ins = Ins::AddV(src,dst);
-					println!("{ins:?}");
+					Ins::AddV(src,dst)
 				}
 				Rule::ins_and_byt => {
 					let mut args = line.into_inner();
@@ -372,81 +375,114 @@ fn main() {
 						args.next().unwrap().as_rule(),
 						"expected @(R0,GBR) as AND dst",
 					);
-					let ins = Ins::AndByte(src);
-					println!("{ins:?}");
+					Ins::AndByte(src)
 				}
 				Rule::ins_and_imm => {
 					let mut args = line.into_inner();
 					let src = num8u(args.next().unwrap());
 					assert_eq!(0, reg(args.next().unwrap()), "expected R0 as AND dst");
-					let ins = Ins::AndImm(src);
-					println!("{ins:?}");
+					Ins::AndImm(src)
 				}
 				Rule::ins_and_reg => {
 					let mut args = line.into_inner();
 					let src = reg(args.next().unwrap());
 					let dst = reg(args.next().unwrap());
-					let ins = Ins::AndReg(src,dst);
-					println!("{ins:?}");
+					Ins::AndReg(src,dst)
 				}
 				Rule::ins_bf => {
 					let mut args = line.into_inner();
 					let lbl = args.next().unwrap().as_str();
-					let ins = Ins::Bf(lbl.into());
-					println!("{ins:?}");
+					Ins::Bf(lbl.into())
 				}
 				Rule::ins_bfs => {
 					let mut args = line.into_inner();
 					let lbl = args.next().unwrap().as_str();
-					let ins = Ins::BfS(lbl.into());
-					println!("{ins:?}");
+					Ins::BfS(lbl.into())
 				}
 				Rule::ins_bra => {
 					let mut args = line.into_inner();
 					let lbl = args.next().unwrap().as_str();
-					let ins = Ins::Bra(lbl.into());
-					println!("{ins:?}");
+					Ins::Bra(lbl.into())
 				}
 				Rule::ins_braf => {
 					let mut args = line.into_inner();
 					let reg = reg(args.next().unwrap());
-					let ins = Ins::BraF(reg);
-					println!("{ins:?}");
+					Ins::BraF(reg)
 				}
 				Rule::ins_bsr => {
 					let mut args = line.into_inner();
 					let lbl = args.next().unwrap().as_str();
-					let ins = Ins::Bsr(lbl.into());
-					println!("{ins:?}");
+					Ins::Bsr(lbl.into())
 				}
 				Rule::ins_bsrf => {
 					let mut args = line.into_inner();
 					let reg = reg(args.next().unwrap());
-					let ins = Ins::BsrF(reg);
-					println!("{ins:?}");
+					Ins::BsrF(reg)
 				}
 				Rule::ins_bt => {
 					let mut args = line.into_inner();
 					let lbl = args.next().unwrap().as_str();
-					let ins = Ins::Bt(lbl.into());
-					println!("{ins:?}");
+					Ins::Bt(lbl.into())
 				}
 				Rule::ins_bts => {
 					let mut args = line.into_inner();
 					let lbl = args.next().unwrap().as_str();
-					let ins = Ins::BtS(lbl.into());
-					println!("{ins:?}");
+					Ins::BtS(lbl.into())
 				}
-				Rule::ins_clrmac => {}
-				Rule::ins_clrt => {}
-				Rule::ins_cmp_eq => {}
-				Rule::ins_cmp_ge => {}
-				Rule::ins_cmp_gt => {}
-				Rule::ins_cmp_hi => {}
-				Rule::ins_cmp_hs => {}
-				Rule::ins_cmp_pl => {}
-				Rule::ins_cmp_pz => {}
-				Rule::ins_cmp_str => {}
+				Rule::ins_clrmac => Ins::ClrMac,
+				Rule::ins_clrt => Ins::ClrT,
+				Rule::ins_cmp_eq_imm => {
+					let mut args = line.into_inner();
+					let src = num8s(args.next().unwrap());
+					assert_eq!(0, reg(args.next().unwrap()), "expected R0 as CMP/EQ dst");
+					Ins::CmpEqImm(src)
+				}
+				Rule::ins_cmp_eq_reg => {
+					let mut args = line.into_inner();
+					let src = reg(args.next().unwrap());
+					let dst = reg(args.next().unwrap());
+					Ins::CmpEqReg(src,dst)
+				}
+				Rule::ins_cmp_ge => {
+					let mut args = line.into_inner();
+					let src = reg(args.next().unwrap());
+					let dst = reg(args.next().unwrap());
+					Ins::CmpGE(src,dst)
+				}
+				Rule::ins_cmp_gt => {
+					let mut args = line.into_inner();
+					let src = reg(args.next().unwrap());
+					let dst = reg(args.next().unwrap());
+					Ins::CmpGT(src,dst)
+				}
+				Rule::ins_cmp_hi => {
+					let mut args = line.into_inner();
+					let src = reg(args.next().unwrap());
+					let dst = reg(args.next().unwrap());
+					Ins::CmpHI(src,dst)
+				}
+				Rule::ins_cmp_hs => {
+					let mut args = line.into_inner();
+					let src = reg(args.next().unwrap());
+					let dst = reg(args.next().unwrap());
+					Ins::CmpHS(src,dst)
+				}
+				Rule::ins_cmp_pl => {
+					let mut args = line.into_inner();
+					let src = reg(args.next().unwrap());
+					Ins::CmpPL(src)
+				}
+				Rule::ins_cmp_pz => {
+					let mut args = line.into_inner();
+					let src = reg(args.next().unwrap());
+					Ins::CmpPZ(src)
+				}
+				Rule::ins_cmp_str => {
+					let mut args = line.into_inner();
+					let src = reg(args.next().unwrap());
+					let dst = reg(args.next().unwrap());
+					Ins::CmpStr(src,dst)
+				}
 				Rule::ins_div0s => {}
 				Rule::ins_div0u => {}
 				Rule::ins_div1 => {}
@@ -511,7 +547,8 @@ fn main() {
 				}
 				Rule::EOI => {}
 				_ => unreachable!("unexpected token found: {line}"),
-			}
+			};
+			println!("{ins:?}");
 		}
 	}
 }

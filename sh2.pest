@@ -163,16 +163,18 @@ ins_or  = { ^"or.b"  ~ imm__disp_r0_gbr | ^"or"  ~ (imm__r0 | reg_or_sp__reg_or_
 ins_tst = { ^"tst.b" ~ imm__disp_r0_gbr | ^"tst" ~ (imm__r0 | reg_or_sp__reg_or_sp) }
 ins_xor = { ^"xor.b" ~ imm__disp_r0_gbr | ^"xor" ~ (imm__r0 | reg_or_sp__reg_or_sp) }
 
-ins_cmp_eq  = { ^"cmp/eq"  ~ (imm__r0 | reg_or_sp__reg_or_sp) }
-ins_cmp_ge  = { ^"cmp/ge"  ~ reg_or_sp__reg_or_sp }
-ins_cmp_gt  = { ^"cmp/gt"  ~ reg_or_sp__reg_or_sp }
-ins_cmp_hi  = { ^"cmp/hi"  ~ reg_or_sp__reg_or_sp }
-ins_cmp_hs  = { ^"cmp/hs"  ~ reg_or_sp__reg_or_sp }
-ins_cmp_str = { ^"cmp/str" ~ reg_or_sp__reg_or_sp }
-ins_cmp_pl  = { ^"cmp/pl"  ~ reg_or_sp }
-ins_cmp_pz  = { ^"cmp/pz"  ~ reg_or_sp }
+ins_cmp_eq_imm = { ^"cmp/eq"  ~ imm__r0 }
+ins_cmp_eq_reg = { ^"cmp/eq"  ~ reg_or_sp__reg_or_sp }
+ins_cmp_ge     = { ^"cmp/ge"  ~ reg_or_sp__reg_or_sp }
+ins_cmp_gt     = { ^"cmp/gt"  ~ reg_or_sp__reg_or_sp }
+ins_cmp_hi     = { ^"cmp/hi"  ~ reg_or_sp__reg_or_sp }
+ins_cmp_hs     = { ^"cmp/hs"  ~ reg_or_sp__reg_or_sp }
+ins_cmp_str    = { ^"cmp/str" ~ reg_or_sp__reg_or_sp }
+ins_cmp_pl     = { ^"cmp/pl"  ~ reg_or_sp }
+ins_cmp_pz     = { ^"cmp/pz"  ~ reg_or_sp }
 ins_cmp = _{
-	ins_cmp_eq
+	ins_cmp_eq_imm
+	| ins_cmp_eq_reg
 	| ins_cmp_ge
 	| ins_cmp_gt
 	| ins_cmp_hi
