@@ -380,13 +380,13 @@ fn main() {
 				Rule::ins_and_imm => {
 					let mut args = line.into_inner();
 					let src = num8u(args.next().unwrap());
-					assert_eq!(0, reg(args.next().unwrap()), "expected R0 as AND dst");
+					assert_eq!(0, reg_or_sp(args.next().unwrap()), "expected R0 as AND dst");
 					Ins::AndImm(src)
 				}
 				Rule::ins_and_reg => {
 					let mut args = line.into_inner();
-					let src = reg(args.next().unwrap());
-					let dst = reg(args.next().unwrap());
+					let src = reg_or_sp(args.next().unwrap());
+					let dst = reg_or_sp(args.next().unwrap());
 					Ins::AndReg(src,dst)
 				}
 				Rule::ins_bf => {
@@ -406,7 +406,7 @@ fn main() {
 				}
 				Rule::ins_braf => {
 					let mut args = line.into_inner();
-					let reg = reg(args.next().unwrap());
+					let reg = reg_or_sp(args.next().unwrap());
 					Ins::BraF(reg)
 				}
 				Rule::ins_bsr => {
@@ -416,7 +416,7 @@ fn main() {
 				}
 				Rule::ins_bsrf => {
 					let mut args = line.into_inner();
-					let reg = reg(args.next().unwrap());
+					let reg = reg_or_sp(args.next().unwrap());
 					Ins::BsrF(reg)
 				}
 				Rule::ins_bt => {
@@ -434,53 +434,53 @@ fn main() {
 				Rule::ins_cmp_eq_imm => {
 					let mut args = line.into_inner();
 					let src = num8s(args.next().unwrap());
-					assert_eq!(0, reg(args.next().unwrap()), "expected R0 as CMP/EQ dst");
+					assert_eq!(0, reg_or_sp(args.next().unwrap()), "expected R0 as CMP/EQ dst");
 					Ins::CmpEqImm(src)
 				}
 				Rule::ins_cmp_eq_reg => {
 					let mut args = line.into_inner();
-					let src = reg(args.next().unwrap());
-					let dst = reg(args.next().unwrap());
+					let src = reg_or_sp(args.next().unwrap());
+					let dst = reg_or_sp(args.next().unwrap());
 					Ins::CmpEqReg(src,dst)
 				}
 				Rule::ins_cmp_ge => {
 					let mut args = line.into_inner();
-					let src = reg(args.next().unwrap());
-					let dst = reg(args.next().unwrap());
+					let src = reg_or_sp(args.next().unwrap());
+					let dst = reg_or_sp(args.next().unwrap());
 					Ins::CmpGE(src,dst)
 				}
 				Rule::ins_cmp_gt => {
 					let mut args = line.into_inner();
-					let src = reg(args.next().unwrap());
-					let dst = reg(args.next().unwrap());
+					let src = reg_or_sp(args.next().unwrap());
+					let dst = reg_or_sp(args.next().unwrap());
 					Ins::CmpGT(src,dst)
 				}
 				Rule::ins_cmp_hi => {
 					let mut args = line.into_inner();
-					let src = reg(args.next().unwrap());
-					let dst = reg(args.next().unwrap());
+					let src = reg_or_sp(args.next().unwrap());
+					let dst = reg_or_sp(args.next().unwrap());
 					Ins::CmpHI(src,dst)
 				}
 				Rule::ins_cmp_hs => {
 					let mut args = line.into_inner();
-					let src = reg(args.next().unwrap());
-					let dst = reg(args.next().unwrap());
+					let src = reg_or_sp(args.next().unwrap());
+					let dst = reg_or_sp(args.next().unwrap());
 					Ins::CmpHS(src,dst)
 				}
 				Rule::ins_cmp_pl => {
 					let mut args = line.into_inner();
-					let src = reg(args.next().unwrap());
+					let src = reg_or_sp(args.next().unwrap());
 					Ins::CmpPL(src)
 				}
 				Rule::ins_cmp_pz => {
 					let mut args = line.into_inner();
-					let src = reg(args.next().unwrap());
+					let src = reg_or_sp(args.next().unwrap());
 					Ins::CmpPZ(src)
 				}
 				Rule::ins_cmp_str => {
 					let mut args = line.into_inner();
-					let src = reg(args.next().unwrap());
-					let dst = reg(args.next().unwrap());
+					let src = reg_or_sp(args.next().unwrap());
+					let dst = reg_or_sp(args.next().unwrap());
 					Ins::CmpStr(src,dst)
 				}
 				Rule::ins_div0s => {}
