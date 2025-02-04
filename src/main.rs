@@ -391,14 +391,52 @@ fn main() {
 				}
 				Rule::ins_bf => {
 					let mut args = line.into_inner();
+					let lbl = args.next().unwrap().as_str();
+					let ins = Ins::Bf(lbl.into());
+					println!("{ins:?}");
 				}
-				Rule::ins_bfs => {}
-				Rule::ins_bra => {}
-				Rule::ins_braf => {}
-				Rule::ins_bsr => {}
-				Rule::ins_bsrf => {}
-				Rule::ins_bt => {}
-				Rule::ins_bts => {}
+				Rule::ins_bfs => {
+					let mut args = line.into_inner();
+					let lbl = args.next().unwrap().as_str();
+					let ins = Ins::BfS(lbl.into());
+					println!("{ins:?}");
+				}
+				Rule::ins_bra => {
+					let mut args = line.into_inner();
+					let lbl = args.next().unwrap().as_str();
+					let ins = Ins::Bra(lbl.into());
+					println!("{ins:?}");
+				}
+				Rule::ins_braf => {
+					let mut args = line.into_inner();
+					let reg = reg(args.next().unwrap());
+					let ins = Ins::BraF(reg);
+					println!("{ins:?}");
+				}
+				Rule::ins_bsr => {
+					let mut args = line.into_inner();
+					let lbl = args.next().unwrap().as_str();
+					let ins = Ins::Bsr(lbl.into());
+					println!("{ins:?}");
+				}
+				Rule::ins_bsrf => {
+					let mut args = line.into_inner();
+					let reg = reg(args.next().unwrap());
+					let ins = Ins::BsrF(reg);
+					println!("{ins:?}");
+				}
+				Rule::ins_bt => {
+					let mut args = line.into_inner();
+					let lbl = args.next().unwrap().as_str();
+					let ins = Ins::Bt(lbl.into());
+					println!("{ins:?}");
+				}
+				Rule::ins_bts => {
+					let mut args = line.into_inner();
+					let lbl = args.next().unwrap().as_str();
+					let ins = Ins::BtS(lbl.into());
+					println!("{ins:?}");
+				}
 				Rule::ins_clrmac => {}
 				Rule::ins_clrt => {}
 				Rule::ins_cmp_eq => {}
