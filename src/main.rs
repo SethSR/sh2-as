@@ -93,7 +93,7 @@ use std::collections::HashMap;
 use std::fs::read_to_string;
 
 use pest::Parser;
-use pest::iterators::Pair;
+use pest::iterators::{Pair, Pairs};
 use pest_derive::Parser;
 
 mod instructions;
@@ -229,6 +229,12 @@ fn num32s(item: Pair<Rule>) -> i32 {
 	}
 }
 
+fn reg_pair(mut args: Pairs<Rule>) -> (Reg,Reg) {
+	let src = reg_or_sp(args.next().unwrap());
+	let dst = reg_or_sp(args.next().unwrap());
+	(src,dst)
+}
+
 fn main() {
 	let mut args = std::env::args();
 	args.next();
@@ -350,21 +356,15 @@ fn main() {
 					Ins::AddImm(src,dst)
 				}
 				Rule::ins_add_reg => {
-					let mut args = line.into_inner();
-					let src = reg(args.next().unwrap());
-					let dst = reg(args.next().unwrap());
+					let (src,dst) = reg_pair(line.into_inner());
 					Ins::AddReg(src,dst)
 				}
 				Rule::ins_addc => {
-					let mut args = line.into_inner();
-					let src = reg_or_sp(args.next().unwrap());
-					let dst = reg_or_sp(args.next().unwrap());
+					let (src,dst) = reg_pair(line.into_inner());
 					Ins::AddC(src,dst)
 				}
 				Rule::ins_addv => {
-					let mut args = line.into_inner();
-					let src = reg_or_sp(args.next().unwrap());
-					let dst = reg_or_sp(args.next().unwrap());
+					let (src,dst) = reg_pair(line.into_inner());
 					Ins::AddV(src,dst)
 				}
 				Rule::ins_and_byt => {
@@ -384,9 +384,7 @@ fn main() {
 					Ins::AndImm(src)
 				}
 				Rule::ins_and_reg => {
-					let mut args = line.into_inner();
-					let src = reg_or_sp(args.next().unwrap());
-					let dst = reg_or_sp(args.next().unwrap());
+					let (src,dst) = reg_pair(line.into_inner());
 					Ins::AndReg(src,dst)
 				}
 				Rule::ins_bf => {
@@ -438,33 +436,23 @@ fn main() {
 					Ins::CmpEqImm(src)
 				}
 				Rule::ins_cmp_eq_reg => {
-					let mut args = line.into_inner();
-					let src = reg_or_sp(args.next().unwrap());
-					let dst = reg_or_sp(args.next().unwrap());
+					let (src,dst) = reg_pair(line.into_inner());
 					Ins::CmpEqReg(src,dst)
 				}
 				Rule::ins_cmp_ge => {
-					let mut args = line.into_inner();
-					let src = reg_or_sp(args.next().unwrap());
-					let dst = reg_or_sp(args.next().unwrap());
+					let (src,dst) = reg_pair(line.into_inner());
 					Ins::CmpGE(src,dst)
 				}
 				Rule::ins_cmp_gt => {
-					let mut args = line.into_inner();
-					let src = reg_or_sp(args.next().unwrap());
-					let dst = reg_or_sp(args.next().unwrap());
+					let (src,dst) = reg_pair(line.into_inner());
 					Ins::CmpGT(src,dst)
 				}
 				Rule::ins_cmp_hi => {
-					let mut args = line.into_inner();
-					let src = reg_or_sp(args.next().unwrap());
-					let dst = reg_or_sp(args.next().unwrap());
+					let (src,dst) = reg_pair(line.into_inner());
 					Ins::CmpHI(src,dst)
 				}
 				Rule::ins_cmp_hs => {
-					let mut args = line.into_inner();
-					let src = reg_or_sp(args.next().unwrap());
-					let dst = reg_or_sp(args.next().unwrap());
+					let (src,dst) = reg_pair(line.into_inner());
 					Ins::CmpHS(src,dst)
 				}
 				Rule::ins_cmp_pl => {
@@ -478,9 +466,7 @@ fn main() {
 					Ins::CmpPZ(src)
 				}
 				Rule::ins_cmp_str => {
-					let mut args = line.into_inner();
-					let src = reg_or_sp(args.next().unwrap());
-					let dst = reg_or_sp(args.next().unwrap());
+					let (src,dst) = reg_pair(line.into_inner());
 					Ins::CmpStr(src,dst)
 				}
 				Rule::ins_div0s => {}
