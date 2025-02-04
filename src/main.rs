@@ -169,7 +169,6 @@ fn bin32u(item: Pair<Rule>) -> u32 {
 	u32::from_str_radix(&item.as_str().replace('_',""), 2).unwrap()
 }
 
-
 fn bin8s(item: Pair<Rule>) -> i8 {
 	bin8u(item) as i8
 }
@@ -383,7 +382,55 @@ fn main() {
 					let ins = Ins::AddV(src,dst);
 					println!("{ins:?}");
 				}
-				Rule::ins_and => {}
+				Rule::ins_and => {
+					let mut args = line.into_inner();
+					let src = args.next().unwrap();
+					match src.as_rule() {
+						Rule::hex => {
+							let src = hex8u(src);
+							let dst = args.next().unwrap();
+							let ins = match dst.as_rule() {
+								Rule::r0 => Ins::AndImm(src),
+								Rule::disp_r0_gbr => Ins::AndByte(src),
+								_ => unreachable!("error: AND #imm,<dst>"),
+							};
+							println!("{ins:?}");
+						}
+						Rule::bin => {
+							let src = bin8u(src);
+							let dst = args.next().unwrap();
+							let ins = match dst.as_rule() {
+								Rule::r0 => Ins::AndImm(src),
+								Rule::disp_r0_gbr => Ins::AndByte(src),
+								_ => unreachable!("error: AND #imm,<dst>"),
+							};
+							println!("{ins:?}");
+						}
+						Rule::dec => {
+							let src: u8 = dec8s(src).try_into().unwrap();
+							let dst = args.next().unwrap();
+							let ins = match dst.as_rule() {
+								Rule::r0 => Ins::AndImm(src),
+								Rule::disp_r0_gbr => Ins::AndByte(src),
+								_ => unreachable!("error: AND #imm,<dst>"),
+							};
+							println!("{ins:?}");
+						}
+						Rule::reg => {
+							let src = reg(src);
+							let dst = reg_or_sp(args.next().unwrap());
+							let ins = Ins::AndReg(src,dst);
+							println!("{ins:?}");
+						}
+						Rule::sp => {
+							let src = reg(src);
+							let dst = reg_or_sp(args.next().unwrap());
+							let ins = Ins::AndReg(src,dst);
+							println!("{ins:?}");
+						}
+						_ => unreachable!("unexpected")
+					}
+				}
 				Rule::ins_bf => {}
 				Rule::ins_bfs => {}
 				Rule::ins_bra => {}
