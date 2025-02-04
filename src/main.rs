@@ -478,7 +478,14 @@ fn main() {
 					let (src,dst) = reg_pair(line.into_inner());
 					Ins::Div1(src,dst)
 				}
-				Rule::ins_dmul => {}
+				Rule::ins_dmuls => {
+					let (src,dst) = reg_pair(line.into_inner());
+					Ins::DMulS(src,dst)
+				}
+				Rule::ins_dmulu => {
+					let (src,dst) = reg_pair(line.into_inner());
+					Ins::DMulU(src,dst)
+				}
 				Rule::ins_dt => {}
 				Rule::ins_ext => {}
 				Rule::ins_jmp => {}
@@ -489,9 +496,18 @@ fn main() {
 				Rule::ins_mov => {}
 				Rule::ins_mova => {}
 				Rule::ins_movt => {}
-				Rule::ins_mul => {}
-				Rule::ins_muls => {}
-				Rule::ins_mulu => {}
+				Rule::ins_mul => {
+					let (src,dst) = reg_pair(line.into_inner());
+					Ins::Mul(src,dst)
+				}
+				Rule::ins_muls => {
+					let (src,dst) = reg_pair(line.into_inner());
+					Ins::MulS(src,dst)
+				}
+				Rule::ins_mulu => {
+					let (src,dst) = reg_pair(line.into_inner());
+					Ins::MulU(src,dst)
+				}
 				Rule::ins_neg => {}
 				Rule::ins_negc => {}
 				Rule::ins_nop => {}
