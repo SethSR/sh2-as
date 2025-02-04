@@ -469,9 +469,15 @@ fn main() {
 					let (src,dst) = reg_pair(line.into_inner());
 					Ins::CmpStr(src,dst)
 				}
-				Rule::ins_div0s => {}
-				Rule::ins_div0u => {}
-				Rule::ins_div1 => {}
+				Rule::ins_div0s => {
+					let (src,dst) = reg_pair(line.into_inner());
+					Ins::Div0S(src,dst)
+				}
+				Rule::ins_div0u => Ins::Div0U,
+				Rule::ins_div1 => {
+					let (src,dst) = reg_pair(line.into_inner());
+					Ins::Div1(src,dst)
+				}
 				Rule::ins_dmul => {}
 				Rule::ins_dt => {}
 				Rule::ins_ext => {}
