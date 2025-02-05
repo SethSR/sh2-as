@@ -159,8 +159,17 @@ ins_and_imm = { ^"and" ~ imm__r0 }
 ins_and_reg = { ^"and" ~ reg_or_sp__reg_or_sp }
 ins_and_byt = { ^"and.b" ~ imm__disp_r0_gbr }
 ins_and = _{ ins_and_byt | ins_and_imm | ins_and_reg }
+ins_or_imm = { ^"or" ~ imm__r0 }
+ins_or_reg = { ^"or" ~ reg_or_sp__reg_or_sp }
+ins_or_byt = { ^"or.b" ~ imm__disp_r0_gbr }
 ins_or  = { ^"or.b"  ~ imm__disp_r0_gbr | ^"or"  ~ (imm__r0 | reg_or_sp__reg_or_sp) }
+ins_tst_imm = { ^"tst" ~ imm__r0 }
+ins_tst_reg = { ^"tst" ~ reg_or_sp__reg_or_sp }
+ins_tst_byt = { ^"tst.b" ~ imm__disp_r0_gbr }
 ins_tst = { ^"tst.b" ~ imm__disp_r0_gbr | ^"tst" ~ (imm__r0 | reg_or_sp__reg_or_sp) }
+ins_xor_imm = { ^"xor" ~ imm__r0 }
+ins_xor_reg = { ^"xor" ~ reg_or_sp__reg_or_sp }
+ins_xor_byt = { ^"xor.b" ~ imm__disp_r0_gbr }
 ins_xor = { ^"xor.b" ~ imm__disp_r0_gbr | ^"xor" ~ (imm__r0 | reg_or_sp__reg_or_sp) }
 
 ins_cmp_eq_imm = { ^"cmp/eq"  ~ imm__r0 }
@@ -188,16 +197,20 @@ ins_add_imm = { ^"add" ~ imm__reg_or_sp }
 ins_add_reg = { ^"add" ~ reg_or_sp__reg_or_sp }
 ins_add = _{ ins_add_imm | ins_add_reg }
 
-ins_mul   = { (^"mul.l" | ^"mul")   ~ reg_or_sp__reg_or_sp }
-ins_muls  = { (^"muls.w" | ^"muls") ~ reg_or_sp__reg_or_sp }
-ins_mulu  = { (^"mulu.w" | ^"mulu") ~ reg_or_sp__reg_or_sp }
-ins_ldc   = { ^"ldc" ~ reg_or_sp__reg_ctrl | ^"ldc.l" ~ reg_post_inc__reg_ctrl }
-ins_lds   = { ^"lds" ~ reg_or_sp__reg_spec | ^"lds.l" ~ reg_post_inc__reg_spec }
-ins_stc   = { ^"stc" ~ reg_ctrl__reg_or_sp | ^"stc.l" ~ reg_ctrl__reg_pre_dec }
-ins_sts   = { ^"sts" ~ reg_spec__reg_or_sp | ^"sts.l" ~ reg_spec__reg_pre_dec }
-ins_macl  = { (^"mac.l"   | ^"mac")   ~ reg_post_inc__reg_post_inc }
-ins_dmuls = { (^"dmuls.l" | ^"dmuls") ~ reg_or_sp__reg_or_sp }
-ins_dmulu = { (^"dmulu.l" | ^"dmulu") ~ reg_or_sp__reg_or_sp }
+ins_mul     = { (^"mul.l" | ^"mul")   ~ reg_or_sp__reg_or_sp }
+ins_muls    = { (^"muls.w" | ^"muls") ~ reg_or_sp__reg_or_sp }
+ins_mulu    = { (^"mulu.w" | ^"mulu") ~ reg_or_sp__reg_or_sp }
+ins_ldc     = { ^"ldc"   ~ reg_or_sp__reg_ctrl }
+ins_ldc_inc = { ^"ldc.l" ~ reg_post_inc__reg_ctrl }
+ins_lds     = { ^"lds"   ~ reg_or_sp__reg_spec }
+ins_lds_inc = { ^"lds.l" ~ reg_post_inc__reg_spec }
+ins_stc     = { ^"stc"   ~ reg_ctrl__reg_or_sp }
+ins_stc_dec = { ^"stc.l" ~ reg_ctrl__reg_pre_dec }
+ins_sts     = { ^"sts"   ~ reg_spec__reg_or_sp }
+ins_sts_dec = { ^"sts.l" ~ reg_spec__reg_pre_dec }
+ins_macl    = { (^"mac.l"   | ^"mac")   ~ reg_post_inc__reg_post_inc }
+ins_dmuls   = { (^"dmuls.l" | ^"dmuls") ~ reg_or_sp__reg_or_sp }
+ins_dmulu   = { (^"dmulu.l" | ^"dmulu") ~ reg_or_sp__reg_or_sp }
 
 mov_common = _{
 	imm__reg_or_sp
@@ -221,11 +234,6 @@ ins_mov = {
 	| (^"mov.l" | ^"mov") ~ (mov_common | movl)
 }
 
-ins_ext  = _{ ins_extsb | ins_extsw | ins_extub | ins_extuw }
-ins_dmul = _{ ins_dmuls | ins_dmulu }
-ins_mac  = _{ ins_macw | ins_macl }
-ins_swap = _{ ins_swapb | ins_swapw }
-
 ins = _{
 	| ins_add
 	| ins_addc
@@ -245,14 +253,21 @@ ins = _{
 	| ins_div0s
 	| ins_div0u
 	| ins_div1
-	| ins_dmul
+	| ins_dmuls
+	| ins_dmulu
 	| ins_dt
-	| ins_ext
+	| ins_extsb
+	| ins_extsw
+	| ins_extub
+	| ins_extuw
 	| ins_jmp
 	| ins_jsr
+	| ins_ldc_inc
 	| ins_ldc
+	| ins_lds_inc
 	| ins_lds
-	| ins_mac
+	| ins_macw
+	| ins_macl
 	| ins_mov
 	| ins_mova
 	| ins_movt
@@ -282,12 +297,15 @@ ins = _{
 	| ins_shlr2
 	| ins_shlr8
 	| ins_sleep
+	| ins_stc_dec
 	| ins_stc
+	| ins_sts_dec
 	| ins_sts
 	| ins_sub
 	| ins_subc
 	| ins_subv
-	| ins_swap
+	| ins_swapb
+	| ins_swapw
 	| ins_tas
 	| ins_trapa
 	| ins_tst

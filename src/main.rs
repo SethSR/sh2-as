@@ -128,8 +128,36 @@ fn reg(item: Pair<Rule>) -> Reg {
 fn reg_or_sp(item: Pair<Rule>) -> Reg {
 	match item.as_rule() {
 		Rule::reg => reg(item),
+		Rule::r0 => 0,
 		Rule::sp => 15,
 		_ => unreachable!("unexpected token: {item}"),
+	}
+}
+
+fn reg_post_inc(item: Pair<Rule>) -> Reg {
+	if item.as_rule() == Rule::reg_post_inc {
+		let s = item.as_str().to_lowercase();
+		let s = &s[1..s.len()-1];
+		if "sp" == s {
+			15
+		} else {
+			s.parse::<Reg>().unwrap()
+		}
+	} else {
+		unreachable!("expected @R<num>+")
+	}
+}
+
+fn reg_pre_dec(item: Pair<Rule>) -> Reg {
+	if item.as_rule() == Rule::reg_pre_dec {
+		let s = &item.as_str().to_lowercase()[2..];
+		if "sp" == s {
+			15
+		} else {
+			s.parse::<Reg>().unwrap()
+		}
+	} else {
+		unreachable!("expected @-R<num>")
 	}
 }
 
@@ -233,6 +261,14 @@ fn reg_pair(mut args: Pairs<Rule>) -> (Reg,Reg) {
 	let src = reg_or_sp(args.next().unwrap());
 	let dst = reg_or_sp(args.next().unwrap());
 	(src,dst)
+}
+
+fn disp_pc(item: Pair<Rule>) -> i8 {
+	if item.as_rule() == Rule::disp_pc {
+		item.as_str().parse::<i8>().unwrap()
+	} else {
+		unreachable!("expected @(disp,PC)")
+	}
 }
 
 fn main() {
@@ -486,16 +522,104 @@ fn main() {
 					let (src,dst) = reg_pair(line.into_inner());
 					Ins::DMulU(src,dst)
 				}
-				Rule::ins_dt => {}
-				Rule::ins_ext => {}
-				Rule::ins_jmp => {}
-				Rule::ins_jsr => {}
-				Rule::ins_ldc => {}
-				Rule::ins_lds => {}
-				Rule::ins_mac => {}
-				Rule::ins_mov => {}
-				Rule::ins_mova => {}
-				Rule::ins_movt => {}
+				Rule::ins_dt => {
+					let mut args = line.into_inner();
+					let reg = reg_or_sp(args.next().unwrap());
+					Ins::Dt(reg)
+				}
+				Rule::ins_extsb => {
+					let (src,dst) = reg_pair(line.into_inner());
+					Ins::ExtS(Size::Byte,src,dst)
+				}
+				Rule::ins_extsw => {
+					let (src,dst) = reg_pair(line.into_inner());
+					Ins::ExtS(Size::Word,src,dst)
+				}
+				Rule::ins_extub => {
+					let (src,dst) = reg_pair(line.into_inner());
+					Ins::ExtU(Size::Byte,src,dst)
+				}
+				Rule::ins_extuw => {
+					let (src,dst) = reg_pair(line.into_inner());
+					Ins::ExtU(Size::Word,src,dst)
+				}
+				Rule::ins_jmp => {
+					let mut args = line.into_inner();
+					let reg = reg_or_sp(args.next().unwrap());
+					Ins::Jmp(reg)
+				}
+				Rule::ins_jsr => {
+					let mut args = line.into_inner();
+					let reg = reg_or_sp(args.next().unwrap());
+					Ins::Jsr(reg)
+				}
+				Rule::ins_ldc => {
+					let mut args = line.into_inner();
+					let src = reg_or_sp(args.next().unwrap());
+					let dst = args.next().unwrap();
+					match dst.as_rule() {
+						Rule::gbr => Ins::LdcGBR(src),
+						Rule::sr => Ins::LdcSR(src),
+						Rule::vbr => Ins::LdcVBR(src),
+						_ => unreachable!("expected GBR, SR, or VBR as LDC dst"),
+					}
+				}
+				Rule::ins_ldc_inc => {
+					let mut args = line.into_inner();
+					let src = reg_post_inc(args.next().unwrap());
+					let dst = args.next().unwrap();
+					match dst.as_rule() {
+						Rule::gbr => Ins::LdcGBR_Inc(src),
+						Rule::sr => Ins::LdcSR_Inc(src),
+						Rule::vbr => Ins::LdcVBR_Inc(src),
+						_ => unreachable!("expected GBR, SR, or VBR as LDC.L dst"),
+					}
+				}
+				Rule::ins_lds => {
+					let mut args = line.into_inner();
+					let src = reg_or_sp(args.next().unwrap());
+					let dst = args.next().unwrap();
+					match dst.as_rule() {
+						Rule::macl => Ins::LdsMACL(src),
+						Rule::mach => Ins::LdsMACH(src),
+						Rule::pr => Ins::LdsPR(src),
+						_ => unreachable!("expected GBR, SR, or VBR as LDC dst"),
+					}
+				}
+				Rule::ins_lds_inc => {
+					let mut args = line.into_inner();
+					let src = reg_post_inc(args.next().unwrap());
+					let dst = args.next().unwrap();
+					match dst.as_rule() {
+						Rule::macl => Ins::LdsMACL_Inc(src),
+						Rule::mach => Ins::LdsMACH_Inc(src),
+						Rule::pr => Ins::LdsPR_Inc(src),
+						_ => unreachable!("expected GBR, SR, or VBR as LDC.L dst"),
+					}
+				}
+				Rule::ins_macw => {
+					let (src,dst) = reg_pair(line.into_inner());
+					Ins::MacWord(src,dst)
+				}
+				Rule::ins_macl => {
+					let (src,dst) = reg_pair(line.into_inner());
+					Ins::MacLong(src,dst)
+				}
+				Rule::ins_mov => {
+					println!("implement MOV instruction");
+					continue
+				}
+				Rule::ins_mova => {
+					let mut args = line.into_inner();
+					let imm = disp_pc(args.next().unwrap());
+					assert_eq!(0, reg(args.next().unwrap()));
+					Ins::MovA(imm)
+				}
+				Rule::ins_movt => {
+					let mut args = line.into_inner();
+					let reg = reg_or_sp(args.next().unwrap());
+					Ins::MovT(reg)
+				}
 				Rule::ins_mul => {
 					let (src,dst) = reg_pair(line.into_inner());
 					Ins::Mul(src,dst)
@@ -508,52 +632,280 @@ fn main() {
 					let (src,dst) = reg_pair(line.into_inner());
 					Ins::MulU(src,dst)
 				}
-				Rule::ins_neg => {}
-				Rule::ins_negc => {}
-				Rule::ins_nop => {}
-				Rule::ins_not => {}
-				Rule::ins_or => {}
-				Rule::ins_rotcl => {}
-				Rule::ins_rotcr => {}
-				Rule::ins_rotl => {}
-				Rule::ins_rotr => {}
-				Rule::ins_rte => {}
-				Rule::ins_rts => {}
-				Rule::ins_sett => {}
-				Rule::ins_shal => {}
-				Rule::ins_shar => {}
-				Rule::ins_shll => {}
-				Rule::ins_shll16 => {}
-				Rule::ins_shll2 => {}
-				Rule::ins_shll8 => {}
-				Rule::ins_shlr => {}
-				Rule::ins_shlr16 => {}
-				Rule::ins_shlr2 => {}
-				Rule::ins_shlr8 => {}
-				Rule::ins_sleep => {}
-				Rule::ins_stc => {}
-				Rule::ins_sts => {}
-				Rule::ins_sub => {}
-				Rule::ins_subc => {}
-				Rule::ins_subv => {}
-				Rule::ins_swap => {}
-				Rule::ins_tas => {}
-				Rule::ins_trapa => {}
-				Rule::ins_tst => {}
-				Rule::ins_xor => {}
-				Rule::ins_xtrct => {}
+				Rule::ins_neg => {
+					let (src,dst) = reg_pair(line.into_inner());
+					Ins::Neg(src,dst)
+				}
+				Rule::ins_negc => {
+					let (src,dst) = reg_pair(line.into_inner());
+					Ins::NegC(src,dst)
+				}
+				Rule::ins_nop => Ins::Nop,
+				Rule::ins_not => {
+					let (src,dst) = reg_pair(line.into_inner());
+					Ins::Not(src,dst)
+				}
+				Rule::ins_or => continue,
+				Rule::ins_or_byt => {
+					let mut args = line.into_inner();
+					let src = num8u(args.next().unwrap());
+					assert_eq!(
+						Rule::disp_r0_gbr,
+						args.next().unwrap().as_rule(),
+						"expected @(R0,GBR) as AND dst",
+					);
+					Ins::AndByte(src)
+				}
+				Rule::ins_or_imm => {
+					let mut args = line.into_inner();
+					let src = num8u(args.next().unwrap());
+					assert_eq!(0, reg_or_sp(args.next().unwrap()), "expected R0 as AND dst");
+					Ins::AndImm(src)
+				}
+				Rule::ins_or_reg => {
+					let (src,dst) = reg_pair(line.into_inner());
+					Ins::AndReg(src,dst)
+				}
+				Rule::ins_rotcl => {
+					let mut args = line.into_inner();
+					let reg = reg_or_sp(args.next().unwrap());
+					Ins::RotCL(reg)
+				}
+				Rule::ins_rotcr => {
+					let mut args = line.into_inner();
+					let reg = reg_or_sp(args.next().unwrap());
+					Ins::RotCL(reg)
+				}
+				Rule::ins_rotl => {
+					let mut args = line.into_inner();
+					let reg = reg_or_sp(args.next().unwrap());
+					Ins::RotL(reg)
+				}
+				Rule::ins_rotr => {
+					let mut args = line.into_inner();
+					let reg = reg_or_sp(args.next().unwrap());
+					Ins::RotR(reg)
+				}
+				Rule::ins_rte => Ins::Rte,
+				Rule::ins_rts => Ins::Rts,
+				Rule::ins_sett => Ins::SetT,
+				Rule::ins_shal => {
+					let mut args = line.into_inner();
+					let reg = reg_or_sp(args.next().unwrap());
+					Ins::ShAL(reg)
+				}
+				Rule::ins_shar => {
+					let mut args = line.into_inner();
+					let reg = reg_or_sp(args.next().unwrap());
+					Ins::ShAR(reg)
+				}
+				Rule::ins_shll => {
+					let mut args = line.into_inner();
+					let reg = reg_or_sp(args.next().unwrap());
+					Ins::ShLL(reg)
+				}
+				Rule::ins_shll16 => {
+					let mut args = line.into_inner();
+					let reg = reg_or_sp(args.next().unwrap());
+					Ins::ShLL16(reg)
+				}
+				Rule::ins_shll2 => {
+					let mut args = line.into_inner();
+					let reg = reg_or_sp(args.next().unwrap());
+					Ins::ShLL2(reg)
+				}
+				Rule::ins_shll8 => {
+					let mut args = line.into_inner();
+					let reg = reg_or_sp(args.next().unwrap());
+					Ins::ShLL8(reg)
+				}
+				Rule::ins_shlr => {
+					let mut args = line.into_inner();
+					let reg = reg_or_sp(args.next().unwrap());
+					Ins::ShLR(reg)
+				}
+				Rule::ins_shlr16 => {
+					let mut args = line.into_inner();
+					let reg = reg_or_sp(args.next().unwrap());
+					Ins::ShLR16(reg)
+				}
+				Rule::ins_shlr2 => {
+					let mut args = line.into_inner();
+					let reg = reg_or_sp(args.next().unwrap());
+					Ins::ShLR2(reg)
+				}
+				Rule::ins_shlr8 => {
+					let mut args = line.into_inner();
+					let reg = reg_or_sp(args.next().unwrap());
+					Ins::ShLR8(reg)
+				}
+				Rule::ins_sleep => Ins::Sleep,
+				Rule::ins_stc => {
+					let mut args = line.into_inner();
+					let src = args.next().unwrap();
+					match src.as_rule() {
+						Rule::gbr => {
+							let reg = reg_or_sp(args.next().unwrap());
+							Ins::StcGBR(reg)
+						}
+						Rule::sr => {
+							let reg = reg_or_sp(args.next().unwrap());
+							Ins::StcSR(reg)
+						}
+						Rule::vbr => {
+							let reg = reg_or_sp(args.next().unwrap());
+							Ins::StcVBR(reg)
+						}
+						_ => unreachable!("expected GBR, SR, or VBR for STC dst"),
+					}
+				}
+				Rule::ins_stc_dec => {
+					let mut args = line.into_inner();
+					let src = args.next().unwrap();
+					match src.as_rule() {
+						Rule::gbr => {
+							let reg = reg_pre_dec(args.next().unwrap());
+							Ins::StcGBR_Dec(reg)
+						}
+						Rule::sr => {
+							let reg = reg_pre_dec(args.next().unwrap());
+							Ins::StcSR_Dec(reg)
+						}
+						Rule::vbr => {
+							let reg = reg_pre_dec(args.next().unwrap());
+							Ins::StcVBR_Dec(reg)
+						}
+						_ => unreachable!("expected GBR, SR, or VBR for STC.L dst"),
+					}
+				}
+				Rule::ins_sts => {
+					let mut args = line.into_inner();
+					let src = args.next().unwrap();
+					match src.as_rule() {
+						Rule::macl => {
+							let reg = reg_or_sp(args.next().unwrap());
+							Ins::StsMACL(reg)
+						}
+						Rule::mach => {
+							let reg = reg_or_sp(args.next().unwrap());
+							Ins::StsMACH(reg)
+						}
+						Rule::pr => {
+							let reg = reg_or_sp(args.next().unwrap());
+							Ins::StsPR(reg)
+						}
+						_ => unreachable!("expected MACL, MACH, PR for STS dst")
+					}
+				}
+				Rule::ins_sts_dec => {
+					let mut args = line.into_inner();
+					let src = args.next().unwrap();
+					match src.as_rule() {
+						Rule::macl => {
+							let reg = reg_pre_dec(args.next().unwrap());
+							Ins::StsMACL_Dec(reg)
+						}
+						Rule::mach => {
+							let reg = reg_pre_dec(args.next().unwrap());
+							Ins::StsMACH_Dec(reg)
+						}
+						Rule::pr => {
+							let reg = reg_pre_dec(args.next().unwrap());
+							Ins::StsPR_Dec(reg)
+						}
+						_ => unreachable!("expected MACL, MACH, or PR for STS.L dst"),
+					}
+				}
+				Rule::ins_sub => {
+					let (src,dst) = reg_pair(line.into_inner());
+					Ins::Sub(src,dst)
+				}
+				Rule::ins_subc => {
+					let (src,dst) = reg_pair(line.into_inner());
+					Ins::SubC(src,dst)
+				}
+				Rule::ins_subv => {
+					let (src,dst) = reg_pair(line.into_inner());
+					Ins::SubV(src,dst)
+				}
+				Rule::ins_swapb => {
+					let (src,dst) = reg_pair(line.into_inner());
+					Ins::Swap(Size::Byte,src,dst)
+				}
+				Rule::ins_swapw => {
+					let (src,dst) = reg_pair(line.into_inner());
+					Ins::Swap(Size::Word,src,dst)
+				}
+				Rule::ins_tas => {
+					let mut args = line.into_inner();
+					let reg = reg_or_sp(args.next().unwrap());
+					Ins::Tas(reg)
+				}
+				Rule::ins_trapa => {
+					let mut args = line.into_inner();
+					let imm = num8u(args.next().unwrap());
+					Ins::TrapA(imm)
+				}
+				Rule::ins_tst => continue,
+				Rule::ins_tst_byt => {
+					let mut args = line.into_inner();
+					let src = num8u(args.next().unwrap());
+					assert_eq!(
+						Rule::disp_r0_gbr,
+						args.next().unwrap().as_rule(),
+						"expected @(R0,GBR) as AND dst",
+					);
+					Ins::AndByte(src)
+				}
+				Rule::ins_tst_imm => {
+					let mut args = line.into_inner();
+					let src = num8u(args.next().unwrap());
+					assert_eq!(0, reg_or_sp(args.next().unwrap()), "expected R0 as AND dst");
+					Ins::AndImm(src)
+				}
+				Rule::ins_tst_reg => {
+					let (src,dst) = reg_pair(line.into_inner());
+					Ins::AndReg(src,dst)
+				}
+				Rule::ins_xor => continue,
+				Rule::ins_xor_byt => {
+					let mut args = line.into_inner();
+					let src = num8u(args.next().unwrap());
+					assert_eq!(
+						Rule::disp_r0_gbr,
+						args.next().unwrap().as_rule(),
+						"expected @(R0,GBR) as AND dst",
+					);
+					Ins::AndByte(src)
+				}
+				Rule::ins_xor_imm => {
+					let mut args = line.into_inner();
+					let src = num8u(args.next().unwrap());
+					assert_eq!(0, reg_or_sp(args.next().unwrap()), "expected R0 as AND dst");
+					Ins::AndImm(src)
+				}
+				Rule::ins_xor_reg => {
+					let (src,dst) = reg_pair(line.into_inner());
+					Ins::AndReg(src,dst)
+				}
+				Rule::ins_xtrct => {
+					let (src,dst) = reg_pair(line.into_inner());
+					Ins::Xtrct(src,dst)
+				}
 				Rule::val_line => {
 					let mut args = line.into_inner();
 					let label = args.next().unwrap().as_str();
 					let value = args.next().unwrap().as_str();
 					println!("Value: {label} = {value}");
+					continue;
 				}
 				Rule::lbl_line => {
 					let s = line.as_str();
 					let label: Label = s[..s.len()-1].into();
 					println!("Label: {label}");
+					continue;
 				}
-				Rule::EOI => {}
+				Rule::EOI => continue,
 				_ => unreachable!("unexpected token found: {line}"),
 			};
 			println!("{ins:?}");
@@ -657,10 +1009,10 @@ mod can_parse {
 
 	#[test]
 	fn dmul() {
-		check!(Rule::ins_dmul, "dmuls r1,r3");
-		check!(Rule::ins_dmul, "dmuls.l r4,r7");
-		check!(Rule::ins_dmul, "dmulu r1,r3");
-		check!(Rule::ins_dmul, "dmulu.l r4,r7");
+		check!(Rule::ins_dmuls, "dmuls r1,r3");
+		check!(Rule::ins_dmuls, "dmuls.l r4,r7");
+		check!(Rule::ins_dmulu, "dmulu r1,r3");
+		check!(Rule::ins_dmulu, "dmulu.l r4,r7");
 	}
 
 	#[test]
