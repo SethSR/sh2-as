@@ -271,6 +271,29 @@ fn disp_pc(item: Pair<Rule>) -> i8 {
 	}
 }
 
+fn reg2_inst(line: Pair<Rule>, out_fn: fn (Reg,Reg) -> Ins) -> Ins {
+	let (src,dst) = reg_pair(line.into_inner());
+	out_fn(src,dst)
+}
+
+fn size_reg_inst(line: Pair<Rule>, size: Size, out_fn: fn (Size,Reg,Reg) -> Ins) -> Ins {
+	let (src,dst) = reg_pair(line.into_inner());
+	out_fn(size,src,dst)
+}
+
+
+fn label_inst(line: Pair<Rule>, out_fn: fn(Label) -> Ins) -> Ins {
+	let mut args = line.into_inner();
+	let lbl = args.next().unwrap().as_str();
+	out_fn(lbl.into())
+}
+
+fn reg_inst(line: Pair<Rule>, out_fn: fn(Reg) -> Ins) -> Ins {
+	let mut args = line.into_inner();
+	let reg = reg_or_sp(args.next().unwrap());
+	out_fn(reg)
+}
+
 fn main() {
 	let mut args = std::env::args();
 	args.next();
@@ -352,14 +375,14 @@ fn main() {
 				}
 				Rule::dir_org => {
 					let mut args = line.into_inner();
-					skey = args.next().unwrap().as_str().parse::<u32>().unwrap();
+					skey = num32s(args.next().unwrap()) as u32;
 					println!("set skey to {skey}");
 					continue;
 				}
 				Rule::dir_repeat => {
 					let mut args = line.into_inner();
 					repetitions = Some((
-						args.next().unwrap().as_str().parse::<u32>().unwrap(),
+						num32s(args.next().unwrap()),
 						Vec::with_capacity(64),
 					));
 					continue;
@@ -391,18 +414,9 @@ fn main() {
 					let dst = reg(args.next().unwrap());
 					Ins::AddImm(src,dst)
 				}
-				Rule::ins_add_reg => {
-					let (src,dst) = reg_pair(line.into_inner());
-					Ins::AddReg(src,dst)
-				}
-				Rule::ins_addc => {
-					let (src,dst) = reg_pair(line.into_inner());
-					Ins::AddC(src,dst)
-				}
-				Rule::ins_addv => {
-					let (src,dst) = reg_pair(line.into_inner());
-					Ins::AddV(src,dst)
-				}
+				Rule::ins_add_reg => reg2_inst(line, Ins::AddReg),
+				Rule::ins_addc => reg2_inst(line, Ins::AddC),
+				Rule::ins_addv => reg2_inst(line, Ins::AddV),
 				Rule::ins_and_byt => {
 					let mut args = line.into_inner();
 					let src = num8u(args.next().unwrap());
@@ -419,50 +433,15 @@ fn main() {
 					assert_eq!(0, reg_or_sp(args.next().unwrap()), "expected R0 as AND dst");
 					Ins::AndImm(src)
 				}
-				Rule::ins_and_reg => {
-					let (src,dst) = reg_pair(line.into_inner());
-					Ins::AndReg(src,dst)
-				}
-				Rule::ins_bf => {
-					let mut args = line.into_inner();
-					let lbl = args.next().unwrap().as_str();
-					Ins::Bf(lbl.into())
-				}
-				Rule::ins_bfs => {
-					let mut args = line.into_inner();
-					let lbl = args.next().unwrap().as_str();
-					Ins::BfS(lbl.into())
-				}
-				Rule::ins_bra => {
-					let mut args = line.into_inner();
-					let lbl = args.next().unwrap().as_str();
-					Ins::Bra(lbl.into())
-				}
-				Rule::ins_braf => {
-					let mut args = line.into_inner();
-					let reg = reg_or_sp(args.next().unwrap());
-					Ins::BraF(reg)
-				}
-				Rule::ins_bsr => {
-					let mut args = line.into_inner();
-					let lbl = args.next().unwrap().as_str();
-					Ins::Bsr(lbl.into())
-				}
-				Rule::ins_bsrf => {
-					let mut args = line.into_inner();
-					let reg = reg_or_sp(args.next().unwrap());
-					Ins::BsrF(reg)
-				}
-				Rule::ins_bt => {
-					let mut args = line.into_inner();
-					let lbl = args.next().unwrap().as_str();
-					Ins::Bt(lbl.into())
-				}
-				Rule::ins_bts => {
-					let mut args = line.into_inner();
-					let lbl = args.next().unwrap().as_str();
-					Ins::BtS(lbl.into())
-				}
+				Rule::ins_and_reg => reg2_inst(line, Ins::AndReg),
+				Rule::ins_bf => label_inst(line, Ins::Bf),
+				Rule::ins_bfs => label_inst(line, Ins::BfS),
+				Rule::ins_bra => label_inst(line, Ins::Bra),
+				Rule::ins_braf => reg_inst(line, Ins::BraF),
+				Rule::ins_bsr => label_inst(line, Ins::Bsr),
+				Rule::ins_bsrf => reg_inst(line, Ins::BsrF),
+				Rule::ins_bt => label_inst(line, Ins::Bt),
+				Rule::ins_bts => label_inst(line, Ins::BtS),
 				Rule::ins_clrmac => Ins::ClrMac,
 				Rule::ins_clrt => Ins::ClrT,
 				Rule::ins_cmp_eq_imm => {
@@ -471,88 +450,26 @@ fn main() {
 					assert_eq!(0, reg_or_sp(args.next().unwrap()), "expected R0 as CMP/EQ dst");
 					Ins::CmpEqImm(src)
 				}
-				Rule::ins_cmp_eq_reg => {
-					let (src,dst) = reg_pair(line.into_inner());
-					Ins::CmpEqReg(src,dst)
-				}
-				Rule::ins_cmp_ge => {
-					let (src,dst) = reg_pair(line.into_inner());
-					Ins::CmpGE(src,dst)
-				}
-				Rule::ins_cmp_gt => {
-					let (src,dst) = reg_pair(line.into_inner());
-					Ins::CmpGT(src,dst)
-				}
-				Rule::ins_cmp_hi => {
-					let (src,dst) = reg_pair(line.into_inner());
-					Ins::CmpHI(src,dst)
-				}
-				Rule::ins_cmp_hs => {
-					let (src,dst) = reg_pair(line.into_inner());
-					Ins::CmpHS(src,dst)
-				}
-				Rule::ins_cmp_pl => {
-					let mut args = line.into_inner();
-					let src = reg_or_sp(args.next().unwrap());
-					Ins::CmpPL(src)
-				}
-				Rule::ins_cmp_pz => {
-					let mut args = line.into_inner();
-					let src = reg_or_sp(args.next().unwrap());
-					Ins::CmpPZ(src)
-				}
-				Rule::ins_cmp_str => {
-					let (src,dst) = reg_pair(line.into_inner());
-					Ins::CmpStr(src,dst)
-				}
-				Rule::ins_div0s => {
-					let (src,dst) = reg_pair(line.into_inner());
-					Ins::Div0S(src,dst)
-				}
+				Rule::ins_cmp_eq_reg => reg2_inst(line, Ins::CmpEqReg),
+				Rule::ins_cmp_ge => reg2_inst(line, Ins::CmpGE),
+				Rule::ins_cmp_gt => reg2_inst(line, Ins::CmpGT),
+				Rule::ins_cmp_hi => reg2_inst(line, Ins::CmpHI),
+				Rule::ins_cmp_hs => reg2_inst(line, Ins::CmpHS),
+				Rule::ins_cmp_pl => reg_inst(line, Ins::CmpPL),
+				Rule::ins_cmp_pz => reg_inst(line, Ins::CmpPZ),
+				Rule::ins_cmp_str => reg2_inst(line, Ins::CmpStr),
+				Rule::ins_div0s => reg2_inst(line, Ins::Div0S),
 				Rule::ins_div0u => Ins::Div0U,
-				Rule::ins_div1 => {
-					let (src,dst) = reg_pair(line.into_inner());
-					Ins::Div1(src,dst)
-				}
-				Rule::ins_dmuls => {
-					let (src,dst) = reg_pair(line.into_inner());
-					Ins::DMulS(src,dst)
-				}
-				Rule::ins_dmulu => {
-					let (src,dst) = reg_pair(line.into_inner());
-					Ins::DMulU(src,dst)
-				}
-				Rule::ins_dt => {
-					let mut args = line.into_inner();
-					let reg = reg_or_sp(args.next().unwrap());
-					Ins::Dt(reg)
-				}
-				Rule::ins_extsb => {
-					let (src,dst) = reg_pair(line.into_inner());
-					Ins::ExtS(Size::Byte,src,dst)
-				}
-				Rule::ins_extsw => {
-					let (src,dst) = reg_pair(line.into_inner());
-					Ins::ExtS(Size::Word,src,dst)
-				}
-				Rule::ins_extub => {
-					let (src,dst) = reg_pair(line.into_inner());
-					Ins::ExtU(Size::Byte,src,dst)
-				}
-				Rule::ins_extuw => {
-					let (src,dst) = reg_pair(line.into_inner());
-					Ins::ExtU(Size::Word,src,dst)
-				}
-				Rule::ins_jmp => {
-					let mut args = line.into_inner();
-					let reg = reg_or_sp(args.next().unwrap());
-					Ins::Jmp(reg)
-				}
-				Rule::ins_jsr => {
-					let mut args = line.into_inner();
-					let reg = reg_or_sp(args.next().unwrap());
-					Ins::Jsr(reg)
-				}
+				Rule::ins_div1 => reg2_inst(line, Ins::Div1),
+				Rule::ins_dmuls => reg2_inst(line, Ins::DMulS),
+				Rule::ins_dmulu => reg2_inst(line, Ins::DMulU),
+				Rule::ins_dt => reg_inst(line, Ins::Dt),
+				Rule::ins_extsb => size_reg_inst(line, Size::Byte, Ins::ExtS),
+				Rule::ins_extsw => size_reg_inst(line, Size::Word, Ins::ExtS),
+				Rule::ins_extub => size_reg_inst(line, Size::Byte, Ins::ExtU),
+				Rule::ins_extuw => size_reg_inst(line, Size::Word, Ins::ExtU),
+				Rule::ins_jmp => reg_inst(line, Ins::Jmp),
+				Rule::ins_jsr => reg_inst(line, Ins::Jsr),
 				Rule::ins_ldc => {
 					let mut args = line.into_inner();
 					let src = reg_or_sp(args.next().unwrap());
@@ -597,14 +514,8 @@ fn main() {
 						_ => unreachable!("expected GBR, SR, or VBR as LDC.L dst"),
 					}
 				}
-				Rule::ins_macw => {
-					let (src,dst) = reg_pair(line.into_inner());
-					Ins::MacWord(src,dst)
-				}
-				Rule::ins_macl => {
-					let (src,dst) = reg_pair(line.into_inner());
-					Ins::MacLong(src,dst)
-				}
+				Rule::ins_macw => reg2_inst(line, Ins::MacWord),
+				Rule::ins_macl => reg2_inst(line, Ins::MacLong),
 				Rule::ins_mov => {
 					println!("implement MOV instruction");
 					continue
@@ -615,36 +526,14 @@ fn main() {
 					assert_eq!(0, reg(args.next().unwrap()));
 					Ins::MovA(imm)
 				}
-				Rule::ins_movt => {
-					let mut args = line.into_inner();
-					let reg = reg_or_sp(args.next().unwrap());
-					Ins::MovT(reg)
-				}
-				Rule::ins_mul => {
-					let (src,dst) = reg_pair(line.into_inner());
-					Ins::Mul(src,dst)
-				}
-				Rule::ins_muls => {
-					let (src,dst) = reg_pair(line.into_inner());
-					Ins::MulS(src,dst)
-				}
-				Rule::ins_mulu => {
-					let (src,dst) = reg_pair(line.into_inner());
-					Ins::MulU(src,dst)
-				}
-				Rule::ins_neg => {
-					let (src,dst) = reg_pair(line.into_inner());
-					Ins::Neg(src,dst)
-				}
-				Rule::ins_negc => {
-					let (src,dst) = reg_pair(line.into_inner());
-					Ins::NegC(src,dst)
-				}
+				Rule::ins_movt => reg_inst(line, Ins::MovT),
+				Rule::ins_mul => reg2_inst(line, Ins::Mul),
+				Rule::ins_muls => reg2_inst(line, Ins::MulS),
+				Rule::ins_mulu => reg2_inst(line, Ins::MulU),
+				Rule::ins_neg => reg2_inst(line, Ins::Neg),
+				Rule::ins_negc => reg2_inst(line, Ins::NegC),
 				Rule::ins_nop => Ins::Nop,
-				Rule::ins_not => {
-					let (src,dst) = reg_pair(line.into_inner());
-					Ins::Not(src,dst)
-				}
+				Rule::ins_not => reg2_inst(line, Ins::Not),
 				Rule::ins_or => continue,
 				Rule::ins_or_byt => {
 					let mut args = line.into_inner();
@@ -662,83 +551,24 @@ fn main() {
 					assert_eq!(0, reg_or_sp(args.next().unwrap()), "expected R0 as AND dst");
 					Ins::AndImm(src)
 				}
-				Rule::ins_or_reg => {
-					let (src,dst) = reg_pair(line.into_inner());
-					Ins::AndReg(src,dst)
-				}
-				Rule::ins_rotcl => {
-					let mut args = line.into_inner();
-					let reg = reg_or_sp(args.next().unwrap());
-					Ins::RotCL(reg)
-				}
-				Rule::ins_rotcr => {
-					let mut args = line.into_inner();
-					let reg = reg_or_sp(args.next().unwrap());
-					Ins::RotCL(reg)
-				}
-				Rule::ins_rotl => {
-					let mut args = line.into_inner();
-					let reg = reg_or_sp(args.next().unwrap());
-					Ins::RotL(reg)
-				}
-				Rule::ins_rotr => {
-					let mut args = line.into_inner();
-					let reg = reg_or_sp(args.next().unwrap());
-					Ins::RotR(reg)
-				}
+				Rule::ins_or_reg => reg2_inst(line, Ins::AndReg),
+				Rule::ins_rotcl => reg_inst(line, Ins::RotCL),
+				Rule::ins_rotcr => reg_inst(line, Ins::RotCL),
+				Rule::ins_rotl => reg_inst(line, Ins::RotL),
+				Rule::ins_rotr => reg_inst(line, Ins::RotR),
 				Rule::ins_rte => Ins::Rte,
 				Rule::ins_rts => Ins::Rts,
 				Rule::ins_sett => Ins::SetT,
-				Rule::ins_shal => {
-					let mut args = line.into_inner();
-					let reg = reg_or_sp(args.next().unwrap());
-					Ins::ShAL(reg)
-				}
-				Rule::ins_shar => {
-					let mut args = line.into_inner();
-					let reg = reg_or_sp(args.next().unwrap());
-					Ins::ShAR(reg)
-				}
-				Rule::ins_shll => {
-					let mut args = line.into_inner();
-					let reg = reg_or_sp(args.next().unwrap());
-					Ins::ShLL(reg)
-				}
-				Rule::ins_shll16 => {
-					let mut args = line.into_inner();
-					let reg = reg_or_sp(args.next().unwrap());
-					Ins::ShLL16(reg)
-				}
-				Rule::ins_shll2 => {
-					let mut args = line.into_inner();
-					let reg = reg_or_sp(args.next().unwrap());
-					Ins::ShLL2(reg)
-				}
-				Rule::ins_shll8 => {
-					let mut args = line.into_inner();
-					let reg = reg_or_sp(args.next().unwrap());
-					Ins::ShLL8(reg)
-				}
-				Rule::ins_shlr => {
-					let mut args = line.into_inner();
-					let reg = reg_or_sp(args.next().unwrap());
-					Ins::ShLR(reg)
-				}
-				Rule::ins_shlr16 => {
-					let mut args = line.into_inner();
-					let reg = reg_or_sp(args.next().unwrap());
-					Ins::ShLR16(reg)
-				}
-				Rule::ins_shlr2 => {
-					let mut args = line.into_inner();
-					let reg = reg_or_sp(args.next().unwrap());
-					Ins::ShLR2(reg)
-				}
-				Rule::ins_shlr8 => {
-					let mut args = line.into_inner();
-					let reg = reg_or_sp(args.next().unwrap());
-					Ins::ShLR8(reg)
-				}
+				Rule::ins_shal => reg_inst(line, Ins::ShAL),
+				Rule::ins_shar => reg_inst(line, Ins::ShAR),
+				Rule::ins_shll => reg_inst(line, Ins::ShLL),
+				Rule::ins_shll16 => reg_inst(line, Ins::ShLL16),
+				Rule::ins_shll2 => reg_inst(line, Ins::ShLL2),
+				Rule::ins_shll8 => reg_inst(line, Ins::ShLL8),
+				Rule::ins_shlr => reg_inst(line, Ins::ShLR),
+				Rule::ins_shlr16 => reg_inst(line, Ins::ShLR16),
+				Rule::ins_shlr2 => reg_inst(line, Ins::ShLR2),
+				Rule::ins_shlr8 => reg_inst(line, Ins::ShLR8),
 				Rule::ins_sleep => Ins::Sleep,
 				Rule::ins_stc => {
 					let mut args = line.into_inner();
@@ -816,31 +646,12 @@ fn main() {
 						_ => unreachable!("expected MACL, MACH, or PR for STS.L dst"),
 					}
 				}
-				Rule::ins_sub => {
-					let (src,dst) = reg_pair(line.into_inner());
-					Ins::Sub(src,dst)
-				}
-				Rule::ins_subc => {
-					let (src,dst) = reg_pair(line.into_inner());
-					Ins::SubC(src,dst)
-				}
-				Rule::ins_subv => {
-					let (src,dst) = reg_pair(line.into_inner());
-					Ins::SubV(src,dst)
-				}
-				Rule::ins_swapb => {
-					let (src,dst) = reg_pair(line.into_inner());
-					Ins::Swap(Size::Byte,src,dst)
-				}
-				Rule::ins_swapw => {
-					let (src,dst) = reg_pair(line.into_inner());
-					Ins::Swap(Size::Word,src,dst)
-				}
-				Rule::ins_tas => {
-					let mut args = line.into_inner();
-					let reg = reg_or_sp(args.next().unwrap());
-					Ins::Tas(reg)
-				}
+				Rule::ins_sub => reg2_inst(line, Ins::Sub),
+				Rule::ins_subc => reg2_inst(line, Ins::SubC),
+				Rule::ins_subv => reg2_inst(line, Ins::SubV),
+				Rule::ins_swapb => size_reg_inst(line, Size::Byte, Ins::Swap),
+				Rule::ins_swapw => size_reg_inst(line, Size::Word, Ins::Swap),
+				Rule::ins_tas => reg_inst(line, Ins::Tas),
 				Rule::ins_trapa => {
 					let mut args = line.into_inner();
 					let imm = num8u(args.next().unwrap());
@@ -863,10 +674,7 @@ fn main() {
 					assert_eq!(0, reg_or_sp(args.next().unwrap()), "expected R0 as AND dst");
 					Ins::AndImm(src)
 				}
-				Rule::ins_tst_reg => {
-					let (src,dst) = reg_pair(line.into_inner());
-					Ins::AndReg(src,dst)
-				}
+				Rule::ins_tst_reg => reg2_inst(line, Ins::AndReg),
 				Rule::ins_xor => continue,
 				Rule::ins_xor_byt => {
 					let mut args = line.into_inner();
@@ -884,14 +692,8 @@ fn main() {
 					assert_eq!(0, reg_or_sp(args.next().unwrap()), "expected R0 as AND dst");
 					Ins::AndImm(src)
 				}
-				Rule::ins_xor_reg => {
-					let (src,dst) = reg_pair(line.into_inner());
-					Ins::AndReg(src,dst)
-				}
-				Rule::ins_xtrct => {
-					let (src,dst) = reg_pair(line.into_inner());
-					Ins::Xtrct(src,dst)
-				}
+				Rule::ins_xor_reg => reg2_inst(line, Ins::AndReg),
+				Rule::ins_xtrct => reg2_inst(line, Ins::Xtrct),
 				Rule::val_line => {
 					let mut args = line.into_inner();
 					let label = args.next().unwrap().as_str();
