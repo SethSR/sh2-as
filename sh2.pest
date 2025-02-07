@@ -46,18 +46,15 @@ imm_bin = _{ "%" ~ bin }
 num = _{ imm_hex | imm_bin | dec }
 imm = _{ "#" ~ term }
 
-disp8 = { num }
-disp4 = { num }
-
 /** Argument Types **/
 
 reg_or_sp      = _{ reg | sp }
 addr_reg_or_sp = @{ "@" ~ reg_or_sp }
 reg_post_inc   = @{ "@" ~ reg_or_sp ~ "+" }
 reg_pre_dec    = @{ "@" ~ "-" ~ reg_or_sp }
-disp_reg       = { "@(" ~ (disp4 | lbl) ~ "," ~ reg_or_sp ~ ")" }
-disp_gbr       = { "@(" ~ (disp8 | lbl) ~ "," ~ gbr       ~ ")" }
-disp_pc        = { "@(" ~ (disp8 | lbl) ~ "," ~ pc        ~ ")" }
+disp_reg       = { "@(" ~ (num | lbl) ~ "," ~ reg_or_sp ~ ")" }
+disp_gbr       = { "@(" ~ (num | lbl) ~ "," ~ gbr       ~ ")" }
+disp_pc        = { "@(" ~ (num | lbl) ~ "," ~ pc        ~ ")" }
 disp_r0        = { "@(" ~ r0 ~ "," ~ reg_or_sp ~ ")" }
 disp_r0_gbr    = { "@(" ~ r0 ~ "," ~ gbr       ~ ")" }
 
@@ -224,15 +221,10 @@ mov_common = _{
 	| reg_or_sp__reg_pre_dec
 	| reg_post_inc__reg_or_sp
 }
-movb = _{ disp_reg__r0 | r0__disp_reg }
-movw = _{ disp_reg__r0 | r0__disp_reg | disp_pc__reg_or_sp }
-movl = _{ disp_pc__reg_or_sp | disp_reg__reg_or_sp | reg_or_sp__disp_reg }
-
-ins_mov = {
-	^"mov.b" ~ (mov_common | movb)
-	| ^"mov.w" ~ (mov_common | movw)
-	| (^"mov.l" | ^"mov") ~ (mov_common | movl)
-}
+ins_movb =  { mov_common | disp_reg__r0 | r0__disp_reg }
+ins_movw =  { mov_common | disp_reg__r0 | r0__disp_reg | disp_pc__reg_or_sp }
+ins_movl =  { mov_common | disp_pc__reg_or_sp | disp_reg__reg_or_sp | reg_or_sp__disp_reg }
+ins_mov  = _{ ^"mov.b" ~ ins_movb | ^"mov.w" ~ ins_movw | (^"mov.l" | ^"mov") ~ ins_movl }
 
 ins = _{
 	| ins_add

@@ -1,23 +1,4 @@
 /*
-use std::collections::HashMap;
-
-use miette::IntoDiagnostic;
-
-mod lexer;
-use lexer::lexer;
-use lexer::TokenType;
-
-mod parser;
-use parser::parser;
-use parser::State;
-
-mod resolver;
-use resolver::resolver;
-
-type Label = std::rc::Rc<str>;
-type SectionMap = HashMap<u64, Vec<State>>;
-type LabelMap = HashMap<Label, Option<u32>>;
-
 fn main() -> miette::Result<()> {
 	tracing_subscriber::fmt::init();
 
@@ -130,7 +111,21 @@ fn reg_or_sp(item: Pair<Rule>) -> Reg {
 		Rule::reg => reg(item),
 		Rule::r0 => 0,
 		Rule::sp => 15,
-		_ => unreachable!("unexpected token: {item}"),
+		_ => unreachable!("expected Reg or SP, found: {item}-{}", item.as_str()),
+	}
+}
+
+fn addr_reg_or_sp(item: Pair<Rule>) -> Reg {
+	if item.as_rule() == Rule::addr_reg_or_sp {
+		let s = item.as_str().to_lowercase();
+		let s = &s[1..];
+		if "sp" == s {
+			15
+		} else {
+			s[1..].parse::<Reg>().unwrap()
+		}
+	} else {
+		unreachable!("expected @Reg, found: {item}-{}", item.as_str())
 	}
 }
 
@@ -141,10 +136,10 @@ fn reg_post_inc(item: Pair<Rule>) -> Reg {
 		if "sp" == s {
 			15
 		} else {
-			s.parse::<Reg>().unwrap()
+			s[1..].parse::<Reg>().unwrap()
 		}
 	} else {
-		unreachable!("expected @R<num>+")
+		unreachable!("expected @Reg+, found: {item}-{}", item.as_str())
 	}
 }
 
@@ -154,10 +149,10 @@ fn reg_pre_dec(item: Pair<Rule>) -> Reg {
 		if "sp" == s {
 			15
 		} else {
-			s.parse::<Reg>().unwrap()
+			s[1..].parse::<Reg>().unwrap()
 		}
 	} else {
-		unreachable!("expected @-R<num>")
+		unreachable!("expected @-Reg, found: {item}-{}", item.as_str())
 	}
 }
 
@@ -263,11 +258,54 @@ fn reg_pair(mut args: Pairs<Rule>) -> (Reg,Reg) {
 	(src,dst)
 }
 
+fn disp_gbr(item: Pair<Rule>) -> i8 {
+	if item.as_rule() == Rule::disp_gbr {
+		item.as_str().parse::<i8>().unwrap()
+	} else {
+		unreachable!("expected @(disp,GBR)")
+	}
+}
+
 fn disp_pc(item: Pair<Rule>) -> i8 {
 	if item.as_rule() == Rule::disp_pc {
 		item.as_str().parse::<i8>().unwrap()
 	} else {
 		unreachable!("expected @(disp,PC)")
+	}
+}
+
+fn disp_reg(item: Pair<Rule>) -> Arg {
+	if item.as_rule() != Rule::disp_reg {
+		unreachable!("expected @(disp,Reg)")
+	}
+
+	let mut args = item.into_inner();
+	let disp = args.next().unwrap();
+	let reg = reg_or_sp(args.next().unwrap());
+	match disp.as_rule() {
+		Rule::lbl => Arg::DispLabel(disp.as_str().into(),reg),
+		Rule::hex | Rule::bin | Rule::dec => {
+			let disp = num32s(disp);
+			if (i8::MIN as i32..i8::MAX as i32).contains(&disp) {
+				Arg::DispRegByte(disp as i8,reg)
+			} else if (i16::MIN as i32..i16::MAX as i32).contains(&disp) {
+				Arg::DispRegWord(disp as i16,reg)
+			} else {
+				Arg::DispRegLong(disp,reg)
+			}
+		}
+		_ => unreachable!("expected @(disp,Reg), found: {disp}-{}", disp.as_str()),
+	}
+}
+
+fn disp_r0(item: Pair<Rule>) -> Reg {
+	if item.as_rule() == Rule::disp_r0 {
+		let mut args = item.into_inner();
+		let disp = reg_or_sp(args.next().unwrap());
+		assert_eq!(0, reg(args.next().unwrap()));
+		disp
+	} else {
+		unreachable!("expected @(disp,R0)")
 	}
 }
 
@@ -292,6 +330,77 @@ fn reg_inst(line: Pair<Rule>, out_fn: fn(Reg) -> Ins) -> Ins {
 	let mut args = line.into_inner();
 	let reg = reg_or_sp(args.next().unwrap());
 	out_fn(reg)
+}
+
+fn mov_common(size: Size, line: Pair<Rule>) -> Ins {
+	let mut args = line.clone().into_inner();
+	let src = args.next().unwrap();
+	let dst = args.next().unwrap();
+	match src.as_rule() {
+		Rule::hex | Rule::bin | Rule::dec => {
+			let src = num32s(src);
+			let dst = reg_or_sp(dst);
+			if (i8::MIN as i32..i8::MAX as i32).contains(&src) {
+				Ins::MovImmByte(src as i8, dst)
+			} else if (i16::MIN as i32..i16::MAX as i32).contains(&src) {
+				Ins::MovImmWord(src as i16, dst)
+			} else {
+				Ins::MovImmLong(src, dst)
+			}
+		}
+		Rule::addr_reg_or_sp => {
+			let src = addr_reg_or_sp(src);
+			let dst = reg_or_sp(dst);
+			Ins::Mov(size, Arg::IndReg(src), Arg::DirReg(dst))
+		}
+		Rule::disp_gbr => {
+			let src = disp_gbr(src);
+			assert_eq!(0, reg(dst));
+			Ins::Mov(size, Arg::DispGBR(src), Arg::DirReg(0))
+		}
+		Rule::disp_r0 => {
+			let src = disp_r0(src);
+			let dst = reg_or_sp(dst);
+			Ins::Mov(size, Arg::DispR0(src), Arg::DirReg(dst))
+		}
+		Rule::r0 => {
+			assert_eq!(0, reg(src));
+			let dst = disp_gbr(dst);
+			Ins::Mov(size, Arg::DirReg(0), Arg::DispGBR(dst))
+		}
+		Rule::reg | Rule::sp => {
+			let src = Arg::DirReg(reg_or_sp(src));
+			match dst.as_rule() {
+				Rule::addr_reg_or_sp => {
+					let dst = addr_reg_or_sp(dst);
+					Ins::Mov(size, src, Arg::IndReg(dst))
+				}
+				Rule::disp_r0 => {
+					let dst = disp_r0(dst);
+					Ins::Mov(size, src, Arg::DispR0(dst))
+				}
+				Rule::reg | Rule::sp => {
+					let dst = reg_or_sp(dst);
+					Ins::Mov(size, src, Arg::DirReg(dst))
+				}
+				Rule::reg_pre_dec => {
+					let dst = reg_pre_dec(dst);
+					Ins::Mov(size, src, Arg::PreDec(dst))
+				}
+				_ => unreachable!("expected valid common MOV dst, found: {dst}-{}", dst.as_str()),
+			}
+		}
+		Rule::reg_post_inc => {
+			let src = reg_post_inc(src);
+			let dst = reg_or_sp(dst);
+			Ins::Mov(size, Arg::PostInc(src), Arg::DirReg(dst))
+		}
+		Rule::lbl => {
+			let dst = reg_or_sp(dst);
+			Ins::Mov(size, Arg::Label(src.as_str().into()), Arg::DirReg(dst))
+		}
+		_ => unreachable!("expected common MOV arguments, found: {line}-{}", line.as_str()),
+	}
 }
 
 fn main() {
@@ -516,9 +625,72 @@ fn main() {
 				}
 				Rule::ins_macw => reg2_inst(line, Ins::MacWord),
 				Rule::ins_macl => reg2_inst(line, Ins::MacLong),
-				Rule::ins_mov => {
-					println!("implement MOV instruction");
-					continue
+				Rule::ins_mov => continue,
+				Rule::ins_movb => {
+					let mut args = line.clone().into_inner();
+					let src = args.next().unwrap();
+					match src.as_rule() {
+						Rule::disp_reg => {
+							let src = disp_reg(src);
+							assert_eq!(0, reg(args.next().unwrap()));
+							Ins::Mov(Size::Byte, src, Arg::DirReg(0))
+						}
+						Rule::r0 => {
+							assert_eq!(0, reg(src));
+							let dst = disp_reg(args.next().unwrap());
+							Ins::Mov(Size::Byte, Arg::DirReg(0), dst)
+						}
+						Rule::disp_pc => {
+							let src = disp_pc(src);
+							let dst = reg_or_sp(args.next().unwrap());
+							Ins::Mov(Size::Byte, Arg::DispPC(src), Arg::DirReg(dst))
+						}
+						_ => mov_common(Size::Byte, line),
+					}
+				}
+				Rule::ins_movw => {
+					let mut args = line.clone().into_inner();
+					let src = args.next().unwrap();
+					match src.as_rule() {
+						Rule::disp_reg => {
+							let src = disp_reg(src);
+							assert_eq!(0, reg(args.next().unwrap()));
+							Ins::Mov(Size::Word, src, Arg::DirReg(0))
+						}
+						Rule::r0 => {
+							assert_eq!(0, reg(src));
+							let dst = disp_reg(args.next().unwrap());
+							Ins::Mov(Size::Word, Arg::DirReg(0), dst)
+						}
+						Rule::disp_pc => {
+							let src = disp_pc(src);
+							let dst = reg_or_sp(args.next().unwrap());
+							Ins::Mov(Size::Word, Arg::DispPC(src), Arg::DirReg(dst))
+						}
+						_ => mov_common(Size::Word, line),
+					}
+				}
+				Rule::ins_movl => {
+					let mut args = line.clone().into_inner();
+					let src = args.next().unwrap();
+					match src.as_rule() {
+						Rule::disp_pc => {
+							let src = disp_pc(src);
+							let dst = reg_or_sp(args.next().unwrap());
+							Ins::Mov(Size::Long, Arg::DispPC(src), Arg::DirReg(dst))
+						}
+						Rule::disp_reg => {
+							let src = disp_reg(src);
+							let dst = reg_or_sp(args.next().unwrap());
+							Ins::Mov(Size::Long, src, Arg::DirReg(dst))
+						}
+						Rule::reg_or_sp => {
+							let src = reg_or_sp(src);
+							let dst = disp_reg(args.next().unwrap());
+							Ins::Mov(Size::Long, Arg::DirReg(src), dst)
+						}
+						_ => mov_common(Size::Long, line),
+					}
 				}
 				Rule::ins_mova => {
 					let mut args = line.into_inner();

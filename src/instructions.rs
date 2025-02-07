@@ -171,7 +171,11 @@ pub(crate) enum Ins {
 	MacWord(Reg, Reg),
 	/// | #imm,Rn           | 1110nnnniiiiiiii | imm -> Sign        | 1       | -      |
 	/// |                   |                  | extension -> Rn    |         |        |
-	MovImm(i8, Reg),
+	MovImmByte(i8, Reg),
+	/// This is an invalid command. It will need to be converted to a constant and load using the
+	/// lt_org directive.
+	MovImmWord(i16, Reg),
+	MovImmLong(i32, Reg),
 	/// | Rm,Rn             | 0110nnnnmmmm0011 | Rm -> Rn           | 1       | -      |
 	/// |                   |                  |                    |         |        |
 	MovReg(Reg, Reg),
