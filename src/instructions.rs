@@ -6,9 +6,9 @@ use crate::{Arg, Label, Reg, Size};
 //    | Instruction       | Bit Layout       | Operation          | Cycles  | T Bit  |
 pub(crate) enum Ins {
 	/// | #imm,Rn           | 0111nnnniiiiiiii | Rn+imm -> Rn       | 1       | -      |
-	AddImm(i8, Reg),
+	Add_Imm(i8, Reg),
 	/// | Rm,Rn             | 0011nnnnmmmm1100 | Rn+Rm -> Rn        | 1       | -      |
-	AddReg(Reg, Reg),
+	Add_Reg(Reg, Reg),
 	/// | Rm,Rn             | 0011nnnnmmmm1110 | Rn+Rm+T -> Rn,     | 1       | Carry  |
 	/// |                   |                  | Carry -> T         |         |        |
 	AddC(Reg, Reg),
@@ -16,12 +16,12 @@ pub(crate) enum Ins {
 	/// |                   |                  | Overflow -> T      |         |        |
 	AddV(Reg, Reg),
 	/// | #imm,R0           | 11001001iiiiiiii | R0 & imm -> R0     | 1       | -      |
-	AndImm(u8),
+	And_Imm(u8),
 	/// | Rm,Rn             | 0010nnnnmmmm1001 | Rn & Rm -> Rn      | 1       | -      |
-	AndReg(Reg, Reg),
+	And_Reg(Reg, Reg),
 	/// | #imm,@(R0,GBR)    | 11001101iiiiiiii | (R0+GBR) & imm     | 3       | -      |
 	/// |                   |                  | -> (R0+GBR)        |         |        |
-	AndByte(u8),
+	And_Byte(u8),
 	/// | label             | 10011011dddddddd | if T = 0,          | 3/1     | -      |
 	/// |                   |                  | dispx2+PC -> PC;   |         |        |
 	/// |                   |                  | if T = 1, nop      |         |        |
@@ -58,10 +58,10 @@ pub(crate) enum Ins {
 	ClrT,
 	/// | #imm,R0           | 10001000iiiiiiii | if R0 = imm,       | 1       | Result |
 	/// |                   |                  | 1 -> T             |         |        |
-	CmpEqImm(i8),
+	CmpEq_Imm(i8),
 	/// | Rm,Rn             | 0011nnnnmmmm0000 | if Rn = Rm,        | 1       | Result |
 	/// |                   |                  | 1 -> T             |         |        |
-	CmpEqReg(Reg, Reg),
+	CmpEq_Reg(Reg, Reg),
 	/// | Rm,Rn             | 0011nnnnmmmm0011 | if Rn >= Rm with   | 1       | Result |
 	/// |                   |                  | signed data,       |         |        |
 	/// |                   |                  | 1 -> T             |         |        |
@@ -164,21 +164,21 @@ pub(crate) enum Ins {
 	/// | @Rm+,@Rn+         | 0000nnnnmmmm1111 | Signed operation   | 3/(2-4) | -      |
 	/// |                   |                  | of (Rn) x (Rm) +   |         |        |
 	/// |                   |                  | MAC -> MAC         |         |        |
-	MacLong(Reg, Reg),
+	Mac_Long(Reg, Reg),
 	/// | @Rm+,@Rn+         | 0100nnnnmmmm1111 | Signed operation   | 3/(2)   | -      |
 	/// |                   |                  | of (Rn) x (Rm) +   |         |        |
 	/// |                   |                  | MAC -> MAC         |         |        |
-	MacWord(Reg, Reg),
+	Mac_Word(Reg, Reg),
 	/// | #imm,Rn           | 1110nnnniiiiiiii | imm -> Sign        | 1       | -      |
 	/// |                   |                  | extension -> Rn    |         |        |
-	MovImmByte(i8, Reg),
+	Mov_Imm_Byte(i8, Reg),
 	/// This is an invalid command. It will need to be converted to a constant and load using the
 	/// lt_org directive.
-	MovImmWord(i16, Reg),
-	MovImmLong(i32, Reg),
+	Mov_Imm_Word(i16, Reg),
+	Mov_Imm_Long(i32, Reg),
 	/// | Rm,Rn             | 0110nnnnmmmm0011 | Rm -> Rn           | 1       | -      |
 	/// |                   |                  |                    |         |        |
-	MovReg(Reg, Reg),
+	Mov_Reg(Reg, Reg),
 	/// | .B @(disp,GBR),R0 | 11000100dddddddd | (disp+GBR) -> Sign | 1       | -      |
 	/// |                   |                  | extension -> R0    |         |        |
 	/// | .B @(disp,Rm),R0  | 10000100mmmmdddd | (disp+Rm) -> Sign  | 1       | -      |
@@ -213,12 +213,12 @@ pub(crate) enum Ins {
 	/// | Rm,Rn             | 0110nnnnmmmm0111 | ~Rm -> Rn          | 1       | -      |
 	Not(Reg, Reg),
 	/// | #imm,R0           | 11001011iiiiiiii | R0|imm -> R0       | 1       | -      |
-	OrImm(u8),
+	Or_Imm(u8),
 	/// | Rm,Rn             | 0010nnnnmmmm1011 | Rn|Rm -> Rn        | 1       | -      |
-	OrReg(Reg, Reg),
+	Or_Reg(Reg, Reg),
 	/// | #imm,@(R0,GBR)    | 11001111iiiiiiii | (R0+GBR)|imm ->    | 3       | -      |
 	/// |                   |                  | (R0+GBR)           |         |        |
-	OrByte(u8),
+	Or_Byte(u8),
 	/// | Rn                | 0100nnnn00100100 | T <- Rn <- T       | 1       | MSB    |
 	RotCL(Reg),
 	/// | Rn                | 0100nnnn00100101 | T -> Rn -> T       | 1       | LSB    |
@@ -333,5 +333,4 @@ pub(crate) enum Ins {
 	/*** Directives ***/
 	Const_Imm(Size, i64),
 	Const_Label(Size, Label),
-	Label(Label),
 }

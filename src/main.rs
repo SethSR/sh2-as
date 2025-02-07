@@ -93,11 +93,6 @@ enum Size {
 type Reg = u8;
 type Label = std::rc::Rc<str>;
 
-enum LabelType {
-	Value(i32),
-	Addr(u32),
-}
-
 #[derive(Parser)]
 #[grammar = "sh2.pest"]
 struct Sh2Parser;
@@ -343,11 +338,11 @@ fn mov_common(size: Size, line: Pair<Rule>) -> Ins {
 			let src = num32s(src);
 			let dst = reg_or_sp(dst);
 			if (i8::MIN as i32..i8::MAX as i32).contains(&src) {
-				Ins::MovImmByte(src as i8, dst)
+				Ins::Mov_Imm_Byte(src as i8, dst)
 			} else if (i16::MIN as i32..i16::MAX as i32).contains(&src) {
-				Ins::MovImmWord(src as i16, dst)
+				Ins::Mov_Imm_Word(src as i16, dst)
 			} else {
-				Ins::MovImmLong(src, dst)
+				Ins::Mov_Imm_Long(src, dst)
 			}
 		}
 		Rule::addr_reg_or_sp => {
@@ -371,23 +366,23 @@ fn mov_common(size: Size, line: Pair<Rule>) -> Ins {
 			Ins::Mov(size, Arg::DirReg(0), dst)
 		}
 		Rule::reg | Rule::sp => {
-			let src = Arg::DirReg(reg_or_sp(src));
+			let src = reg_or_sp(src);
 			match dst.as_rule() {
 				Rule::addr_reg_or_sp => {
 					let dst = addr_reg_or_sp(dst);
-					Ins::Mov(size, src, Arg::IndReg(dst))
+					Ins::Mov(size, Arg::DirReg(src), Arg::IndReg(dst))
 				}
 				Rule::disp_r0 => {
 					let dst = disp_r0(dst);
-					Ins::Mov(size, src, dst)
+					Ins::Mov(size, Arg::DirReg(src), dst)
 				}
 				Rule::reg | Rule::sp => {
 					let dst = reg_or_sp(dst);
-					Ins::Mov(size, src, Arg::DirReg(dst))
+					Ins::Mov_Reg(src, dst)
 				}
 				Rule::reg_pre_dec => {
 					let dst = reg_pre_dec(dst);
-					Ins::Mov(size, src, Arg::PreDec(dst))
+					Ins::Mov(size, Arg::DirReg(src), Arg::PreDec(dst))
 				}
 				_ => unreachable!("expected valid common MOV dst, found: {dst}-{}", dst.as_str()),
 			}
@@ -413,7 +408,38 @@ fn main() {
 	let input = read_to_string(&source).expect("unable to read source file");
 
 	//let target = args.next().unwrap_or("asm.out".to_string());
+	let out = parser(&input);
 
+	println!("values: {}", out.values.len());
+	for (name, value) in out.values {
+		println!("  {name} = {value}");
+	}
+	println!("labels: {}", out.labels.len());
+	for (name, addr) in out.labels {
+		println!("  {name} : ${addr:0X?}");
+	}
+	println!("sections: {}", out.sections.len());
+	for (addr, section) in out.sections {
+		println!("  addr: ${addr:0X}");
+		for ins in section {
+			println!("    {ins:X?}");
+		}
+	}
+}
+
+struct Output {
+	sections: HashMap::<u32, Vec<Ins>>,
+	labels: HashMap::<Label, Option<u32>>,
+	values: HashMap<Label, i32>,
+}
+
+enum LabelType {
+	Unknown,
+	Label,
+	Value(i32),
+}
+
+fn parser(input: &str) -> Output {
 	let mut repetitions = None;
 	let mut skey = 0;
 
@@ -430,16 +456,27 @@ fn main() {
 					match value.as_rule() {
 						Rule::hex | Rule::bin | Rule::dec => {
 							let num = num8s(value);
-							sections.entry(skey)
-								.or_insert(Vec::default())
-								.push(Ins::Const_Imm(Size::Byte, num as i64));
-							continue;
+							Ins::Const_Imm(Size::Byte, num as i64)
 						}
 						Rule::lbl => {
-							// TODO - srenshaw - If this label is already defined, then if it's a value label,
-							// use the defined value. If it's a address label, then use the address. If this
-							// label is not defined, then save it as a Const_Label for resolving later.
-							todo!("implement label constants");
+							let label: Label = value.as_str().into();
+							match labels.get(&label) {
+								None => {
+									labels.insert(label.clone(), LabelType::Unknown);
+									Ins::Const_Label(Size::Byte, label)
+								}
+								Some(LabelType::Unknown) |
+								Some(LabelType::Label) => {
+									Ins::Const_Label(Size::Byte, label)
+								}
+								Some(LabelType::Value(val)) => {
+									if (i8::MIN as i32..i8::MAX as i32).contains(val) {
+										Ins::Const_Imm(Size::Byte, *val as i64)
+									} else {
+										panic!("value too big for byte-constant directive");
+									}
+								}
+							}
 						}
 						_ => unreachable!("unexpected constant value: {value}"),
 					}
@@ -450,16 +487,27 @@ fn main() {
 					match value.as_rule() {
 						Rule::hex | Rule::bin | Rule::dec => {
 							let num = num16s(value);
-							sections.entry(skey)
-								.or_insert(Vec::default())
-								.push(Ins::Const_Imm(Size::Word, num as i64));
-							continue;
+							Ins::Const_Imm(Size::Word, num as i64)
 						}
 						Rule::lbl => {
-							// TODO - srenshaw - If this label is already defined, then if it's a value label,
-							// use the defined value. If it's a address label, then use the address. If this
-							// label is not defined, then save it as a Const_Label for resolving later.
-							todo!("implement label constants");
+							let label: Label = value.as_str().into();
+							match labels.get(&label) {
+								None => {
+									labels.insert(label.clone(), LabelType::Unknown);
+									Ins::Const_Label(Size::Word, label)
+								}
+								Some(LabelType::Unknown) |
+								Some(LabelType::Label) => {
+									Ins::Const_Label(Size::Word, label)
+								}
+								Some(LabelType::Value(val)) => {
+									if (i16::MIN as i32..i16::MAX as i32).contains(val) {
+										Ins::Const_Imm(Size::Word, *val as i64)
+									} else {
+										panic!("value too big for word-constant directive");
+									}
+								}
+							}
 						}
 						_ => unreachable!("unexpected constant value: {value}"),
 					}
@@ -470,16 +518,23 @@ fn main() {
 					match value.as_rule() {
 						Rule::hex | Rule::bin | Rule::dec => {
 							let num = num32s(value);
-							sections.entry(skey)
-								.or_insert(Vec::default())
-								.push(Ins::Const_Imm(Size::Long, num as i64));
-							continue;
+							Ins::Const_Imm(Size::Long, num as i64)
 						}
 						Rule::lbl => {
-							// TODO - srenshaw - If this label is already defined, then if it's a value label,
-							// use the defined value. If it's a address label, then use the address. If this
-							// label is not defined, then save it as a Const_Label for resolving later.
-							todo!("implement label constants");
+							let label: Label = value.as_str().into();
+							match labels.get(&label) {
+								None => {
+									labels.insert(label.clone(), LabelType::Unknown);
+									Ins::Const_Label(Size::Long, label)
+								}
+								Some(LabelType::Unknown) |
+								Some(LabelType::Label) => {
+									Ins::Const_Label(Size::Long, label)
+								}
+								Some(LabelType::Value(val)) => {
+									Ins::Const_Imm(Size::Long, *val as i64)
+								}
+							}
 						}
 						_ => unreachable!("unexpected constant value: {value}"),
 					}
@@ -487,7 +542,6 @@ fn main() {
 				Rule::dir_org => {
 					let mut args = line.into_inner();
 					skey = num32s(args.next().unwrap()) as u32;
-					println!("set skey to {skey}");
 					continue;
 				}
 				Rule::dir_repeat => {
@@ -500,7 +554,7 @@ fn main() {
 				}
 				Rule::dir_endr => {
 					if let Some((num, instrs)) = repetitions {
-						let section = sections.entry(skey).or_insert(Vec::default());
+						let section = sections.entry(skey).or_default();
 						for _ in 0..num {
 							section.extend_from_slice(&instrs);
 						}
@@ -523,9 +577,9 @@ fn main() {
 					let mut args = line.into_inner();
 					let src = num8s(args.next().unwrap());
 					let dst = reg(args.next().unwrap());
-					Ins::AddImm(src,dst)
+					Ins::Add_Imm(src,dst)
 				}
-				Rule::ins_add_reg => reg2_inst(line, Ins::AddReg),
+				Rule::ins_add_reg => reg2_inst(line, Ins::Add_Reg),
 				Rule::ins_addc => reg2_inst(line, Ins::AddC),
 				Rule::ins_addv => reg2_inst(line, Ins::AddV),
 				Rule::ins_and_byt => {
@@ -536,15 +590,15 @@ fn main() {
 						args.next().unwrap().as_rule(),
 						"expected @(R0,GBR) as AND dst",
 					);
-					Ins::AndByte(src)
+					Ins::And_Byte(src)
 				}
 				Rule::ins_and_imm => {
 					let mut args = line.into_inner();
 					let src = num8u(args.next().unwrap());
 					assert_eq!(0, reg_or_sp(args.next().unwrap()), "expected R0 as AND dst");
-					Ins::AndImm(src)
+					Ins::And_Imm(src)
 				}
-				Rule::ins_and_reg => reg2_inst(line, Ins::AndReg),
+				Rule::ins_and_reg => reg2_inst(line, Ins::And_Reg),
 				Rule::ins_bf => label_inst(line, Ins::Bf),
 				Rule::ins_bfs => label_inst(line, Ins::BfS),
 				Rule::ins_bra => label_inst(line, Ins::Bra),
@@ -559,9 +613,9 @@ fn main() {
 					let mut args = line.into_inner();
 					let src = num8s(args.next().unwrap());
 					assert_eq!(0, reg_or_sp(args.next().unwrap()), "expected R0 as CMP/EQ dst");
-					Ins::CmpEqImm(src)
+					Ins::CmpEq_Imm(src)
 				}
-				Rule::ins_cmp_eq_reg => reg2_inst(line, Ins::CmpEqReg),
+				Rule::ins_cmp_eq_reg => reg2_inst(line, Ins::CmpEq_Reg),
 				Rule::ins_cmp_ge => reg2_inst(line, Ins::CmpGE),
 				Rule::ins_cmp_gt => reg2_inst(line, Ins::CmpGT),
 				Rule::ins_cmp_hi => reg2_inst(line, Ins::CmpHI),
@@ -625,8 +679,8 @@ fn main() {
 						_ => unreachable!("expected GBR, SR, or VBR as LDC.L dst"),
 					}
 				}
-				Rule::ins_macw => reg2_inst(line, Ins::MacWord),
-				Rule::ins_macl => reg2_inst(line, Ins::MacLong),
+				Rule::ins_macw => reg2_inst(line, Ins::Mac_Word),
+				Rule::ins_macl => reg2_inst(line, Ins::Mac_Long),
 				Rule::ins_mov => continue,
 				Rule::ins_movb => {
 					let mut args = line.clone().into_inner();
@@ -710,7 +764,6 @@ fn main() {
 				Rule::ins_negc => reg2_inst(line, Ins::NegC),
 				Rule::ins_nop => Ins::Nop,
 				Rule::ins_not => reg2_inst(line, Ins::Not),
-				Rule::ins_or => continue,
 				Rule::ins_or_byt => {
 					let mut args = line.into_inner();
 					let src = num8u(args.next().unwrap());
@@ -719,17 +772,17 @@ fn main() {
 						args.next().unwrap().as_rule(),
 						"expected @(R0,GBR) as AND dst",
 					);
-					Ins::AndByte(src)
+					Ins::Or_Byte(src)
 				}
 				Rule::ins_or_imm => {
 					let mut args = line.into_inner();
 					let src = num8u(args.next().unwrap());
 					assert_eq!(0, reg_or_sp(args.next().unwrap()), "expected R0 as AND dst");
-					Ins::AndImm(src)
+					Ins::Or_Imm(src)
 				}
-				Rule::ins_or_reg => reg2_inst(line, Ins::AndReg),
+				Rule::ins_or_reg => reg2_inst(line, Ins::Or_Reg),
 				Rule::ins_rotcl => reg_inst(line, Ins::RotCL),
-				Rule::ins_rotcr => reg_inst(line, Ins::RotCL),
+				Rule::ins_rotcr => reg_inst(line, Ins::RotCR),
 				Rule::ins_rotl => reg_inst(line, Ins::RotL),
 				Rule::ins_rotr => reg_inst(line, Ins::RotR),
 				Rule::ins_rte => Ins::Rte,
@@ -749,76 +802,44 @@ fn main() {
 				Rule::ins_stc => {
 					let mut args = line.into_inner();
 					let src = args.next().unwrap();
+					let reg = reg_or_sp(args.next().unwrap());
 					match src.as_rule() {
-						Rule::gbr => {
-							let reg = reg_or_sp(args.next().unwrap());
-							Ins::StcGBR(reg)
-						}
-						Rule::sr => {
-							let reg = reg_or_sp(args.next().unwrap());
-							Ins::StcSR(reg)
-						}
-						Rule::vbr => {
-							let reg = reg_or_sp(args.next().unwrap());
-							Ins::StcVBR(reg)
-						}
+						Rule::gbr => Ins::StcGBR(reg),
+						Rule::sr => Ins::StcSR(reg),
+						Rule::vbr => Ins::StcVBR(reg),
 						_ => unreachable!("expected GBR, SR, or VBR for STC dst"),
 					}
 				}
 				Rule::ins_stc_dec => {
 					let mut args = line.into_inner();
 					let src = args.next().unwrap();
+					let reg = reg_pre_dec(args.next().unwrap());
 					match src.as_rule() {
-						Rule::gbr => {
-							let reg = reg_pre_dec(args.next().unwrap());
-							Ins::StcGBR_Dec(reg)
-						}
-						Rule::sr => {
-							let reg = reg_pre_dec(args.next().unwrap());
-							Ins::StcSR_Dec(reg)
-						}
-						Rule::vbr => {
-							let reg = reg_pre_dec(args.next().unwrap());
-							Ins::StcVBR_Dec(reg)
-						}
+						Rule::gbr => Ins::StcGBR_Dec(reg),
+						Rule::sr => Ins::StcSR_Dec(reg),
+						Rule::vbr => Ins::StcVBR_Dec(reg),
 						_ => unreachable!("expected GBR, SR, or VBR for STC.L dst"),
 					}
 				}
 				Rule::ins_sts => {
 					let mut args = line.into_inner();
 					let src = args.next().unwrap();
+					let reg = reg_or_sp(args.next().unwrap());
 					match src.as_rule() {
-						Rule::macl => {
-							let reg = reg_or_sp(args.next().unwrap());
-							Ins::StsMACL(reg)
-						}
-						Rule::mach => {
-							let reg = reg_or_sp(args.next().unwrap());
-							Ins::StsMACH(reg)
-						}
-						Rule::pr => {
-							let reg = reg_or_sp(args.next().unwrap());
-							Ins::StsPR(reg)
-						}
+						Rule::macl => Ins::StsMACL(reg),
+						Rule::mach => Ins::StsMACH(reg),
+						Rule::pr => Ins::StsPR(reg),
 						_ => unreachable!("expected MACL, MACH, PR for STS dst")
 					}
 				}
 				Rule::ins_sts_dec => {
 					let mut args = line.into_inner();
 					let src = args.next().unwrap();
+					let reg = reg_pre_dec(args.next().unwrap());
 					match src.as_rule() {
-						Rule::macl => {
-							let reg = reg_pre_dec(args.next().unwrap());
-							Ins::StsMACL_Dec(reg)
-						}
-						Rule::mach => {
-							let reg = reg_pre_dec(args.next().unwrap());
-							Ins::StsMACH_Dec(reg)
-						}
-						Rule::pr => {
-							let reg = reg_pre_dec(args.next().unwrap());
-							Ins::StsPR_Dec(reg)
-						}
+						Rule::macl => Ins::StsMACL_Dec(reg),
+						Rule::mach => Ins::StsMACH_Dec(reg),
+						Rule::pr => Ins::StsPR_Dec(reg),
 						_ => unreachable!("expected MACL, MACH, or PR for STS.L dst"),
 					}
 				}
@@ -833,7 +854,6 @@ fn main() {
 					let imm = num8u(args.next().unwrap());
 					Ins::TrapA(imm)
 				}
-				Rule::ins_tst => continue,
 				Rule::ins_tst_byt => {
 					let mut args = line.into_inner();
 					let src = num8u(args.next().unwrap());
@@ -842,16 +862,15 @@ fn main() {
 						args.next().unwrap().as_rule(),
 						"expected @(R0,GBR) as AND dst",
 					);
-					Ins::AndByte(src)
+					Ins::Tst_Byte(src)
 				}
 				Rule::ins_tst_imm => {
 					let mut args = line.into_inner();
 					let src = num8u(args.next().unwrap());
 					assert_eq!(0, reg_or_sp(args.next().unwrap()), "expected R0 as AND dst");
-					Ins::AndImm(src)
+					Ins::Tst_Imm(src)
 				}
-				Rule::ins_tst_reg => reg2_inst(line, Ins::AndReg),
-				Rule::ins_xor => continue,
+				Rule::ins_tst_reg => reg2_inst(line, Ins::Tst_Reg),
 				Rule::ins_xor_byt => {
 					let mut args = line.into_inner();
 					let src = num8u(args.next().unwrap());
@@ -860,34 +879,77 @@ fn main() {
 						args.next().unwrap().as_rule(),
 						"expected @(R0,GBR) as AND dst",
 					);
-					Ins::AndByte(src)
+					Ins::Xor_Byte(src)
 				}
 				Rule::ins_xor_imm => {
 					let mut args = line.into_inner();
 					let src = num8u(args.next().unwrap());
 					assert_eq!(0, reg_or_sp(args.next().unwrap()), "expected R0 as AND dst");
-					Ins::AndImm(src)
+					Ins::Xor_Imm(src)
 				}
-				Rule::ins_xor_reg => reg2_inst(line, Ins::AndReg),
+				Rule::ins_xor_reg => reg2_inst(line, Ins::Xor_Reg),
 				Rule::ins_xtrct => reg2_inst(line, Ins::Xtrct),
 				Rule::val_line => {
 					let mut args = line.into_inner();
-					let label = args.next().unwrap().as_str();
-					let value = args.next().unwrap().as_str();
-					println!("Value: {label} = {value}");
+					let label: Label = args.next().unwrap().as_str().into();
+					let value = num32s(args.next().unwrap());
+					if labels.contains_key(&label) {
+						panic!("duplicate label: '{label}'");
+					}
+					labels.insert(label, LabelType::Value(value));
 					continue;
 				}
 				Rule::lbl_line => {
 					let s = line.as_str();
 					let label: Label = s[..s.len()-1].into();
-					println!("Label: {label}");
+					if labels.contains_key(&label) {
+						panic!("duplicate label: '{label}'");
+					}
+					labels.insert(label, LabelType::Label);
 					continue;
 				}
 				Rule::EOI => continue,
 				_ => unreachable!("unexpected token found: {line}"),
 			};
-			println!("{ins:?}");
+
+			if let Some((_, repeat)) = &mut repetitions {
+				repeat.push(ins);
+			} else {
+				let section = sections.entry(skey).or_default();
+				section.push(ins);
+			}
 		}
+	}
+
+	if repetitions.is_some() {
+		panic!("missing an .aendr directive");
+	}
+
+	let mut out_labels = HashMap::<Label, Option<u32>>::default();
+	let mut out_values = HashMap::<Label, i32>::default();
+	let mut unknown_label_count = 0;
+	for (label, lbl_type) in labels {
+		match lbl_type {
+			LabelType::Unknown => {
+				eprintln!("Unknown label: '{label}'");
+				unknown_label_count += 1;
+			}
+			LabelType::Label => {
+				out_labels.insert(label, None);
+			}
+			LabelType::Value(val) => {
+				out_values.insert(label, val);
+			}
+		}
+	}
+	if unknown_label_count > 0 {
+		panic!("{unknown_label_count} unknown labels");
+	}
+
+	Output {
+		sections,
+		labels: out_labels,
+		values: out_values,
 	}
 }
 
