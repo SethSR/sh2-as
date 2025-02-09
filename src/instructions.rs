@@ -333,4 +333,5 @@ pub(crate) enum Ins {
 	/*** Directives ***/
 	Const_Imm(Size, i64),
 	Const_Label(Size, Label),
+	Label(Label),
 }
