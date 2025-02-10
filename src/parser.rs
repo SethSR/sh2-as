@@ -956,6 +956,24 @@ mod can_parse {
 	#[test]
 	fn dt() { check!(Rule::ins_dt, "dt r14") }
 
+	#[test]
+	fn exts() {
+		check!(Rule::ins_extsb, "exts.b r2,r5");
+		check!(Rule::ins_extsw, "exts.w r7,sp");
+	}
+
+	#[test]
+	fn extu() {
+		check!(Rule::ins_extub, "extu.b r9,r1");
+		check!(Rule::ins_extuw, "extu.w sp,r4");
+	}
+
+	#[test]
+	fn jmp() {
+		check!(Rule::ins_jmp, "jmp @r9");
+		check!(Rule::ins_jmp, "jmp @sp");
+	}
+
 	//#[test]
 	//fn () { check!(Rule::ins_, "") }
 }
@@ -1096,6 +1114,35 @@ trget_t:
 	.aendr
 	ROTCL R2    ; R2 = Quotient (1's complement)
 	ADDC  R3,R2 ; Increments and takes 2's complement if the MSB of the quotient is 1. R2 = Quotient (2's complement)
+")
+	}
+
+	#[test]
+	fn dt() {
+		check!("
+	MOV #4,R5 ; Sets the number of loops
+LOOP:
+	ADD R0,R1
+	DT  R5    ; Decrements the R5 value and checks whether it has become 0.
+	BF  LOOP  ; Branches to LOOP if T=0. (In this example, loops 4 times.)
+")
+	}
+
+	#[test]
+	fn exts() {
+		check!("
+	EXTS.B R0,R1
+	EXTS.W R0,R1
+")
+	}
+
+	#[test]
+	fn extu() {
+		check!("
+	EXTU.B R0,R1
+	EXTU.W R0,R1
+")
+	}
 ")
 	}
 }
