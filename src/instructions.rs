@@ -1,7 +1,22 @@
 use crate::{Arg, Label, Reg, Size};
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum Asm {
+	/// Assembler Directive
+	Dir(Dir),
+	/// Assembler Instruction
+	Ins(Ins),
+}
+
+impl From<Dir> for Asm {
+	fn from(dir: Dir) -> Self { Self::Dir(dir) }
+}
+
+impl From<Ins> for Asm {
+	fn from(ins: Ins) -> Self { Self::Ins(ins) }
+}
+
 #[allow(non_camel_case_types)]
-//#[allow(upper_case_acronyms)]
 #[derive(Debug, Clone, PartialEq, Eq)]
 //    | Instruction       | Bit Layout       | Operation          | Cycles  | T Bit  |
 pub(crate) enum Ins {
@@ -329,9 +344,22 @@ pub(crate) enum Ins {
 	/// | Rm,Rn             | 0010nnnnmmmm1101 | Center 32 bits of  | 1       | -      |
 	/// |                   |                  | Rm and Rn -> Rn    |         |        |
 	Xtrct(Reg, Reg),
+}
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Dir {
 	/*** Directives ***/
-	Const_Imm(Size, i64),
-	Const_Label(Size, Label),
+	ConstImmByte(u8),
+	ConstImmWord(u16),
+	ConstImmLong(u32),
+	ConstLabelLong(Label),
+	Org(u32),
+	Repeat(u8),
+	EndRepeat,
+	Include(std::path::PathBuf),
+	BinInclude(std::path::PathBuf),
+	Align(u8),
+
 	Label(Label),
 }
+

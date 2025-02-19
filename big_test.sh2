@@ -1,0 +1,889 @@
+	.macro PushAll
+	mov.l r0,@-sp
+	mov.l r1,@-sp
+	mov.l r2,@-sp
+	mov.l r3,@-sp
+	mov.l r4,@-sp
+	mov.l r5,@-sp
+	mov.l r6,@-sp
+	mov.l r7,@-sp
+	mov.l r8,@-sp
+	mov.l r9,@-sp
+	mov.l r10,@-sp
+	mov.l r11,@-sp
+	mov.l r12,@-sp
+	mov.l r13,@-sp
+	mov.l r14,@-sp
+	sts.l pr,@-sp
+	.endm
+
+	.macro PopAll
+	lds.l @sp+,pr
+	mov.l @sp+,r14
+	mov.l @sp+,r13
+	mov.l @sp+,r12
+	mov.l @sp+,r11
+	mov.l @sp+,r10
+	mov.l @sp+,r9
+	mov.l @sp+,r8
+	mov.l @sp+,r7
+	mov.l @sp+,r6
+	mov.l @sp+,r5
+	mov.l @sp+,r4
+	mov.l @sp+,r3
+	mov.l @sp+,r2
+	mov.l @sp+,r1
+	mov.l @sp+,r0
+	.endm
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
+	.org $6004000 		;Base address for a BIN
+
+;Set up the VDP2 registers
+	mov.l VDP2_Regs,r11
+	mov.l ScreenMode,r6
+	add #$E,r11				;$25f8000E RAMCTL - Ram Control Register
+	mov.w	r6,@r11			;Set Screen Mode
+
+	add #$2e,r11			;$25f8003C MPOFN - Map Offset Register
+	mov	#0,r2
+	mov.w r2,@r11
+
+	add #$3c,r11	;$25f80078 - ZMXIN0 Co-ord Increment register
+	mov.w r2,@-r11	;$25f80076 - SCYDN0 Screen Scroll Value (Vert Fraction)
+	mov.w r2,@-r11	;$25f80074 - SCYIN0 Screen Scroll Value (Vert Integer)
+	mov.w r2,@-r11	;$25f80072 - SCXDN0 Screen Scroll Value (Horiz Fraction)
+	mov.w r2,@-r11	;$25f80070 - SCXIN0 Screen Scroll Value (Horiz Integer)
+
+	add #-72,r11	;$25f80028 CHCTLA - Character control (NBG0, NBG1)
+	mov	#$12,r2
+	mov.w r2,@r11
+
+	add	#-8,r11		;$25f80020 BGON - Screen Display Enable
+	mov	#$101,r8
+	mov.w r8,@r11
+
+	add	#-32,r11	;$25f80020 TVMD - TV Mode
+	mov.w bit15,r10	;DISP bit=1
+	mov.w r10,@r11
+
+;Set Palette
+	mov.l VDP2_CRAM,r6		;
+	mov.l AdrPalette,r8		;Palette
+	mov	#4,r0				;PaletteEntries
+
+PaletteLoop:
+	mov.w @r8+,r1
+	mov.w r1,@r6
+	add	#2,r6
+
+	dt r0		;Dec R0
+	bf PaletteLoop
+
+	mov.l #UserRam,r14
+
+	mov #0,r0
+	mov.l r0,@(UserRam_CursorX,r14)
+	mov.l r0,@(UserRam_CursorY,r14)
+
+	bra ProgramStart
+
+	.align 4
+
+bit15:
+	.dc.w -32768
+deltaainc:
+	.dc.w 258
+AdrPalette:
+	.dc.l Palette
+
+VDP2_Regs:
+	.dc.l $25f80000
+VDP2_CRAM:
+	.dc.l $25F00000
+
+ScreenMode:
+	.dc.l %1100111111111111	;RGB 5 bits
+
+	.ltorg
+
+	.align 4
+
+ProgramStart:
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
+	;bra ExampleMoves
+	;nop
+
+	;bra ExampleAddsSubs
+	;nop
+
+	bra ExampleCallsAndJumps
+	nop
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
+;# Marks immediate
+
+;Source is on LEFT of comma
+;Destination is on the RIGHT of comma
+
+;-128 to +127 can be stored in the assembled command word
+
+ExampleMoves:
+
+	mov #127,r0                  ;Positive number
+
+	mov #-1,r1                   ;Negative numbers are sign extended
+
+	mov #-128,r2                 ;Negative numbers are sign extended
+
+	bsr Monitor3                 ;Show R0,R1,R2
+	nop                          ;Must Put a NOP after BSR (Delay slot)
+
+;NOP - NO OPERATION - Does nothing - this is just a 'spacer' after a command
+;with a delay slot
+
+;This will be moved into literal table
+;It must be neerby! it's defined by a LTORG command
+
+	mov #12345678,r0             ;Decimal
+
+	mov #%1010101010101010,r1    ;Binary  %
+
+	mov #$66606660,r2            ;Hexadecimal $
+
+	mov #'ABCD',r3               ;Ascii '
+
+	bsr Monitor6                 ;Show R0,R1,R2,R3,R4,R5
+	nop                          ;Must Put a NOP after BSR (Delay slot)
+
+;We can transfer values between registers
+
+	mov r0,r1				;Copy R0 -> R1
+	mov r0,r2				;Copy R0 -> R2
+	mov r1,r14				;Copy R1 -> R14
+
+	bsr Monitor3			;Show R0,R1,R2
+	nop
+
+;R15 has a special purpose, the Stack pointer!
+;R15 / SP have the same meaning - Register 15
+;Don't use it for now!
+
+	mov r15,r0				;Copy R15 -> R0
+	mov sp,r1				;Copy R15 -> R1
+
+	bsr Monitor3			;Show R0,R1,R2
+	nop						;Must Put a NOP after BSR (Delay slot)
+
+;We can load an address
+	mov.l #TestValue,r5		;Load address of TestValue into R5
+	mov.l #TestValue2,r4	;Load address of TestValue2 into R4
+
+;... Then use that address as a source to read data
+
+	mov.l @r5,r0	;Move 32 bit value from address in R5 into R0
+
+	mov.w @r5,r1	;Move 16 bit value from address in R5 into R1
+
+	mov.b @r4,r2	;Move 8 bit value from address in R4 into R2
+
+	mov @r5,r3		;If we don't specify a .B .W .L
+					;MOV will default to L
+
+;Most commands default to .L - but a few commands are 16 bit only and default to .W
+
+	bsr Monitor6			;Show R0,R1,R2,R3,R4,R5
+	nop
+
+
+	mov.b @r4+,r0	;Move 8 bit value from R4 into R0, and inc R4
+	mov.b @r4+,r1	;Move 8 bit value from R4 into R1, and inc R4
+	mov.b @r4+,r2	;Move 8 bit value from R4 into R2, and inc R4
+	mov.b @r4+,r3	;Move 8 bit value from R4 into R3, and inc R4
+
+	bsr Monitor6			;Show R0,R1,R2,R3,R4,R5
+	nop
+
+	bra ExampleDone
+	nop
+
+TestValue:
+	.dc.l $FEDCBA98	;Define a long (32 bit)
+TestValue2:
+	.dc.l $12345678	;Define a long (32 bit)
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
+ExampleAddsSubs:
+	mov #2,r0
+	mov #2,r1
+	mov #1,r2
+
+	bsr Monitor3  ;Show R0,R1,R2
+	nop           ;Must Put a NOP after BSR (Delay slot)
+
+	add r2,r0     ;r0=r0+r2
+
+	sub r2,r1     ;r1=r1+r2
+
+	bsr Monitor3  ;Show R0,R1,R2
+	nop           ;Must Put a NOP after BSR (Delay slot)
+
+	add r2,r0     ;r0=r0+r2
+
+	sub r2,r1     ;r1=r1+r2
+
+	bsr Monitor3  ;Show R0,R1,R2
+	nop           ;Must Put a NOP after BSR (Delay slot)
+
+	add #1,r0     ;r0=r0+1
+
+	add #-1,r1    ;r0=r0-1 ... There is no SUB #1
+
+	;sub #1,r1    ;No such command!
+
+	bsr Monitor3  ;Show R0,R1,R2
+	nop           ;Must Put a NOP after BSR (Delay slot)
+
+	bra ExampleDone
+	nop
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
+ExampleCallsAndJumps:
+
+	bsr ShowHello		;Call the sub ShowHello
+	nop						;(Return address into PR)
+
+	bsr NewLine
+	nop					;BSR & JSR have a delay slot
+
+;Branch can be used when destination is neerby
+
+	mov #'A',r0			;Load R0 with 'A'
+	bsr PrintChar		;Branch to subroutine Printchar
+
+	;mov #'?',r0		;Delay slot!?
+	nop
+
+;Jump only works with a register containing address,
+; but destination can be anywhere
+
+	mov #'B',r0
+	mov #PrintChar,r13
+	jsr @r13			;Jump to address in r13
+	nop
+
+;Branch has no return part, it's like a basic Goto
+	bra SkipC			;Branch (no return)
+	nop
+
+	mov #'C',r0
+	mov #PrintChar,r13
+	jsr @r13			;Jump to address in r13
+	nop
+
+SkipC:
+
+	mov #'D',r0
+	mov #PrintChar,r13
+	jsr @r13			;Jump to address in r13
+	nop
+
+;Jump is like Branch, but has no range limit
+	;and only works with a register
+
+	mov #SkipE,r13
+	jmp @r13			;Jump can only go to a register
+	nop
+
+	mov #'E',r0
+	mov #PrintChar,r13
+	jsr @r13			;Jump to address in r13
+	nop
+
+SkipE:
+
+	mov #'F',r0
+	mov #PrintChar,r13
+	jsr @r13			;Jump to address in r13
+	nop
+
+	bsr NewLine
+	nop
+
+;Far Branches/Jumps
+
+	mov #ShowHello-(*+6),r13     ;Calculate offset to ShowHello
+	bsrf r13
+	nop
+
+	mov #ExampleDone-(*+6),r13   ;Calculate offset to ExampleDone
+	braf r13
+	nop
+
+	mov #Monitor3,r13
+	jsr @r13                     ;Show R0,R1,R2
+	nop                          ;Must Put a NOP after BSR (Delay slot)
+
+	bra ExampleDone
+	nop
+
+ShowHello:
+
+	sts.l pr,@-sp    ;Back up PR (used by BSR/RTS)
+
+		mov #'H',r0        ;Load R0 with 'H'
+		bsr PrintChar      ;Branch to subroutine Printchar
+		nop                ;Delay slot
+
+		mov #'E',r0        ;Load R0 with 'E'
+		bsr PrintChar      ;Branch to subroutine Printchar
+		nop                ;Delay slot
+
+		mov #'L',r0        ;Load R0 with 'L'
+		bsr PrintChar      ;Branch to subroutine Printchar
+		nop                ;Delay slot
+
+		mov #'L',r0        ;Load R0 with 'L'
+		bsr PrintChar      ;Branch to subroutine Printchar
+		nop                ;Delay slot
+
+		bsr PrintChar      ;Branch to subroutine Printchar
+		mov #'O',r0        ;Load R0 with 'O' - in the delay slot!
+
+	lds.l @sp+,pr    ;Restore PR (used by BSR/RTS)
+
+	rts              ;Return to the caller
+	nop
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
+ExampleDone:
+	bsr PageFlip ;Flip Buffer (for 32x)
+	nop
+
+InfLoop:
+	bra	InfLoop
+	nop
+
+;Anything too big for a 16 bit command (EG #$12345678) will be put
+; at LTORG automatically by our assembler!
+
+	.ltorg       ;Literal Org, Values too large
+	             ;will be stored here by the assembler
+
+	.align 4     ;Ensure we're still 32 bit aligned
+	             ;(4 bytes = 32 bit)
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
+Monitor3:
+	pushall
+		mov sp,r3
+		add #60,r3     ;Point to first pushed reg
+		mov #0,r1      ;Reg label
+
+		mov #3,r5      ;Reg per line
+
+		mov #3,r4      ;Reg count
+MonitorAgain3:
+		mov.l @r3,r2   ;Get reg
+		add #-4,r3     ;Move to next reg
+
+		bsr ShowReg
+		nop
+
+		add #1,r1      ;Reg label
+
+		dt r5
+		bf MonitorNoNL3
+
+		mov #3,r5      ;Reg per line
+		bsr NewLine
+		nop
+MonitorNoNL3:
+		dt r4
+		bf MonitorAgain3
+
+		bsr NewLine
+		nop
+	popall
+	rts
+	nop
+
+Monitor6:
+	pushall
+		mov sp,r3
+		add #60,r3	;Point to first pushed reg
+		mov #0,r1 	;Reg label
+
+		mov #3,r5	;Reg per line
+
+		mov #6,r4	;Reg count
+MonitorAgain6:
+		mov.l @r3,r2	;Get reg
+		add #-4,r3		;Move to next reg
+
+		bsr ShowReg
+		nop
+
+		add #1,r1		;Reg label
+
+		dt r5
+		bf MonitorNoNL6
+
+		mov #3,r5	;Reg per line
+		bsr NewLine
+		nop
+MonitorNoNL6:
+		dt r4
+		bf MonitorAgain6
+
+		bsr NewLine
+		nop
+	popall
+	rts
+	nop
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
+	.align 4
+
+Monitor:
+	pushall
+		mov sp,r3
+		stc sr,r6
+		add #60,r3	;Point to first pushed reg
+		mov #0,r1 	;Reg label
+
+		mov #3,r5	;Reg per line
+
+		mov #15,r4	;Reg count
+MonitorAgain:
+		mov.l @r3,r2	;Get reg
+		add #-4,r3		;Move to next reg
+
+		bsr ShowReg
+		nop
+
+		add #1,r1		;Reg label
+
+		dt r5
+		bf MonitorNoNL
+
+		mov #3,r5	;Reg per line
+		bsr NewLine
+		nop
+MonitorNoNL:
+		dt r4
+		bf MonitorAgain
+
+		mov sp,r2
+		mov #'S',r0
+		mov #'P',r1
+		add #64,r2		;Correct SP
+		bsr ShowRegSpec
+		nop
+
+		mov.l @r3,r2		;Return addr
+		mov #'P',r0
+		mov #'C',r1
+		bsr ShowRegSpec
+		nop
+
+		mov r6,r2 ;stc SR,r2
+		mov #'S',r0
+		mov #'R',r1
+		bsr ShowRegSpec
+		nop
+
+		bsr NewLine
+		nop
+
+		stc gbr,r2
+		mov #'G',r0
+		mov #'B',r1
+		bsr ShowRegSpec
+		nop
+
+		stc vbr,r2
+		mov #'V',r0
+		mov #'B',r1
+		bsr ShowRegSpec
+		nop
+
+		bsr NewLine
+		nop
+
+		sts MACH,r2
+		mov #'M',r0
+		mov #'H',r1
+		bsr ShowRegSpec
+		nop
+
+		sts MACL,r2
+		mov #'M',r0
+		mov #'L',r1
+		bsr ShowRegSpec
+		nop
+
+		bsr NewLine
+		nop
+	popall
+	rts
+	nop
+
+ShowRegSpec:	;R0R1:R2
+	sts.l pr,@-sp
+		bsr PrintChar
+		nop
+
+		mov r1,r0
+		bsr PrintChar
+		nop
+
+		bra ShowRegB
+		nop
+
+ShowReg:	;R1:R2
+	sts.l pr,@-sp
+		mov #'R',r0
+		bsr PrintChar
+		nop
+
+		mov r1,r0
+		bsr ShowHexChar
+		nop
+ShowRegB:
+		mov #':',r0
+		bsr PrintChar
+		nop
+
+		mov r2,r0
+		bsr ShowHex32
+		nop
+
+		mov #' ',r0
+		bsr PrintChar
+		nop
+
+	lds.l @sp+,pr
+	rts
+	nop
+
+ShowHex32:			;Show R0
+	sts.l pr,@-sp
+	mov.l r0,@-sp
+	mov.l r1,@-sp
+	mov.l r2,@-sp
+		mov #8,r2
+ShowHexAgain:
+		rotl r0				;Move top nibble to bottom
+		rotl r0
+		rotl r0
+		rotl r0
+
+		bsr ShowHexChar
+		nop
+
+		dt r2
+		bf ShowHexAgain
+
+	mov.l @sp+,r2
+	mov.l @sp+,r1
+	mov.l @sp+,r0
+	lds.l @sp+,pr
+	rts
+	nop
+
+ShowHexChar:		;Show R0
+	sts.l pr,@-sp
+		mov.l r0,@-sp
+		mov.l r1,@-sp
+			and #$0f,r0
+			add #'0',r0
+			mov #'9',r1				;Char valid?
+			cmp/ge r0,r1
+			bt ShowHexDigit
+			add #7,r0				;Fix A-F
+ShowHexDigit:
+			bsr PrintChar
+			nop
+		mov.l @sp+,r1
+		mov.l @sp+,r0
+	lds.l @sp+,pr
+	rts
+	nop
+
+MemDump:
+	pushall
+		mov r1,r0
+		bsr ShowHex32
+		nop
+
+		mov #':',r0
+		bsr PrintChar
+		nop
+
+		bsr NewLine
+		nop
+MemDumpNextLine:
+		mov #8,r3			;8 bytes per line
+MemDumpByteAgain:
+		mov.b @r1+,r0
+		bsr ShowHex8
+		nop
+
+		mov #' ',r0
+		bsr PrintChar
+		nop
+
+		dt r3				;Decrement and Test
+		bf MemDumpByteAgain ;Branch if False
+
+		mov #8,r3			;8 bytes per line
+		sub r3,r1			;Back 8 chars
+MemDumpCharAgain:
+		mov.b @r1+,r0
+
+		mov #32,r4
+		CMP/GE r4,r0
+		bt MemDumpCharOK1
+		mov #'.',r0
+
+MemDumpCharOK1:
+
+		mov #127,r4
+		CMP/GE r4,r0
+		bf MemDumpCharOK2
+		mov #'.',r0
+MemDumpCharOK2:
+
+		bsr PrintChar
+		nop
+
+		dt r3				;Decrement and Test
+		bf MemDumpCharAgain ;Branch if False
+
+		bsr NewLine
+		nop
+
+		add #-8,r2
+
+		mov #0,r3
+		CMP/EQ r3,r2
+		bf MemDumpNextLine
+
+	popall
+	rts
+	nop
+
+ShowHex8:
+	sts.l pr,@-sp		;Back up PR (used by BSR/RTS)
+	mov.l r1,@-sp
+	mov.l r2,@-sp
+
+		mov r0,r1
+		rotr r0				;Move top nibble to bottom
+		rotr r0
+		rotr r0
+		rotr r0
+		bsr ShowHexChar
+		nop
+
+		mov r1,r0
+		bsr ShowHexChar
+		nop
+
+	mov.l @sp+,r2
+	mov.l @sp+,r1
+	lds.l @sp+,pr		;Restore PR (used by BSR/RTS)
+	rts 				;Return to the caller
+	nop
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
+PrintString:
+	sts.l pr,@-sp
+PrintStringAgain:
+		mov.b @r13+,r0
+		mov #-1,r1				;Compare to 255
+		cmp/eq r0,r1
+
+		bt PrintStringDone
+		nop
+
+		bsr PrintChar
+		nop
+
+		bra PrintStringAgain
+		nop
+PrintStringDone:
+	lds.l @sp+,pr
+	rts
+	nop
+
+PrintChar:	;PrintChar R0
+	sts.l mach,@-sp
+	sts.l macl,@-sp
+	PushAll
+
+		mov.l AdrUserRam,r14		;R14 points to our work ram
+
+		mov.l AdrScreenbuffer,r6		;Screen VRAM
+
+		mov.l AdrFont,r5
+
+		add #-32,r0		;No Char below space
+
+		shll r0
+		shll r0
+		shll r0		;8 bytes per char
+		add r0,r5
+
+		mov.l @(UserRam_CursorX,r14),r0
+
+		shll r0
+		shll r0
+		shll r0		;8 bytes per Horiz char
+		add r0,r6
+
+		mov.l @(UserRam_CursorY,r14),r0
+
+		shll r0
+		shll r0
+		shll r0		;8 lines per vert char
+
+		mov.l OneLineSize,r1	;320 bytes per line
+		mulu r0,r1
+
+		sts macl,r0		;Get L result of multiplication
+
+		add r0,r6		;Add Y offset
+
+		mov #7,r1
+		add r1,r6		;Move 7 pixels right (work right->left)
+
+		mov #8,r1		;Lines
+
+	NextYLine:
+		mov.l r6,@-sp
+			mov #8,r0		;Bits per line
+
+			mov.b @r5+,r3	;Get a byte
+	NextXPixel:
+			mov #1,r2		;Fill pixel
+
+			rotcr r3	;Get a bit
+			bt CharPixelSet
+			mov #0,r2		;Clear pixel
+	CharPixelSet:
+			mov.b r2,@r6	;Write pixel
+
+			add #-1,r6		;Left one pixel
+
+			dt r0
+			bf NextXPixel
+
+		mov.l @sp+,r6
+		mov.l OneLineSize,r0
+		add r0,r6		;Down a line
+
+		dt r1
+		bf NextYLine
+
+		mov.l @(UserRam_CursorX,r14),r0
+		add #1,r0
+		mov.l r0,@(UserRam_CursorX,r14)
+	PopAll
+	lds.l @sp+,macl
+	lds.l @sp+,mach
+	rts
+	nop
+
+NewLine:
+	mov.l r0,@-sp
+	mov.l r14,@-sp
+
+		mov.l AdrUserRam,r14		;R14 points to our work ram
+		mov #0,r0
+		mov.l r0,@(UserRam_CursorX,r14)
+
+		mov.l @(UserRam_CursorY,r14),r0
+		add #1,r0
+		mov.l r0,@(UserRam_CursorY,r14)
+	mov.l @sp+,r14
+	mov.l @sp+,r0
+	rts
+	nop
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
+WaitVblank:
+	mov.l VDP2_Reg_TVSTAT,r11	;$25f80004 TVSTAT - Screen Status
+VblankWait1:
+	mov.w @r11,r0
+	tst	#8,r0			;%------LS----VHOP V=Vblank H=Hblank O=Odd field P=Pal
+	bf	VblankWait1		;V=1=In Vblank
+VblankWait2:
+	mov.w @r11,r0
+	tst	#8,r0			;%------LS----VHOP V=Vblank H=Hblank O=Odd field P=Pal
+	bt	VblankWait2		;V=1=In Vblank
+	rts
+
+PageFlip:
+	rts
+
+	.align 4
+
+	.ltorg
+
+Palette:
+		 ;-BBBBBGGGGGRRRRR
+	.dc.w %0011110000000000
+	.dc.w %0000001111111111
+	.dc.w %0111111111100000
+	.dc.w %0000000000011111
+	.align 4
+
+VDP2_Reg_TVSTAT:
+	.dc.l $25f80004
+
+AdrUserRam:
+	.dc.l UserRam
+AdrFont:
+	.dc.l Font
+
+;LineSkip:
+;	.dc.l 192		;Vram is actually 512x256
+OneLineSize:
+	.dc.l 512
+;LineCount:
+;	.dc.l 224
+;LineStartAddr:
+;	.dc.l $100
+
+AdrScreenbuffer:
+	.dc.l $25e00000 ;Screenbuffer
+VDP2_VRAM:
+	.dc.l $25e00000
+
+UserRam_VdpStat = 0
+UserRam_CursorX = 4
+UserRam_CursorY = 8
+
+UserRam:
+	.dc.l 0	;VDP Stat cache
+	.dc.l 0	;Xpos
+	.dc.l 0	;Ypos
+	.dc.l 0
+	.dc.l 0
+	.dc.l 0
+
+Font:							;1bpp font - 8x8 96 characters
+	.binclude "/ResALL/Font96.FNT"

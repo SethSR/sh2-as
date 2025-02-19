@@ -1,75 +1,4 @@
-/*
-fn main() -> miette::Result<()> {
 
-	let mut args = std::env::args();
-	args.next();
-
-	let source = args.next().expect("missing source file");
-	let target = args.next().unwrap_or("asm.out".to_string());
-
-	// TODO - srenshaw - Change this to a CLI option.
-	let is_silent = true;
-
-	let file = std::fs::read_to_string(source).into_diagnostic()?;
-
-	let tokens = match lexer(&file) {
-		Ok(tokens) => tokens,
-		Err(errors) => {
-			for error in errors {
-				eprintln!("{error}");
-			}
-			return Ok(());
-		}
-	};
-
-	for token in &tokens {
-		if token.get_type() == TokenType::IdUnknown || !is_silent {
-			println!("{token:?}");
-		}
-	}
-
-	let mut data = match parser(&tokens) {
-		Ok(tables) => tables,
-		Err(errors) => {
-			for error in errors {
-				eprintln!("{error}");
-			}
-			return Ok(());
-		}
-	};
-
-	if !is_silent {
-		println!("State: initial");
-		println!("{data:?}");
-	}
-
-	let limit = 10;
-	for _ in 0..limit {
-		if resolver(&mut data) {
-			break;
-		}
-	}
-
-	if !is_silent {
-		println!("State: final");
-		println!("{data:?}");
-	}
-
-	// TODO - srenshaw - This is just for debugging purposes. This is not the "real" output!
-	for (_, section) in data.sections {
-		let output = section
-			.iter()
-			.map(|state| state.completed_or(0xDEAD))
-			.flat_map(|word| [(word >> 8) as u8, word as u8])
-			.collect::<Vec<u8>>();
-		std::fs::write(&target, output).into_diagnostic()?;
-	}
-
-	Ok(())
-}
-*/
-
-use std::collections::HashMap;
 use std::fs::read_to_string;
 
 use tracing::{
@@ -78,16 +7,18 @@ use tracing::{
 };
 
 mod instructions;
-use instructions::Ins;
 
 mod arg;
 use arg::Arg;
 
 mod parser;
-use parser::{Output, parser};
+use parser::{parser, LabelMap, Output};
 
-mod resolver;
-use resolver::{Item, resolver};
+mod unroller;
+use unroller::unroller;
+
+//mod resolver;
+//use resolver::resolver;
 
 #[derive(Debug, PartialEq, Eq, Clone, Copy)]
 enum Size {
@@ -110,47 +41,132 @@ fn main() {
 
 	//let target = args.next().unwrap_or("asm.out".to_string());
 
-	let Output { sections, mut labels, values } = parser(&input);
-
+	let Output { assembly, mut labels } = parser(&input);
 /*
 	println!("values: {}", values.len());
 	for (name, value) in &values {
 		println!("  {name} = {value}");
 	}
+*/
 	println!("labels: {}", labels.len());
 	for (name, addr) in &labels {
-		println!("  {name} : ${addr:0X?}");
+		println!("  {name} : {addr:0X?}");
+	}
+/*
+	println!("assembly: {}", assembly.len());
+	for (i, ins) in assembly.iter().enumerate() {
+		println!("${i:04X}: {ins:0X?}");
 	}
 */
-	println!("sections: {}", sections.len());
-	for (addr, section) in &sections {
-		println!("  addr: ${addr:0X}");
-		for (i, ins) in section.iter().enumerate() {
-			println!("{:0X}: {ins:0X?}", addr + i as u32 * 2);
-		}
-	}
-	let mut sections: HashMap<u32, Vec<Item>> = sections.into_iter()
-		.map(|(addr,section)| (addr, section.into_iter().map(Item::Ins).collect()))
-		.collect();
 
-	resolver(&mut sections, &mut labels, &values);
+	let out = unroller(assembly);
 
-/*
-	println!("labels: {}", labels.len());
-	for (label, addr) in labels {
-		println!("  {label} = {addr:0X?}");
+	let internal_label_count = 0;
+	let (out, internal_label_count) = displacer(out, internal_label_count, &mut labels);
+	println!("{out:?}");
+	println!("{internal_label_count}");
+
+	//let out = resolver(assembly, labels);
+	//println!("{out:?}");
+}
+
+use instructions::{Asm, Dir, Ins};
+use parser::LabelType;
+fn displacer(
+	assembly: Vec<Asm>,
+	mut temp_label_count: usize,
+	labels: &mut LabelMap,
+) -> (Vec<Asm>, usize) {
+	let mut out = vec![];
+
+	enum Data {
+		Word(Label, i16),
+		Long(Label, i32),
 	}
-	println!("sections: {}", sections.len());
-	for (addr, section) in &sections {
-		println!("  section: {addr:0X}");
-		for item in section {
-			match item {
-				Item::Byte(_) => {}
-				Item::Word(_) => {}
-				Item::Ins(ins) => println!("    {ins:?}"),
+
+	let mut temp_labels = Vec::<Data>::default();
+
+	let mut temp_label = || {
+		temp_label_count += 1;
+		format!("____{}", temp_label_count - 1)
+	};
+
+	for asm in assembly {
+		match asm {
+			asm @ Asm::Dir(_) => out.push(asm.clone()),
+
+			Asm::Ins(ins) => match ins {
+				Ins::Mov_Imm_Word(imm, dst) => {
+					let label: Label = temp_label().into();
+					temp_labels.push(Data::Word(label.clone(), imm));
+					labels.insert(label.clone(), LabelType::Unknown);
+					out.push(Ins::Mov(Size::Word, Arg::Label(label), Arg::DirReg(dst)).into());
+				}
+				Ins::Mov_Imm_Long(imm, dst) => {
+					let label: Label = temp_label().into();
+					temp_labels.push(Data::Long(label.clone(), imm));
+					labels.insert(label.clone(), LabelType::Unknown);
+					out.push(Ins::Mov(Size::Long, Arg::Label(label), Arg::DirReg(dst)).into());
+				}
+
+				Ins::Jmp(_) |
+				Ins::Bra(_) |
+				Ins::Rts |
+				Ins::Rte => {
+					out.push(ins.clone().into());
+					for data in temp_labels.drain(..) {
+						match data {
+							Data::Word(label, imm) => {
+								out.push(Dir::Label(label).into());
+								out.push(Dir::ConstImmWord(imm as u16).into());
+							}
+							Data::Long(label, imm) => {
+								out.push(Dir::Label(label).into());
+								out.push(Dir::ConstImmLong(imm as u32).into());
+							}
+						}
+					}
+				}
+
+				ins => out.push(ins.clone().into()),
 			}
 		}
 	}
-*/
+
+	(out, temp_label_count)
 }
 
+#[test]
+#[should_panic]
+fn mov_w_doesnt_parse_32_bit_immediates() {
+	let input = "
+	MOV.W #$40402020,R3
+";
+	let out = parser(input);
+	assert_eq!(out.assembly, vec![
+		Asm::Ins(Ins::Mov_Imm_Long(0x40402020, 3)),
+	]);
+}
+
+#[test]
+fn test_displacer() {
+	let input = "
+	MOV.W #$4321,R4
+	MOV.L #$10203040,R5
+	BSR BOGUS
+	RTS
+";
+	let Output { assembly, mut labels } = parser(input);
+	let (out, label_count) = displacer(assembly, 0, &mut labels);
+	assert_eq!(label_count, 2);
+	assert_eq!(out, vec![
+		Asm::Ins(Ins::Mov(Size::Word, Arg::Label("____0".into()), Arg::DirReg(4))),
+		Asm::Ins(Ins::Mov(Size::Long, Arg::Label("____1".into()), Arg::DirReg(5))),
+		Asm::Ins(Ins::Bsr("BOGUS".into())),
+		Asm::Ins(Ins::Rts),
+		Asm::Dir(Dir::Label("____0".into())),
+		Asm::Dir(Dir::ConstImmWord(0x4321)),
+		Asm::Dir(Dir::Label("____1".into())),
+		Asm::Dir(Dir::ConstImmLong(0x10203040)),
+	]);
+}
