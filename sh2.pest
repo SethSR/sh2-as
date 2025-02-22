@@ -16,7 +16,6 @@ expr = { term ~ (op ~ term)* }
 
 /** Registers **/
 
-pc   = { ^"pc"   }
 sp   = { ^"sp"   }
 r0   = { ^"r0"   }
 gbr  = { ^"gbr"  }
@@ -48,11 +47,11 @@ reg_or_sp      = _{ reg | sp }
 addr_reg_or_sp = @{ "@" ~ reg_or_sp }
 reg_post_inc   = @{ "@" ~ reg_or_sp ~ "+" }
 reg_pre_dec    = @{ "@" ~ "-" ~ reg_or_sp }
-disp_reg       = { "@(" ~ (num | lbl) ~ "," ~ reg_or_sp ~ ")" }
-disp_gbr       = { "@(" ~ (num | lbl) ~ "," ~ gbr       ~ ")" }
-disp_pc        = { "@(" ~ (num | lbl) ~ "," ~ pc        ~ ")" }
-disp_r0        = { "@(" ~ r0 ~ "," ~ reg_or_sp ~ ")" }
-disp_r0_gbr    = { "@(" ~ r0 ~ "," ~ gbr       ~ ")" }
+disp_reg       = { "@(" ~ num ~ "," ~ reg_or_sp ~ ")" }
+disp_gbr       = { "@(" ~ num ~ "," ~ gbr       ~ ")" }
+disp_pc        = { "@(" ~ num ~ "," ~ ^"pc"     ~ ")" }
+disp_r0        = { "@(" ~ r0  ~ "," ~ reg_or_sp ~ ")" }
+disp_r0_gbr    = { "@(" ~ r0  ~ "," ~ gbr       ~ ")" }
 
 /** Argument pairs **/
 
@@ -97,14 +96,14 @@ ins_sleep  = { ^"sleep" }
 
 /** 1-Argument Instructions **/
 
-ins_bf     = { ^"bf"     ~ lbl }
-ins_bfs    = { ^"bf/s"   ~ lbl }
-ins_bra    = { ^"bra"    ~ lbl }
+ins_bf     = { ^"bf"     ~ disp_pc }
+ins_bfs    = { ^"bf/s"   ~ disp_pc }
+ins_bra    = { ^"bra"    ~ disp_pc }
 ins_braf   = { ^"braf"   ~ reg_or_sp }
-ins_bsr    = { ^"bsr"    ~ lbl }
+ins_bsr    = { ^"bsr"    ~ disp_pc }
 ins_bsrf   = { ^"bsrf"   ~ reg_or_sp }
-ins_bt     = { ^"bt"     ~ lbl }
-ins_bts    = { ^"bt/s"   ~ lbl }
+ins_bt     = { ^"bt"     ~ disp_pc }
+ins_bts    = { ^"bt/s"   ~ disp_pc }
 ins_dt     = { ^"dt"     ~ reg_or_sp }
 ins_jmp    = { ^"jmp"    ~ addr_reg_or_sp }
 ins_jsr    = { ^"jsr"    ~ addr_reg_or_sp }

@@ -1,6 +1,7 @@
 
 use pest::Parser;
 use pest::iterators::Pair;
+use pest::error::{Error, ErrorVariant};
 use pest_derive::Parser;
 
 use tracing::{
@@ -10,7 +11,7 @@ use tracing::{
 
 type Reg = u8;
 
-type ParseResult<T> = Result<T, pest::error::Error<Rule>>;
+type ParseResult<T> = Result<T, Error<Rule>>;
 
 #[derive(Parser)]
 #[grammar = "../sh2.pest"]
@@ -35,6 +36,7 @@ enum Asm {
 	Rts,
 	SetT,
 	Sleep,
+	Bf(u8),
 }
 
 fn extra_rules(src: Pair<Rule>) {
@@ -93,6 +95,10 @@ fn parse_ins_line(source: Pair<Rule>, mut output: Output) -> ParseResult<Output>
 			Rule::ins_rts => output.push(Asm::Rts),
 			Rule::ins_sett => output.push(Asm::SetT),
 			Rule::ins_sleep => output.push(Asm::Sleep),
+			Rule::ins_bf => {
+				let arg = src.into_inner().next().unwrap();
+				output = parse_disp_pc(arg, output)?;
+			}
 			_ => {
 				extra_rules(src);
 				continue;
@@ -100,6 +106,45 @@ fn parse_ins_line(source: Pair<Rule>, mut output: Output) -> ParseResult<Output>
 		}
 	}
 	Ok(output)
+}
+
+#[instrument]
+fn parse_disp_pc(source: Pair<Rule>, mut output: Output) -> ParseResult<Output> {
+	trace!("{source} - '{}'", source.as_str());
+
+	let mut args = source.into_inner();
+	let num = args.next().unwrap();
+	let disp = parse_num(num.clone())?;
+	if !(i8::MIN as i64..=i8::MAX as i64).contains(&disp) {
+		return Err(Error::new_from_span(
+			ErrorVariant::CustomError {
+				message: format!("expected a value between {} and {}", i8::MIN, i8::MAX),
+			},
+			num.as_span(),
+		))
+	}
+	output.push(Asm::Bf(disp as u8));
+	Ok(output)
+}
+
+#[instrument]
+fn parse_num(source: Pair<Rule>) -> ParseResult<i64> {
+	trace!("{source} - '{}'", source.as_str());
+
+	let num = match source.as_rule() {
+		Rule::hex => i64::from_str_radix(source.as_str(), 16)
+			.map_err(|_| "expected a hexadecimal value".to_string()),
+		Rule::bin => i64::from_str_radix(source.as_str(), 2)
+			.map_err(|_| "expected a binary value".to_string()),
+		Rule::dec => source.as_str().parse::<i64>()
+			.map_err(|_| "expected a decimal value".to_string()),
+		_ => unreachable!("{source} - '{}'", source.as_str()),
+	};
+
+	num.map_err(|message| Error::new_from_span(
+		ErrorVariant::CustomError { message },
+		source.as_span(),
+	))
 }
 
 #[cfg(test)]
@@ -156,6 +201,33 @@ mod parser {
 	}
 
 	#[test]
+	fn bf() {
+		test_single!("\tbf @(34,pc)", Asm::Bf(34));
+	}
+
+	#[test]
+	#[should_panic = " --> 1:7
+  |
+1 | 	bf @(243,pc)
+  | 	     ^-^
+  |
+  = expected a value between -128 and 127"]
+	fn bf_too_far_forward() {
+		test_single!("\tbf @(243,pc)", Asm::Bf(0));
+	}
+
+	#[test]
+	#[should_panic = " --> 1:7
+  |
+1 | 	bf @(-243,pc)
+  | 	     ^--^
+  |
+  = expected a value between -128 and 127"]
+	fn bf_too_far_behind() {
+		test_single!("\tbf @(-243,pc)", Asm::Bf(0));
+	}
+
+	#[test]
 	#[should_panic = " --> 1:1
   |
 1 | stuff
@@ -191,6 +263,7 @@ fn output(asm: &[Asm]) -> Vec<u8> {
 			Asm::Sleep  => out.push(0x001B),
 			Asm::ClrMac => out.push(0x0028),
 			Asm::Rte    => out.push(0x002B),
+			Asm::Bf(d)  => out.push(0x8B00 | *d as u16),
 		}
 	}
 	out.into_iter()
@@ -248,6 +321,11 @@ mod output {
 	#[test]
 	fn sleep() {
 		test_output("\tsleep", &[0x00, 0x1B]);
+	}
+
+	#[test]
+	fn bf() {
+		test_output("\tbf @($78,pc)", &[0x8B, 0x78]);
 	}
 }
 
