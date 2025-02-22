@@ -67,6 +67,35 @@ mod parser {
 }
 
 #[instrument]
+fn output(asm: &[Asm]) -> Vec<u8> {
+	let mut out = Vec::with_capacity(asm.len());
+	for cmd in asm {
+		match cmd {
+			Asm::ClrMac => out.extend(&[0x00, 0x00, 0x02, 0x80]),
+		}
+	}
+	out
+}
+
+#[cfg(test)]
+mod output {
+	use super::*;
+
+	#[test]
+	fn clrmac() {
+		let input = "\tclrmac";
+		let asm = parser(input)
+			.map_err(|e| panic!("{e}"))
+			.unwrap();
+		let out = output(&asm.0);
+		assert_eq!(out, vec![
+			0x00, 0x00, 0x02, 0x80,
+		]);
+	}
+}
+
+/*
+#[instrument]
 fn main() {
 	tracing_subscriber::fmt::init();
 
@@ -77,4 +106,5 @@ fn main() {
 	let _input = read_to_string(&source).expect("unable to read source file");
 	let _target = args.next().unwrap_or("asm.out".to_string());
 }
+*/
 
