@@ -2,10 +2,6 @@
 COMMENT = _{ ";" ~ (!NEWLINE ~ ANY)* }
 WHITESPACE = _{ " " }
 
-/** Symbols **/
-
-tab = _{ "\t" }
-
 /** Assembler Calculations **/
 
 op = _{ op_add | op_sub | op_mul | op_div | op_mod | op_pow }
@@ -179,7 +175,7 @@ ins_cmp_str    = { ^"cmp/str" ~ reg_or_sp__reg_or_sp }
 ins_cmp_pl     = { ^"cmp/pl"  ~ reg_or_sp }
 ins_cmp_pz     = { ^"cmp/pz"  ~ reg_or_sp }
 ins_cmp = _{
-	ins_cmp_eq_imm
+	| ins_cmp_eq_imm
 	| ins_cmp_eq_reg
 	| ins_cmp_ge
 	| ins_cmp_gt
@@ -210,7 +206,7 @@ ins_dmuls   = { (^"dmuls.l" | ^"dmuls") ~ reg_or_sp__reg_or_sp }
 ins_dmulu   = { (^"dmulu.l" | ^"dmulu") ~ reg_or_sp__reg_or_sp }
 
 mov_common = _{
-	imm__reg_or_sp
+	| imm__reg_or_sp
 	| addr_reg_or_sp__reg_or_sp
 	| disp_gbr__r0
 	| disp_r0__reg_or_sp
@@ -226,7 +222,7 @@ ins_movw =  { mov_common | disp_reg__r0 | r0__disp_reg | disp_pc__reg_or_sp }
 ins_movl =  { mov_common | disp_pc__reg_or_sp | disp_reg__reg_or_sp | reg_or_sp__disp_reg }
 ins_mov  = _{ ^"mov.b" ~ ins_movb | ^"mov.w" ~ ins_movw | (^"mov.l" | ^"mov") ~ ins_movl }
 
-ins = _{
+ins = {
 	| ins_add
 	| ins_addc
 	| ins_addv
@@ -321,8 +317,8 @@ dir_include  = { ^".include" ~ file_path }
 dir_binclude = { ^".binclude" ~ file_path }
 dir_align    = { ^".align" ~ num }
 
-dir = _{
-	dir_constant
+dir = {
+	| dir_constant
 	| dir_org
 	| dir_repeat
 	| dir_endr
@@ -333,10 +329,12 @@ dir = _{
 
 lbl = { !ASCII_DIGIT ~ (ASCII_ALPHANUMERIC | "_")+ }
 
+ins_line = { "\t" ~ ins }
+dir_line = { "\t" ~ dir }
 lbl_line = @{ lbl ~ ":" }
 val_line = { lbl ~ "=" ~ (num | lbl) }
 
-line = _{ tab ~ (ins | dir)? | lbl_line | val_line | NEWLINE }
+line = _{ ins_line | dir_line | lbl_line | val_line | NEWLINE }
 lines = _{ line* }
 program = _{ SOI ~ lines ~ EOI }
 
