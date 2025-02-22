@@ -34,6 +34,7 @@ enum Asm {
 	Rte,
 	Rts,
 	SetT,
+	Sleep,
 }
 
 fn extra_rules(src: Pair<Rule>) {
@@ -91,6 +92,7 @@ fn parse_ins_line(source: Pair<Rule>, mut output: Output) -> ParseResult<Output>
 			Rule::ins_rte => output.push(Asm::Rte),
 			Rule::ins_rts => output.push(Asm::Rts),
 			Rule::ins_sett => output.push(Asm::SetT),
+			Rule::ins_sleep => output.push(Asm::Sleep),
 			_ => {
 				extra_rules(src);
 				continue;
@@ -149,6 +151,11 @@ mod parser {
 	}
 
 	#[test]
+	fn sleep() {
+		test_single!("\tsleep", Asm::Sleep);
+	}
+
+	#[test]
 	#[should_panic = " --> 1:1
   |
 1 | stuff
@@ -176,13 +183,14 @@ fn output(asm: &[Asm]) -> Vec<u8> {
 	let mut out = Vec::with_capacity(asm.len());
 	for cmd in asm {
 		match cmd {
+			Asm::ClrT   => out.push(0x0008),
+			Asm::Nop    => out.push(0x0009),
+			Asm::Rts    => out.push(0x000B),
+			Asm::SetT   => out.push(0x0018),
+			Asm::Div0U  => out.push(0x0019),
+			Asm::Sleep  => out.push(0x001B),
 			Asm::ClrMac => out.push(0x0028),
-			Asm::ClrT => out.push(0x0008),
-			Asm::Div0U => out.push(0x0019),
-			Asm::Nop => out.push(0x0009),
-			Asm::Rte => out.push(0x002B),
-			Asm::Rts => out.push(0x000B),
-			Asm::SetT => out.push(0x0018),
+			Asm::Rte    => out.push(0x002B),
 		}
 	}
 	out.into_iter()
@@ -235,6 +243,11 @@ mod output {
 	#[test]
 	fn sett() {
 		test_output("\tsett", &[0x00, 0x18]);
+	}
+
+	#[test]
+	fn sleep() {
+		test_output("\tsleep", &[0x00, 0x1B]);
 	}
 }
 
