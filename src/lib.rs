@@ -32,6 +32,7 @@ enum Asm {
 	Div0U,
 	Nop,
 	Rte,
+	Rts,
 }
 
 fn extra_rules(src: Pair<Rule>) {
@@ -87,6 +88,7 @@ fn parse_ins_line(source: Pair<Rule>, mut output: Output) -> ParseResult<Output>
 			Rule::ins_div0u => output.push(Asm::Div0U),
 			Rule::ins_nop => output.push(Asm::Nop),
 			Rule::ins_rte => output.push(Asm::Rte),
+			Rule::ins_rts => output.push(Asm::Rts),
 			_ => {
 				extra_rules(src);
 				continue;
@@ -135,6 +137,11 @@ mod parser {
 	}
 
 	#[test]
+	fn rts() {
+		test_single!("\trts", Asm::Rts);
+	}
+
+	#[test]
 	#[should_panic = " --> 1:1
   |
 1 | stuff
@@ -167,6 +174,7 @@ fn output(asm: &[Asm]) -> Vec<u8> {
 			Asm::Div0U => out.push(0x0019),
 			Asm::Nop => out.push(0x0009),
 			Asm::Rte => out.push(0x002B),
+			Asm::Rts => out.push(0x000B),
 		}
 	}
 	out.into_iter()
@@ -209,6 +217,11 @@ mod output {
 	#[test]
 	fn rte() {
 		test_output("\trte", &[0x00, 0x2B]);
+	}
+
+	#[test]
+	fn rts() {
+		test_output("\trts", &[0x00, 0x0B]);
 	}
 }
 
