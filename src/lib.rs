@@ -30,6 +30,7 @@ enum Asm {
 	ClrMac,
 	ClrT,
 	Div0U,
+	Nop,
 }
 
 fn extra_rules(src: Pair<Rule>) {
@@ -83,6 +84,7 @@ fn parse_ins_line(source: Pair<Rule>, mut output: Output) -> ParseResult<Output>
 			Rule::ins_clrmac => output.push(Asm::ClrMac),
 			Rule::ins_clrt => output.push(Asm::ClrT),
 			Rule::ins_div0u => output.push(Asm::Div0U),
+			Rule::ins_nop => output.push(Asm::Nop),
 			_ => {
 				extra_rules(src);
 				continue;
@@ -121,6 +123,11 @@ mod parser {
 	}
 
 	#[test]
+	fn nop() {
+		test_single!("\tnop", Asm::Nop);
+	}
+
+	#[test]
 	#[should_panic = " --> 1:1
   |
 1 | stuff
@@ -151,6 +158,7 @@ fn output(asm: &[Asm]) -> Vec<u8> {
 			Asm::ClrMac => out.push(0x0028),
 			Asm::ClrT => out.push(0x0008),
 			Asm::Div0U => out.push(0x0019),
+			Asm::Nop => out.push(0x0009),
 		}
 	}
 	out.into_iter()
@@ -183,6 +191,11 @@ mod output {
 	#[test]
 	fn div0u() {
 		test_output("\tdiv0u", &[0x00, 0x19]);
+	}
+
+	#[test]
+	fn nop() {
+		test_output("\tnop", &[0x00, 0x09]);
 	}
 }
 
