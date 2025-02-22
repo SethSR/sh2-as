@@ -29,6 +29,7 @@ impl Output {
 enum Asm {
 	ClrMac,
 	ClrT,
+	Div0U,
 }
 
 fn extra_rules(src: Pair<Rule>) {
@@ -79,12 +80,9 @@ fn parse_ins_line(source: Pair<Rule>, mut output: Output) -> ParseResult<Output>
 		trace!("{src} - '{}'", src.as_str());
 
 		match src.as_rule() {
-			Rule::ins_clrmac => {
-				output.push(Asm::ClrMac);
-			}
-			Rule::ins_clrt => {
-				output.push(Asm::ClrT);
-			}
+			Rule::ins_clrmac => output.push(Asm::ClrMac),
+			Rule::ins_clrt => output.push(Asm::ClrT),
+			Rule::ins_div0u => output.push(Asm::Div0U),
 			_ => {
 				extra_rules(src);
 				continue;
@@ -118,6 +116,11 @@ mod parser {
 	}
 
 	#[test]
+	fn div0u() {
+		test_single!("\tdiv0u", Asm::Div0U);
+	}
+
+	#[test]
 	#[should_panic = " --> 1:1
   |
 1 | stuff
@@ -147,6 +150,7 @@ fn output(asm: &[Asm]) -> Vec<u8> {
 		match cmd {
 			Asm::ClrMac => out.push(0x0028),
 			Asm::ClrT => out.push(0x0008),
+			Asm::Div0U => out.push(0x0019),
 		}
 	}
 	out.into_iter()
@@ -174,6 +178,11 @@ mod output {
 	#[test]
 	fn clrt() {
 		test_output("\tclrt", &[0x00, 0x08]);
+	}
+
+	#[test]
+	fn div0u() {
+		test_output("\tdiv0u", &[0x00, 0x19]);
 	}
 }
 
