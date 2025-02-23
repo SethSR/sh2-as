@@ -41,6 +41,7 @@ enum Asm {
 	Bra(i16),
 	BraF(Reg),
 	Bsr(i16),
+	BsrF(Reg),
 }
 
 fn extra_rules(src: Pair<Rule>) {
@@ -126,6 +127,11 @@ fn parse_ins_line(source: Pair<Rule>, mut output: Output) -> ParseResult<Output>
 				let inner_arg = arg.into_inner().next().unwrap();
 				let disp = parse_i12(inner_arg)?;
 				output.push(Asm::Bsr(disp));
+			}
+			Rule::ins_bsrf => {
+				let arg = src.into_inner().next().unwrap();
+				let reg = parse_addr_reg_or_sp(arg)?;
+				output.push(Asm::BsrF(reg));
 			}
 			_ => {
 				extra_rules(src);
@@ -417,6 +423,11 @@ mod parser {
 	}
 
 	#[test]
+	fn bsrf() {
+		test_single!("\tbsrf @r0", Asm::BsrF(0));
+	}
+
+	#[test]
 	#[should_panic = " --> 1:1
   |
 1 | stuff
@@ -457,6 +468,7 @@ fn output(asm: &[Asm]) -> Vec<u8> {
 			Asm::Bra(d)  => out.push(0xA000 | (*d & 0xFFF) as u16),
 			Asm::BraF(r) => out.push(0x0023 | (*r as u16) << 8),
 			Asm::Bsr(d)  => out.push(0xB000 | (*d & 0xFFF) as u16),
+			Asm::BsrF(r) => out.push(0x0003 | (*r as u16) << 8),
 		}
 	}
 	out.into_iter()
@@ -540,6 +552,11 @@ mod output {
 	#[test]
 	fn bsr() {
 		test_output("\tbsr @(%0110_0011_1101,pc)", &[0xB6, 0x3D]);
+	}
+
+	#[test]
+	fn bsrf() {
+		test_output("\tbsrf @r8", &[0x08, 0x03]);
 	}
 }
 
