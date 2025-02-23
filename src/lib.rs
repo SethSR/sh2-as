@@ -36,8 +36,9 @@ enum Asm {
 	Rts,
 	SetT,
 	Sleep,
-	Bf(u8),
-	BfS(u8),
+	Bf(i8),
+	BfS(i8),
+	Bra(i16),
 }
 
 fn extra_rules(src: Pair<Rule>) {
@@ -100,12 +101,18 @@ fn parse_ins_line(source: Pair<Rule>, mut output: Output) -> ParseResult<Output>
 			Rule::ins_bf => {
 				let arg = src.into_inner().next().unwrap();
 				let disp = parse_disp_pc(arg)?;
-				output.push(Asm::Bf(disp as u8));
+				output.push(Asm::Bf(disp));
 			}
 			Rule::ins_bfs => {
 				let arg = src.into_inner().next().unwrap();
 				let disp = parse_disp_pc(arg)?;
-				output.push(Asm::BfS(disp as u8));
+				output.push(Asm::BfS(disp));
+			}
+			Rule::ins_bra => {
+				let arg = src.into_inner().next().unwrap();
+				let mut inner_args = arg.into_inner();
+				let disp = parse_i12(inner_args.next().unwrap())?;
+				output.push(Asm::Bra(disp));
 			}
 			_ => {
 				extra_rules(src);
@@ -177,6 +184,52 @@ fn parse_i8(source: Pair<Rule>) -> ParseResult<i8> {
 		ErrorVariant::CustomError { message },
 		source.as_span(),
 	))
+}
+
+#[instrument]
+fn parse_i12(source: Pair<Rule>) -> ParseResult<i16> {
+	trace!("{source} - '{}'", source.as_str());
+
+	fn fix_value(n: u16) -> i16 {
+		eprintln!("fix({n})");
+		if (n & 0x800) > 0 {
+			(n | 0xF000) as i16
+		} else {
+			(n & 0x0FFF) as i16
+		}
+	}
+
+	fn err_msg(src: &Pair<Rule>) -> String {
+		format!(
+			"expected a value between -2048 ($800) and 2047 ($7FF), found {}",
+			src.as_str(),
+		)
+	}
+
+	fn check_range(n: i16, src: &Pair<Rule>) -> Result<i16, String> {
+		eprintln!("check({n})");
+		if (-2048..2048).contains(&n) {
+			Ok(n)
+		} else {
+			Err(err_msg(src))
+		}
+	}
+
+	let s = source.as_str().replace('_', "");
+	let result = match source.as_rule() {
+		Rule::hex => u16::from_str_radix(&s, 16).map(fix_value),
+		Rule::bin => u16::from_str_radix(&s, 2).map(fix_value),
+		Rule::dec => s.parse::<i16>(),
+		_ => unreachable!("{source} - '{}'", source.as_str()),
+	};
+
+	result
+		.map_err(|_| err_msg(&source))
+		.and_then(|n| check_range(n, &source))
+		.map_err(|message| Error::new_from_span(
+			ErrorVariant::CustomError { message },
+			source.as_span(),
+		))
 }
 
 #[cfg(test)]
@@ -307,7 +360,12 @@ mod parser {
 
 	#[test]
 	fn bfs() {
-		test_single!("\tbf/s @(%1100_1001,pc)", Asm::BfS(0b1100_1001));
+		test_single!("\tbf/s @(%1100_1001,pc)", Asm::BfS(-55));
+	}
+
+	#[test]
+	fn bra() {
+		test_single!("\tbra @($FFC,pc)", Asm::Bra(-4));
 	}
 
 	#[test]
@@ -348,6 +406,7 @@ fn output(asm: &[Asm]) -> Vec<u8> {
 			Asm::Rte    => out.push(0x002B),
 			Asm::Bf(d)  => out.push(0x8B00 | *d as u16),
 			Asm::BfS(d) => out.push(0x8F00 | *d as u16),
+			Asm::Bra(d) => out.push(0xA000 | (*d & 0xFFF) as u16),
 		}
 	}
 	out.into_iter()
@@ -415,6 +474,12 @@ mod output {
 	#[test]
 	fn bfs() {
 		test_output("\tbf/s @($52,pc)", &[0x8F, 0x52]);
+	}
+
+	#[test]
+	fn bra() {
+		// -2000 -> 0x708 -> 0x8F8
+		test_output("\tbra @(-2000,pc)", &[0xA8, 0x30]);
 	}
 }
 
