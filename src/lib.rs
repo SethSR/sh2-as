@@ -39,6 +39,7 @@ enum Asm {
 	Bf(i8),
 	BfS(i8),
 	Bra(i16),
+	BraF(Reg),
 }
 
 fn extra_rules(src: Pair<Rule>) {
@@ -114,6 +115,11 @@ fn parse_ins_line(source: Pair<Rule>, mut output: Output) -> ParseResult<Output>
 				let disp = parse_i12(inner_args.next().unwrap())?;
 				output.push(Asm::Bra(disp));
 			}
+			Rule::ins_braf => {
+				let arg = src.into_inner().next().unwrap();
+				let reg = parse_addr_reg_or_sp(arg)?;
+				output.push(Asm::BraF(reg));
+			}
 			_ => {
 				extra_rules(src);
 				continue;
@@ -121,6 +127,31 @@ fn parse_ins_line(source: Pair<Rule>, mut output: Output) -> ParseResult<Output>
 		}
 	}
 	Ok(output)
+}
+
+#[instrument]
+fn parse_addr_reg_or_sp(source: Pair<Rule>) -> ParseResult<Reg> {
+	trace!("{source} - '{}'", source.as_str());
+
+	let s = &source.as_str()[1..];
+	if s.chars().next() == Some('r') {
+		s[1..].parse::<Reg>()
+			.map_err(|_| Error::new_from_span(
+				ErrorVariant::CustomError {
+					message: format!("expected indirect register (ex: @r4), found {}", source.as_str()),
+				},
+				source.as_span(),
+			))
+	} else if s == "sp" {
+		Ok(15)
+	} else {
+		Err(Error::new_from_span(
+			ErrorVariant::CustomError {
+				message: format!("expected indirect register or SP, found {}", source.as_str()),
+			},
+			source.as_span(),
+		))
+	}
 }
 
 #[instrument]
@@ -369,6 +400,11 @@ mod parser {
 	}
 
 	#[test]
+	fn braf() {
+		test_single!("\tbraf @r3", Asm::BraF(3));
+	}
+
+	#[test]
 	#[should_panic = " --> 1:1
   |
 1 | stuff
@@ -407,6 +443,7 @@ fn output(asm: &[Asm]) -> Vec<u8> {
 			Asm::Bf(d)  => out.push(0x8B00 | *d as u16),
 			Asm::BfS(d) => out.push(0x8F00 | *d as u16),
 			Asm::Bra(d) => out.push(0xA000 | (*d & 0xFFF) as u16),
+			Asm::BraF(r) => out.push(0x0023 | (*r as u16) << 8),
 		}
 	}
 	out.into_iter()
@@ -480,6 +517,11 @@ mod output {
 	fn bra() {
 		// -2000 -> 0x708 -> 0x8F8
 		test_output("\tbra @(-2000,pc)", &[0xA8, 0x30]);
+	}
+
+	#[test]
+	fn braf() {
+		test_output("\tbraf @sp", &[0x0F, 0x23]);
 	}
 }
 
