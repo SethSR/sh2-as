@@ -54,6 +54,7 @@ fn rename_rules(rule: &Rule) -> String {
 		Rule::dir_line | Rule::dir => "assembler directive",
 		Rule::lbl_line => "Label",
 		Rule::val_line => "Value",
+		Rule::bin => "a binary value",
 		_ => unreachable!("{rule:?}"),
 	}.to_owned()
 }
@@ -97,7 +98,8 @@ fn parse_ins_line(source: Pair<Rule>, mut output: Output) -> ParseResult<Output>
 			Rule::ins_sleep => output.push(Asm::Sleep),
 			Rule::ins_bf => {
 				let arg = src.into_inner().next().unwrap();
-				output = parse_disp_pc(arg, output)?;
+				let disp = parse_disp_pc(arg)?;
+				output.push(Asm::Bf(disp as u8));
 			}
 			_ => {
 				extra_rules(src);
@@ -109,35 +111,59 @@ fn parse_ins_line(source: Pair<Rule>, mut output: Output) -> ParseResult<Output>
 }
 
 #[instrument]
-fn parse_disp_pc(source: Pair<Rule>, mut output: Output) -> ParseResult<Output> {
+fn parse_disp_pc(source: Pair<Rule>) -> ParseResult<i8> {
 	trace!("{source} - '{}'", source.as_str());
 
 	let mut args = source.into_inner();
-	let num = args.next().unwrap();
-	let disp = parse_num(num.clone())?;
-	if !(i8::MIN as i64..=i8::MAX as i64).contains(&disp) {
-		return Err(Error::new_from_span(
-			ErrorVariant::CustomError {
-				message: format!("expected a value between {} and {}", i8::MIN, i8::MAX),
-			},
-			num.as_span(),
-		))
-	}
-	output.push(Asm::Bf(disp as u8));
-	Ok(output)
+	parse_i8(args.next().unwrap())
 }
 
 #[instrument]
-fn parse_num(source: Pair<Rule>) -> ParseResult<i64> {
+fn parse_u8(source: Pair<Rule>) -> ParseResult<u8> {
 	trace!("{source} - '{}'", source.as_str());
 
+	fn err_msg(base: &str) -> String {
+		format!("expected a {base} value between {} and {}", u8::MIN, u8::MAX)
+	}
+
+	let s = source.as_str().replace('_', "");
 	let num = match source.as_rule() {
-		Rule::hex => i64::from_str_radix(source.as_str(), 16)
-			.map_err(|_| "expected a hexadecimal value".to_string()),
-		Rule::bin => i64::from_str_radix(source.as_str(), 2)
-			.map_err(|_| "expected a binary value".to_string()),
-		Rule::dec => source.as_str().parse::<i64>()
-			.map_err(|_| "expected a decimal value".to_string()),
+		Rule::hex => u8::from_str_radix(&s, 16).map_err(|_| err_msg("hexadecimal")),
+		Rule::bin => u8::from_str_radix(&s, 2).map_err(|_| err_msg("binary")),
+		Rule::dec => s.parse::<u8>().map_err(|_| err_msg("decimal")),
+		_ => unreachable!("{source} - '{}'", source.as_str()),
+	};
+
+	num.map_err(|message| Error::new_from_span(
+		ErrorVariant::CustomError { message },
+		source.as_span(),
+	))
+}
+
+#[instrument]
+fn parse_i8(source: Pair<Rule>) -> ParseResult<i8> {
+	trace!("{source} - '{}'", source.as_str());
+
+	fn err_msg(base: &str) -> String {
+		format!("expected a {base} value between {} and {}", i8::MIN, i8::MAX)
+	}
+
+	let s = source.as_str().replace('_', "");
+	let num = match source.as_rule() {
+		Rule::hex => {
+			u8::from_str_radix(&s, 16)
+				.map(|n| n as i8)
+				.map_err(|_| err_msg("hexadecimal"))
+		}
+		Rule::bin => {
+			u8::from_str_radix(&s, 2)
+				.map(|n| n as i8)
+				.map_err(|_| err_msg("binary"))
+		}
+		Rule::dec => {
+			s.parse::<i8>()
+				.map_err(|_| err_msg("decimal"))
+		}
 		_ => unreachable!("{source} - '{}'", source.as_str()),
 	};
 
@@ -152,12 +178,58 @@ mod parser {
 	use super::*;
 
 	macro_rules! test_single {
+		($input:expr, $val:expr, u8) => {
+			test_single!($input, $val, parse_u8)
+		};
+		($input:expr, $val:expr, i8) => {
+			test_single!($input, $val, parse_i8)
+		};
+		($input:expr, $val:expr, $parse:ident) => {
+			let mut source = Sh2Parser::parse(Rule::num, $input)
+				.map_err(|e| panic!("{e}"))
+				.unwrap();
+			let src = source.next().unwrap();
+			let num = $parse(src)
+				.map_err(|e| panic!("{e}"))
+				.unwrap();
+			assert_eq!($val, num);
+		};
 		($input:expr, $asm:expr) => {
 			let out = super::parser($input)
 				.map_err(|e| panic!("{e}"))
 				.unwrap();
 			assert_eq!(out.0, vec![$asm]);
-		}
+		};
+	}
+
+	#[test]
+	fn u8_hex() {
+		test_single!("$C9", 201, u8);
+	}
+
+	#[test]
+	fn u8_bin() {
+		test_single!("%1100_1001", 201, u8);
+	}
+
+	#[test]
+	fn i8_hex_pos() {
+		test_single!("$49", 73, i8);
+	}
+
+	#[test]
+	fn i8_hex_neg() {
+		test_single!("$C9", -55, i8);
+	}
+
+	#[test]
+	fn i8_bin_pos() {
+		test_single!("%0100_1001", 73, i8);
+	}
+
+	#[test]
+	fn i8_bin_neg() {
+		test_single!("%1100_1001", -55, i8);
 	}
 
 	#[test]
@@ -211,7 +283,7 @@ mod parser {
 1 | 	bf @(243,pc)
   | 	     ^-^
   |
-  = expected a value between -128 and 127"]
+  = expected a decimal value between -128 and 127"]
 	fn bf_too_far_forward() {
 		test_single!("\tbf @(243,pc)", Asm::Bf(0));
 	}
@@ -222,7 +294,7 @@ mod parser {
 1 | 	bf @(-243,pc)
   | 	     ^--^
   |
-  = expected a value between -128 and 127"]
+  = expected a decimal value between -128 and 127"]
 	fn bf_too_far_behind() {
 		test_single!("\tbf @(-243,pc)", Asm::Bf(0));
 	}
