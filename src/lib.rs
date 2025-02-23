@@ -40,6 +40,7 @@ enum Asm {
 	BfS(i8),
 	Bra(i16),
 	BraF(Reg),
+	Bsr(i16),
 }
 
 fn extra_rules(src: Pair<Rule>) {
@@ -111,14 +112,20 @@ fn parse_ins_line(source: Pair<Rule>, mut output: Output) -> ParseResult<Output>
 			}
 			Rule::ins_bra => {
 				let arg = src.into_inner().next().unwrap();
-				let mut inner_args = arg.into_inner();
-				let disp = parse_i12(inner_args.next().unwrap())?;
+				let inner_args = arg.into_inner().next().unwrap();
+				let disp = parse_i12(inner_args)?;
 				output.push(Asm::Bra(disp));
 			}
 			Rule::ins_braf => {
 				let arg = src.into_inner().next().unwrap();
 				let reg = parse_addr_reg_or_sp(arg)?;
 				output.push(Asm::BraF(reg));
+			}
+			Rule::ins_bsr => {
+				let arg = src.into_inner().next().unwrap();
+				let inner_arg = arg.into_inner().next().unwrap();
+				let disp = parse_i12(inner_arg)?;
+				output.push(Asm::Bsr(disp));
 			}
 			_ => {
 				extra_rules(src);
@@ -405,6 +412,11 @@ mod parser {
 	}
 
 	#[test]
+	fn bsr() {
+		test_single!("\tbsr @($7FC,pc)", Asm::Bsr(2044));
+	}
+
+	#[test]
 	#[should_panic = " --> 1:1
   |
 1 | stuff
@@ -432,18 +444,19 @@ fn output(asm: &[Asm]) -> Vec<u8> {
 	let mut out = Vec::with_capacity(asm.len());
 	for cmd in asm {
 		match cmd {
-			Asm::ClrT   => out.push(0x0008),
-			Asm::Nop    => out.push(0x0009),
-			Asm::Rts    => out.push(0x000B),
-			Asm::SetT   => out.push(0x0018),
-			Asm::Div0U  => out.push(0x0019),
-			Asm::Sleep  => out.push(0x001B),
-			Asm::ClrMac => out.push(0x0028),
-			Asm::Rte    => out.push(0x002B),
-			Asm::Bf(d)  => out.push(0x8B00 | *d as u16),
-			Asm::BfS(d) => out.push(0x8F00 | *d as u16),
-			Asm::Bra(d) => out.push(0xA000 | (*d & 0xFFF) as u16),
+			Asm::ClrT    => out.push(0x0008),
+			Asm::Nop     => out.push(0x0009),
+			Asm::Rts     => out.push(0x000B),
+			Asm::SetT    => out.push(0x0018),
+			Asm::Div0U   => out.push(0x0019),
+			Asm::Sleep   => out.push(0x001B),
+			Asm::ClrMac  => out.push(0x0028),
+			Asm::Rte     => out.push(0x002B),
+			Asm::Bf(d)   => out.push(0x8B00 | *d as u16),
+			Asm::BfS(d)  => out.push(0x8F00 | *d as u16),
+			Asm::Bra(d)  => out.push(0xA000 | (*d & 0xFFF) as u16),
 			Asm::BraF(r) => out.push(0x0023 | (*r as u16) << 8),
+			Asm::Bsr(d)  => out.push(0xB000 | (*d & 0xFFF) as u16),
 		}
 	}
 	out.into_iter()
@@ -522,6 +535,11 @@ mod output {
 	#[test]
 	fn braf() {
 		test_output("\tbraf @sp", &[0x0F, 0x23]);
+	}
+
+	#[test]
+	fn bsr() {
+		test_output("\tbsr @(%0110_0011_1101,pc)", &[0xB6, 0x3D]);
 	}
 }
 
