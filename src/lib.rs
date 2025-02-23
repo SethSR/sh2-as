@@ -37,6 +37,7 @@ enum Asm {
 	SetT,
 	Sleep,
 	Bf(u8),
+	BfS(u8),
 }
 
 fn extra_rules(src: Pair<Rule>) {
@@ -100,6 +101,11 @@ fn parse_ins_line(source: Pair<Rule>, mut output: Output) -> ParseResult<Output>
 				let arg = src.into_inner().next().unwrap();
 				let disp = parse_disp_pc(arg)?;
 				output.push(Asm::Bf(disp as u8));
+			}
+			Rule::ins_bfs => {
+				let arg = src.into_inner().next().unwrap();
+				let disp = parse_disp_pc(arg)?;
+				output.push(Asm::BfS(disp as u8));
 			}
 			_ => {
 				extra_rules(src);
@@ -300,6 +306,11 @@ mod parser {
 	}
 
 	#[test]
+	fn bfs() {
+		test_single!("\tbf/s @(%1100_1001,pc)", Asm::BfS(0b1100_1001));
+	}
+
+	#[test]
 	#[should_panic = " --> 1:1
   |
 1 | stuff
@@ -336,6 +347,7 @@ fn output(asm: &[Asm]) -> Vec<u8> {
 			Asm::ClrMac => out.push(0x0028),
 			Asm::Rte    => out.push(0x002B),
 			Asm::Bf(d)  => out.push(0x8B00 | *d as u16),
+			Asm::BfS(d) => out.push(0x8F00 | *d as u16),
 		}
 	}
 	out.into_iter()
@@ -398,6 +410,11 @@ mod output {
 	#[test]
 	fn bf() {
 		test_output("\tbf @($78,pc)", &[0x8B, 0x78]);
+	}
+
+	#[test]
+	fn bfs() {
+		test_output("\tbf/s @($52,pc)", &[0x8F, 0x52]);
 	}
 }
 
