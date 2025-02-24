@@ -46,6 +46,7 @@ enum Asm {
 	BtS(i8),
 	Dt(Reg),
 	Jmp(Reg),
+	Jsr(Reg),
 }
 
 fn extra_rules(src: Pair<Rule>) {
@@ -158,6 +159,11 @@ fn parse_ins_line(source: Pair<Rule>, mut output: Output) -> ParseResult<Output>
 				let arg = src.into_inner().next().unwrap();
 				let reg = parse_addr_reg_or_sp(arg)?;
 				output.push(Asm::Jmp(reg));
+			}
+			Rule::ins_jsr => {
+				let arg = src.into_inner().next().unwrap();
+				let reg = parse_addr_reg_or_sp(arg)?;
+				output.push(Asm::Jsr(reg));
 			}
 			_ => {
 				extra_rules(src);
@@ -521,6 +527,11 @@ mod parser {
 	}
 
 	#[test]
+	fn jsr() {
+		test_single!("\tjsr @r9", Asm::Jsr(9));
+	}
+
+	#[test]
 	#[should_panic = " --> 1:1
   |
 1 | stuff
@@ -566,6 +577,7 @@ fn output(asm: &[Asm]) -> Vec<u8> {
 			Asm::BtS(d)  => out.push(0x8D00 | *d as u16),
 			Asm::Dt(r)   => out.push(0x4010 | (*r as u16) << 8),
 			Asm::Jmp(r)  => out.push(0x402B | (*r as u16) << 8),
+			Asm::Jsr(r)  => out.push(0x400B | (*r as u16) << 8),
 		}
 	}
 	out.into_iter()
@@ -674,6 +686,11 @@ mod output {
 	#[test]
 	fn jmp() {
 		test_output("\tjmp @r13", &[0x4D, 0x2B]);
+	}
+
+	#[test]
+	fn jsr() {
+		test_output("\tjsr @r3", &[0x43, 0x0B]);
 	}
 }
 
