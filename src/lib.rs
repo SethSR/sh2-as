@@ -101,70 +101,24 @@ fn parse_ins_line(source: Pair<Rule>, mut output: Output) -> ParseResult<Output>
 
 		match src.as_rule() {
 			Rule::ins_clrmac => output.push(Asm::ClrMac),
-			Rule::ins_clrt => output.push(Asm::ClrT),
-			Rule::ins_div0u => output.push(Asm::Div0U),
-			Rule::ins_nop => output.push(Asm::Nop),
-			Rule::ins_rte => output.push(Asm::Rte),
-			Rule::ins_rts => output.push(Asm::Rts),
-			Rule::ins_sett => output.push(Asm::SetT),
-			Rule::ins_sleep => output.push(Asm::Sleep),
-			Rule::ins_bf => {
-				let arg = src.into_inner().next().unwrap();
-				let disp = parse_disp_pc(arg)?;
-				output.push(Asm::Bf(disp));
-			}
-			Rule::ins_bfs => {
-				let arg = src.into_inner().next().unwrap();
-				let disp = parse_disp_pc(arg)?;
-				output.push(Asm::BfS(disp));
-			}
-			Rule::ins_bra => {
-				let arg = src.into_inner().next().unwrap();
-				let inner_args = arg.into_inner().next().unwrap();
-				let disp = parse_i12(inner_args)?;
-				output.push(Asm::Bra(disp));
-			}
-			Rule::ins_braf => {
-				let arg = src.into_inner().next().unwrap();
-				let reg = parse_addr_reg_or_sp(arg)?;
-				output.push(Asm::BraF(reg));
-			}
-			Rule::ins_bsr => {
-				let arg = src.into_inner().next().unwrap();
-				let inner_arg = arg.into_inner().next().unwrap();
-				let disp = parse_i12(inner_arg)?;
-				output.push(Asm::Bsr(disp));
-			}
-			Rule::ins_bsrf => {
-				let arg = src.into_inner().next().unwrap();
-				let reg = parse_addr_reg_or_sp(arg)?;
-				output.push(Asm::BsrF(reg));
-			}
-			Rule::ins_bt => {
-				let arg = src.into_inner().next().unwrap();
-				let disp = parse_disp_pc(arg)?;
-				output.push(Asm::Bt(disp));
-			}
-			Rule::ins_bts => {
-				let arg = src.into_inner().next().unwrap();
-				let disp = parse_disp_pc(arg)?;
-				output.push(Asm::BtS(disp));
-			}
-			Rule::ins_dt => {
-				let arg = src.into_inner().next().unwrap();
-				let reg = parse_reg_or_sp(arg)?;
-				output.push(Asm::Dt(reg));
-			}
-			Rule::ins_jmp => {
-				let arg = src.into_inner().next().unwrap();
-				let reg = parse_addr_reg_or_sp(arg)?;
-				output.push(Asm::Jmp(reg));
-			}
-			Rule::ins_jsr => {
-				let arg = src.into_inner().next().unwrap();
-				let reg = parse_addr_reg_or_sp(arg)?;
-				output.push(Asm::Jsr(reg));
-			}
+			Rule::ins_clrt   => output.push(Asm::ClrT),
+			Rule::ins_div0u  => output.push(Asm::Div0U),
+			Rule::ins_nop    => output.push(Asm::Nop),
+			Rule::ins_rte    => output.push(Asm::Rte),
+			Rule::ins_rts    => output.push(Asm::Rts),
+			Rule::ins_sett   => output.push(Asm::SetT),
+			Rule::ins_sleep  => output.push(Asm::Sleep),
+			Rule::ins_bf     => output.push(parse_ins_disp_pc(Asm::Bf, src)?),
+			Rule::ins_bfs    => output.push(parse_ins_disp_pc(Asm::BfS, src)?),
+			Rule::ins_bra    => output.push(parse_ins_disp_i12(Asm::Bra, src)?),
+			Rule::ins_braf   => output.push(parse_ins_addr_reg_or_sp(Asm::BraF, src)?),
+			Rule::ins_bsr    => output.push(parse_ins_disp_i12(Asm::Bsr, src)?),
+			Rule::ins_bsrf   => output.push(parse_ins_addr_reg_or_sp(Asm::BsrF, src)?),
+			Rule::ins_bt     => output.push(parse_ins_disp_pc(Asm::Bt, src)?),
+			Rule::ins_bts    => output.push(parse_ins_disp_pc(Asm::BtS, src)?),
+			Rule::ins_dt     => output.push(parse_ins_reg_or_sp(Asm::Dt, src)?),
+			Rule::ins_jmp    => output.push(parse_ins_addr_reg_or_sp(Asm::Jmp, src)?),
+			Rule::ins_jsr    => output.push(parse_ins_addr_reg_or_sp(Asm::Jsr, src)?),
 			_ => {
 				extra_rules(src);
 				continue;
@@ -172,6 +126,35 @@ fn parse_ins_line(source: Pair<Rule>, mut output: Output) -> ParseResult<Output>
 		}
 	}
 	Ok(output)
+}
+
+#[instrument]
+fn parse_ins_disp_i12(f: fn(i16) -> Asm, source: Pair<Rule>) -> ParseResult<Asm> {
+	let arg = source.into_inner().next().unwrap();
+	let inner_arg = arg.into_inner().next().unwrap();
+	let disp = parse_i12(inner_arg)?;
+	Ok(f(disp))
+}
+
+#[instrument]
+fn parse_ins_disp_pc(f: fn(i8) -> Asm, source: Pair<Rule>) -> ParseResult<Asm> {
+	let arg = source.into_inner().next().unwrap();
+	let disp = parse_disp_pc(arg)?;
+	Ok(f(disp))
+}
+
+#[instrument]
+fn parse_ins_reg_or_sp(f: fn(Reg) -> Asm, source: Pair<Rule>) -> ParseResult<Asm> {
+	let arg = source.into_inner().next().unwrap();
+	let reg = parse_reg_or_sp(arg)?;
+	Ok(f(reg))
+}
+
+#[instrument]
+fn parse_ins_addr_reg_or_sp(f: fn(Reg) -> Asm, source: Pair<Rule>) -> ParseResult<Asm> {
+	let arg = source.into_inner().next().unwrap();
+	let reg = parse_addr_reg_or_sp(arg)?;
+	Ok(f(reg))
 }
 
 #[instrument]
