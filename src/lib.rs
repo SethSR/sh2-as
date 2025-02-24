@@ -58,6 +58,10 @@ enum Asm {
 	ShLL2(Reg),
 	ShLL8(Reg),
 	ShLL16(Reg),
+	ShLR(Reg),
+	ShLR2(Reg),
+	ShLR8(Reg),
+	ShLR16(Reg),
 }
 
 fn extra_rules(src: Pair<Rule>) {
@@ -141,6 +145,10 @@ fn parse_ins_line(source: Pair<Rule>, mut output: Output) -> ParseResult<Output>
 			Rule::ins_shll2  => output.push(parse_ins_reg_or_sp(Asm::ShLL2, src)?),
 			Rule::ins_shll8  => output.push(parse_ins_reg_or_sp(Asm::ShLL8, src)?),
 			Rule::ins_shll16 => output.push(parse_ins_reg_or_sp(Asm::ShLL16, src)?),
+			Rule::ins_shlr   => output.push(parse_ins_reg_or_sp(Asm::ShLR, src)?),
+			Rule::ins_shlr2  => output.push(parse_ins_reg_or_sp(Asm::ShLR2, src)?),
+			Rule::ins_shlr8  => output.push(parse_ins_reg_or_sp(Asm::ShLR8, src)?),
+			Rule::ins_shlr16 => output.push(parse_ins_reg_or_sp(Asm::ShLR16, src)?),
 
 			_ => {
 				extra_rules(src);
@@ -593,6 +601,26 @@ mod parser {
 	}
 
 	#[test]
+	fn shlr() {
+		test_single!("\tshlr r12", Asm::ShLR(12));
+	}
+
+	#[test]
+	fn shlr2() {
+		test_single!("\tshlr2 r15", Asm::ShLR2(15));
+	}
+
+	#[test]
+	fn shlr8() {
+		test_single!("\tshlr8 r14", Asm::ShLR8(14));
+	}
+
+	#[test]
+	fn shlr16() {
+		test_single!("\tshlr16 r13", Asm::ShLR16(13));
+	}
+
+	#[test]
 	#[should_panic = " --> 1:1
   |
 1 | stuff
@@ -650,6 +678,10 @@ fn output(asm: &[Asm]) -> Vec<u8> {
 			Asm::ShLL2(r)  => out.push(0x4008 | (*r as u16) << 8),
 			Asm::ShLL8(r)  => out.push(0x4018 | (*r as u16) << 8),
 			Asm::ShLL16(r) => out.push(0x4028 | (*r as u16) << 8),
+			Asm::ShLR(r)   => out.push(0x4001 | (*r as u16) << 8),
+			Asm::ShLR2(r)  => out.push(0x4009 | (*r as u16) << 8),
+			Asm::ShLR8(r)  => out.push(0x4019 | (*r as u16) << 8),
+			Asm::ShLR16(r) => out.push(0x4029 | (*r as u16) << 8),
 		}
 	}
 
@@ -819,6 +851,26 @@ mod output {
 	#[test]
 	fn shll16() {
 		test_output("\tshll16 r15", &[0x4F, 0x28]);
+	}
+
+	#[test]
+	fn shlr() {
+		test_output("\tshlr r0", &[0x40, 0x01]);
+	}
+
+	#[test]
+	fn shlr2() {
+		test_output("\tshlr2 r2", &[0x42, 0x09]);
+	}
+
+	#[test]
+	fn shlr8() {
+		test_output("\tshlr8 r8", &[0x48, 0x19]);
+	}
+
+	#[test]
+	fn shlr16() {
+		test_output("\tshlr16 r15", &[0x4F, 0x29]);
 	}
 }
 
