@@ -67,6 +67,7 @@ enum Asm {
 	TrapA(u8),
 
 	AddC(Reg, Reg),
+	AddV(Reg, Reg),
 }
 
 fn extra_rules(src: Pair<Rule>) {
@@ -165,6 +166,12 @@ fn parse_ins_line(source: Pair<Rule>, mut output: Output) -> ParseResult<Output>
 				let src = parse_reg_or_sp(args.next().unwrap())?;
 				let dst = parse_reg_or_sp(args.next().unwrap())?;
 				output.push(Asm::AddC(src, dst));
+			}
+			Rule::ins_addv => {
+				let mut args = src.into_inner();
+				let src = parse_reg_or_sp(args.next().unwrap())?;
+				let dst = parse_reg_or_sp(args.next().unwrap())?;
+				output.push(Asm::AddV(src, dst));
 			}
 
 			_ => {
@@ -653,6 +660,11 @@ mod parser {
 	}
 
 	#[test]
+	fn addv() {
+		test_single!("\taddv r2,r7", Asm::AddV(2, 7));
+	}
+
+	#[test]
 	#[should_panic = " --> 1:1
   |
 1 | stuff
@@ -717,6 +729,7 @@ fn output(asm: &[Asm]) -> Vec<u8> {
 			Asm::TaS(r)    => out.push(0x401B | (*r as u16) << 8),
 			Asm::TrapA(i)  => out.push(0xC300 | *i as u16),
 			Asm::AddC(m,n) => out.push(0x300E | (*n as u16) << 8 | (*m as u16) << 4),
+			Asm::AddV(m,n) => out.push(0x300F | (*n as u16) << 8 | (*m as u16) << 4),
 		}
 	}
 
@@ -921,6 +934,11 @@ mod output {
 	#[test]
 	fn addc() {
 		test_output("\taddc r12, r8", &[0x38, 0xCE]);
+	}
+
+	#[test]
+	fn addv() {
+		test_output("\taddv r4, r11", &[0x3B, 0x4F]);
 	}
 }
 
