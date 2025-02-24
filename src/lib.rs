@@ -63,6 +63,7 @@ enum Asm {
 	ShLR8(Reg),
 	ShLR16(Reg),
 	TaS(Reg),
+	TrapA(u8),
 }
 
 fn extra_rules(src: Pair<Rule>) {
@@ -151,6 +152,11 @@ fn parse_ins_line(source: Pair<Rule>, mut output: Output) -> ParseResult<Output>
 			Rule::ins_shlr8  => output.push(parse_ins_reg_or_sp(Asm::ShLR8, src)?),
 			Rule::ins_shlr16 => output.push(parse_ins_reg_or_sp(Asm::ShLR16, src)?),
 			Rule::ins_tas    => output.push(parse_ins_addr_reg_or_sp(Asm::TaS, src)?),
+			Rule::ins_trapa  => {
+				let mut args = src.into_inner();
+				let imm = parse_u8(args.next().unwrap())?;
+				output.push(Asm::TrapA(imm));
+			}
 
 			_ => {
 				extra_rules(src);
@@ -628,6 +634,11 @@ mod parser {
 	}
 
 	#[test]
+	fn trapa() {
+		test_single!("\ttrapa #$AA", Asm::TrapA(170));
+	}
+
+	#[test]
 	#[should_panic = " --> 1:1
   |
 1 | stuff
@@ -690,6 +701,7 @@ fn output(asm: &[Asm]) -> Vec<u8> {
 			Asm::ShLR8(r)  => out.push(0x4019 | (*r as u16) << 8),
 			Asm::ShLR16(r) => out.push(0x4029 | (*r as u16) << 8),
 			Asm::TaS(r)    => out.push(0x401B | (*r as u16) << 8),
+			Asm::TrapA(i)  => out.push(0xC300 | *i as u16),
 		}
 	}
 
@@ -884,6 +896,11 @@ mod output {
 	#[test]
 	fn tas() {
 		test_output("\ttas.b @sp", &[0x4F, 0x1B]);
+	}
+
+	#[test]
+	fn trapa() {
+		test_output("\ttrapa #240", &[0xC3, 0xF0]);
 	}
 }
 
