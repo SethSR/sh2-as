@@ -36,6 +36,7 @@ enum Asm {
 	Rts,
 	SetT,
 	Sleep,
+
 	Bf(i8),
 	BfS(i8),
 	Bra(i16),
@@ -64,6 +65,8 @@ enum Asm {
 	ShLR16(Reg),
 	TaS(Reg),
 	TrapA(u8),
+
+	AddC(Reg, Reg),
 }
 
 fn extra_rules(src: Pair<Rule>) {
@@ -152,10 +155,16 @@ fn parse_ins_line(source: Pair<Rule>, mut output: Output) -> ParseResult<Output>
 			Rule::ins_shlr8  => output.push(parse_ins_reg_or_sp(Asm::ShLR8, src)?),
 			Rule::ins_shlr16 => output.push(parse_ins_reg_or_sp(Asm::ShLR16, src)?),
 			Rule::ins_tas    => output.push(parse_ins_addr_reg_or_sp(Asm::TaS, src)?),
-			Rule::ins_trapa  => {
+			Rule::ins_trapa => {
 				let mut args = src.into_inner();
 				let imm = parse_u8(args.next().unwrap())?;
 				output.push(Asm::TrapA(imm));
+			}
+			Rule::ins_addc => {
+				let mut args = src.into_inner();
+				let src = parse_reg_or_sp(args.next().unwrap())?;
+				let dst = parse_reg_or_sp(args.next().unwrap())?;
+				output.push(Asm::AddC(src, dst));
 			}
 
 			_ => {
@@ -639,6 +648,11 @@ mod parser {
 	}
 
 	#[test]
+	fn addc() {
+		test_single!("\taddc r2,r7", Asm::AddC(2, 7));
+	}
+
+	#[test]
 	#[should_panic = " --> 1:1
   |
 1 | stuff
@@ -702,6 +716,7 @@ fn output(asm: &[Asm]) -> Vec<u8> {
 			Asm::ShLR16(r) => out.push(0x4029 | (*r as u16) << 8),
 			Asm::TaS(r)    => out.push(0x401B | (*r as u16) << 8),
 			Asm::TrapA(i)  => out.push(0xC300 | *i as u16),
+			Asm::AddC(m,n) => out.push(0x300E | (*n as u16) << 8 | (*m as u16) << 4),
 		}
 	}
 
@@ -901,6 +916,11 @@ mod output {
 	#[test]
 	fn trapa() {
 		test_output("\ttrapa #240", &[0xC3, 0xF0]);
+	}
+
+	#[test]
+	fn addc() {
+		test_output("\taddc r12, r8", &[0x38, 0xCE]);
 	}
 }
 
