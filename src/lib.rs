@@ -47,6 +47,7 @@ enum Asm {
 	Dt(Reg),
 	Jmp(Reg),
 	Jsr(Reg),
+	MovT(Reg),
 }
 
 fn extra_rules(src: Pair<Rule>) {
@@ -119,6 +120,7 @@ fn parse_ins_line(source: Pair<Rule>, mut output: Output) -> ParseResult<Output>
 			Rule::ins_dt     => output.push(parse_ins_reg_or_sp(Asm::Dt, src)?),
 			Rule::ins_jmp    => output.push(parse_ins_addr_reg_or_sp(Asm::Jmp, src)?),
 			Rule::ins_jsr    => output.push(parse_ins_addr_reg_or_sp(Asm::Jsr, src)?),
+			Rule::ins_movt   => output.push(parse_ins_reg_or_sp(Asm::MovT, src)?),
 			_ => {
 				extra_rules(src);
 				continue;
@@ -515,6 +517,11 @@ mod parser {
 	}
 
 	#[test]
+	fn movt() {
+		test_single!("\tmovt r0", Asm::MovT(0));
+	}
+
+	#[test]
 	#[should_panic = " --> 1:1
   |
 1 | stuff
@@ -561,6 +568,7 @@ fn output(asm: &[Asm]) -> Vec<u8> {
 			Asm::Dt(r)   => out.push(0x4010 | (*r as u16) << 8),
 			Asm::Jmp(r)  => out.push(0x402B | (*r as u16) << 8),
 			Asm::Jsr(r)  => out.push(0x400B | (*r as u16) << 8),
+			Asm::MovT(r) => out.push(0x0029 | (*r as u16) << 8),
 		}
 	}
 	out.into_iter()
@@ -674,6 +682,11 @@ mod output {
 	#[test]
 	fn jsr() {
 		test_output("\tjsr @r3", &[0x43, 0x0B]);
+	}
+
+	#[test]
+	fn movt() {
+		test_output("\tmovt r6", &[0x06, 0x29]);
 	}
 }
 
