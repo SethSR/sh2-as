@@ -54,6 +54,10 @@ enum Asm {
 	RotR(Reg),
 	ShAL(Reg),
 	ShAR(Reg),
+	ShLL(Reg),
+	ShLL2(Reg),
+	ShLL8(Reg),
+	ShLL16(Reg),
 }
 
 fn extra_rules(src: Pair<Rule>) {
@@ -133,6 +137,10 @@ fn parse_ins_line(source: Pair<Rule>, mut output: Output) -> ParseResult<Output>
 			Rule::ins_rotr   => output.push(parse_ins_reg_or_sp(Asm::RotR, src)?),
 			Rule::ins_shal   => output.push(parse_ins_reg_or_sp(Asm::ShAL, src)?),
 			Rule::ins_shar   => output.push(parse_ins_reg_or_sp(Asm::ShAR, src)?),
+			Rule::ins_shll   => output.push(parse_ins_reg_or_sp(Asm::ShLL, src)?),
+			Rule::ins_shll2  => output.push(parse_ins_reg_or_sp(Asm::ShLL2, src)?),
+			Rule::ins_shll8  => output.push(parse_ins_reg_or_sp(Asm::ShLL8, src)?),
+			Rule::ins_shll16 => output.push(parse_ins_reg_or_sp(Asm::ShLL16, src)?),
 
 			_ => {
 				extra_rules(src);
@@ -565,6 +573,26 @@ mod parser {
 	}
 
 	#[test]
+	fn shll() {
+		test_single!("\tshll r12", Asm::ShLL(12));
+	}
+
+	#[test]
+	fn shll2() {
+		test_single!("\tshll2 r15", Asm::ShLL2(15));
+	}
+
+	#[test]
+	fn shll8() {
+		test_single!("\tshll8 r14", Asm::ShLL8(14));
+	}
+
+	#[test]
+	fn shll16() {
+		test_single!("\tshll16 r13", Asm::ShLL16(13));
+	}
+
+	#[test]
 	#[should_panic = " --> 1:1
   |
 1 | stuff
@@ -592,32 +620,36 @@ fn output(asm: &[Asm]) -> Vec<u8> {
 	let mut out = Vec::with_capacity(asm.len());
 	for cmd in asm {
 		match cmd {
-			Asm::ClrT     => out.push(0x0008),
-			Asm::Nop      => out.push(0x0009),
-			Asm::Rts      => out.push(0x000B),
-			Asm::SetT     => out.push(0x0018),
-			Asm::Div0U    => out.push(0x0019),
-			Asm::Sleep    => out.push(0x001B),
-			Asm::ClrMac   => out.push(0x0028),
-			Asm::Rte      => out.push(0x002B),
-			Asm::Bf(d)    => out.push(0x8B00 | *d as u16),
-			Asm::BfS(d)   => out.push(0x8F00 | *d as u16),
-			Asm::Bra(d)   => out.push(0xA000 | (*d & 0xFFF) as u16),
-			Asm::BraF(r)  => out.push(0x0023 | (*r as u16) << 8),
-			Asm::Bsr(d)   => out.push(0xB000 | (*d & 0xFFF) as u16),
-			Asm::BsrF(r)  => out.push(0x0003 | (*r as u16) << 8),
-			Asm::Bt(d)    => out.push(0x8900 | *d as u16),
-			Asm::BtS(d)   => out.push(0x8D00 | *d as u16),
-			Asm::Dt(r)    => out.push(0x4010 | (*r as u16) << 8),
-			Asm::Jmp(r)   => out.push(0x402B | (*r as u16) << 8),
-			Asm::Jsr(r)   => out.push(0x400B | (*r as u16) << 8),
-			Asm::MovT(r)  => out.push(0x0029 | (*r as u16) << 8),
-			Asm::RotCL(r) => out.push(0x4044 | (*r as u16) << 8),
-			Asm::RotCR(r) => out.push(0x4045 | (*r as u16) << 8),
-			Asm::RotL(r)  => out.push(0x4004 | (*r as u16) << 8),
-			Asm::RotR(r)  => out.push(0x4005 | (*r as u16) << 8),
-			Asm::ShAL(r)  => out.push(0x4020 | (*r as u16) << 8),
-			Asm::ShAR(r)  => out.push(0x4021 | (*r as u16) << 8),
+			Asm::ClrT      => out.push(0x0008),
+			Asm::Nop       => out.push(0x0009),
+			Asm::Rts       => out.push(0x000B),
+			Asm::SetT      => out.push(0x0018),
+			Asm::Div0U     => out.push(0x0019),
+			Asm::Sleep     => out.push(0x001B),
+			Asm::ClrMac    => out.push(0x0028),
+			Asm::Rte       => out.push(0x002B),
+			Asm::Bf(d)     => out.push(0x8B00 | *d as u16),
+			Asm::BfS(d)    => out.push(0x8F00 | *d as u16),
+			Asm::Bra(d)    => out.push(0xA000 | (*d & 0xFFF) as u16),
+			Asm::BraF(r)   => out.push(0x0023 | (*r as u16) << 8),
+			Asm::Bsr(d)    => out.push(0xB000 | (*d & 0xFFF) as u16),
+			Asm::BsrF(r)   => out.push(0x0003 | (*r as u16) << 8),
+			Asm::Bt(d)     => out.push(0x8900 | *d as u16),
+			Asm::BtS(d)    => out.push(0x8D00 | *d as u16),
+			Asm::Dt(r)     => out.push(0x4010 | (*r as u16) << 8),
+			Asm::Jmp(r)    => out.push(0x402B | (*r as u16) << 8),
+			Asm::Jsr(r)    => out.push(0x400B | (*r as u16) << 8),
+			Asm::MovT(r)   => out.push(0x0029 | (*r as u16) << 8),
+			Asm::RotCL(r)  => out.push(0x4044 | (*r as u16) << 8),
+			Asm::RotCR(r)  => out.push(0x4045 | (*r as u16) << 8),
+			Asm::RotL(r)   => out.push(0x4004 | (*r as u16) << 8),
+			Asm::RotR(r)   => out.push(0x4005 | (*r as u16) << 8),
+			Asm::ShAL(r)   => out.push(0x4020 | (*r as u16) << 8),
+			Asm::ShAR(r)   => out.push(0x4021 | (*r as u16) << 8),
+			Asm::ShLL(r)   => out.push(0x4000 | (*r as u16) << 8),
+			Asm::ShLL2(r)  => out.push(0x4008 | (*r as u16) << 8),
+			Asm::ShLL8(r)  => out.push(0x4018 | (*r as u16) << 8),
+			Asm::ShLL16(r) => out.push(0x4028 | (*r as u16) << 8),
 		}
 	}
 
@@ -767,6 +799,26 @@ mod output {
 	#[test]
 	fn shar() {
 		test_output("\tshar r9", &[0x49, 0x21]);
+	}
+
+	#[test]
+	fn shll() {
+		test_output("\tshll r0", &[0x40, 0x00]);
+	}
+
+	#[test]
+	fn shll2() {
+		test_output("\tshll2 r2", &[0x42, 0x08]);
+	}
+
+	#[test]
+	fn shll8() {
+		test_output("\tshll8 r8", &[0x48, 0x18]);
+	}
+
+	#[test]
+	fn shll16() {
+		test_output("\tshll16 r15", &[0x4F, 0x28]);
 	}
 }
 
