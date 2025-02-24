@@ -48,6 +48,8 @@ enum Asm {
 	Jmp(Reg),
 	Jsr(Reg),
 	MovT(Reg),
+	RotCL(Reg),
+	RotCR(Reg),
 }
 
 fn extra_rules(src: Pair<Rule>) {
@@ -121,6 +123,8 @@ fn parse_ins_line(source: Pair<Rule>, mut output: Output) -> ParseResult<Output>
 			Rule::ins_jmp    => output.push(parse_ins_addr_reg_or_sp(Asm::Jmp, src)?),
 			Rule::ins_jsr    => output.push(parse_ins_addr_reg_or_sp(Asm::Jsr, src)?),
 			Rule::ins_movt   => output.push(parse_ins_reg_or_sp(Asm::MovT, src)?),
+			Rule::ins_rotcl  => output.push(parse_ins_reg_or_sp(Asm::RotCL, src)?),
+			Rule::ins_rotcr  => output.push(parse_ins_reg_or_sp(Asm::RotCR, src)?),
 			_ => {
 				extra_rules(src);
 				continue;
@@ -522,6 +526,16 @@ mod parser {
 	}
 
 	#[test]
+	fn rotcl() {
+		test_single!("\trotcl r4", Asm::RotCL(4));
+	}
+
+	#[test]
+	fn rotcr() {
+		test_single!("\trotcr r5", Asm::RotCR(5));
+	}
+
+	#[test]
 	#[should_panic = " --> 1:1
   |
 1 | stuff
@@ -549,26 +563,28 @@ fn output(asm: &[Asm]) -> Vec<u8> {
 	let mut out = Vec::with_capacity(asm.len());
 	for cmd in asm {
 		match cmd {
-			Asm::ClrT    => out.push(0x0008),
-			Asm::Nop     => out.push(0x0009),
-			Asm::Rts     => out.push(0x000B),
-			Asm::SetT    => out.push(0x0018),
-			Asm::Div0U   => out.push(0x0019),
-			Asm::Sleep   => out.push(0x001B),
-			Asm::ClrMac  => out.push(0x0028),
-			Asm::Rte     => out.push(0x002B),
-			Asm::Bf(d)   => out.push(0x8B00 | *d as u16),
-			Asm::BfS(d)  => out.push(0x8F00 | *d as u16),
-			Asm::Bra(d)  => out.push(0xA000 | (*d & 0xFFF) as u16),
-			Asm::BraF(r) => out.push(0x0023 | (*r as u16) << 8),
-			Asm::Bsr(d)  => out.push(0xB000 | (*d & 0xFFF) as u16),
-			Asm::BsrF(r) => out.push(0x0003 | (*r as u16) << 8),
-			Asm::Bt(d)   => out.push(0x8900 | *d as u16),
-			Asm::BtS(d)  => out.push(0x8D00 | *d as u16),
-			Asm::Dt(r)   => out.push(0x4010 | (*r as u16) << 8),
-			Asm::Jmp(r)  => out.push(0x402B | (*r as u16) << 8),
-			Asm::Jsr(r)  => out.push(0x400B | (*r as u16) << 8),
-			Asm::MovT(r) => out.push(0x0029 | (*r as u16) << 8),
+			Asm::ClrT     => out.push(0x0008),
+			Asm::Nop      => out.push(0x0009),
+			Asm::Rts      => out.push(0x000B),
+			Asm::SetT     => out.push(0x0018),
+			Asm::Div0U    => out.push(0x0019),
+			Asm::Sleep    => out.push(0x001B),
+			Asm::ClrMac   => out.push(0x0028),
+			Asm::Rte      => out.push(0x002B),
+			Asm::Bf(d)    => out.push(0x8B00 | *d as u16),
+			Asm::BfS(d)   => out.push(0x8F00 | *d as u16),
+			Asm::Bra(d)   => out.push(0xA000 | (*d & 0xFFF) as u16),
+			Asm::BraF(r)  => out.push(0x0023 | (*r as u16) << 8),
+			Asm::Bsr(d)   => out.push(0xB000 | (*d & 0xFFF) as u16),
+			Asm::BsrF(r)  => out.push(0x0003 | (*r as u16) << 8),
+			Asm::Bt(d)    => out.push(0x8900 | *d as u16),
+			Asm::BtS(d)   => out.push(0x8D00 | *d as u16),
+			Asm::Dt(r)    => out.push(0x4010 | (*r as u16) << 8),
+			Asm::Jmp(r)   => out.push(0x402B | (*r as u16) << 8),
+			Asm::Jsr(r)   => out.push(0x400B | (*r as u16) << 8),
+			Asm::MovT(r)  => out.push(0x0029 | (*r as u16) << 8),
+			Asm::RotCL(r) => out.push(0x4044 | (*r as u16) << 8),
+			Asm::RotCR(r) => out.push(0x4045 | (*r as u16) << 8),
 		}
 	}
 	out.into_iter()
@@ -687,6 +703,16 @@ mod output {
 	#[test]
 	fn movt() {
 		test_output("\tmovt r6", &[0x06, 0x29]);
+	}
+
+	#[test]
+	fn rotcl() {
+		test_output("\trotcl r15", &[0x4F, 0x44]);
+	}
+
+	#[test]
+	fn rotcr() {
+		test_output("\trotcr r14", &[0x4E, 0x45]);
 	}
 }
 
