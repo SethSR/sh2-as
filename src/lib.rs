@@ -52,6 +52,8 @@ enum Asm {
 	RotCR(Reg),
 	RotL(Reg),
 	RotR(Reg),
+	ShAL(Reg),
+	ShAR(Reg),
 }
 
 fn extra_rules(src: Pair<Rule>) {
@@ -129,6 +131,9 @@ fn parse_ins_line(source: Pair<Rule>, mut output: Output) -> ParseResult<Output>
 			Rule::ins_rotcr  => output.push(parse_ins_reg_or_sp(Asm::RotCR, src)?),
 			Rule::ins_rotl   => output.push(parse_ins_reg_or_sp(Asm::RotL, src)?),
 			Rule::ins_rotr   => output.push(parse_ins_reg_or_sp(Asm::RotR, src)?),
+			Rule::ins_shal   => output.push(parse_ins_reg_or_sp(Asm::ShAL, src)?),
+			Rule::ins_shar   => output.push(parse_ins_reg_or_sp(Asm::ShAR, src)?),
+
 			_ => {
 				extra_rules(src);
 				continue;
@@ -550,6 +555,16 @@ mod parser {
 	}
 
 	#[test]
+	fn shal() {
+		test_single!("\tshal r10", Asm::ShAL(10));
+	}
+
+	#[test]
+	fn shar() {
+		test_single!("\tshar r11", Asm::ShAR(11));
+	}
+
+	#[test]
 	#[should_panic = " --> 1:1
   |
 1 | stuff
@@ -601,8 +616,11 @@ fn output(asm: &[Asm]) -> Vec<u8> {
 			Asm::RotCR(r) => out.push(0x4045 | (*r as u16) << 8),
 			Asm::RotL(r)  => out.push(0x4004 | (*r as u16) << 8),
 			Asm::RotR(r)  => out.push(0x4005 | (*r as u16) << 8),
+			Asm::ShAL(r)  => out.push(0x4020 | (*r as u16) << 8),
+			Asm::ShAR(r)  => out.push(0x4021 | (*r as u16) << 8),
 		}
 	}
+
 	out.into_iter()
 		.flat_map(|word: u16| word.to_be_bytes())
 		.collect()
@@ -739,6 +757,16 @@ mod output {
 	#[test]
 	fn rotr() {
 		test_output("\trotr r5", &[0x45, 0x05]);
+	}
+
+	#[test]
+	fn shal() {
+		test_output("\tshal r8", &[0x48, 0x20]);
+	}
+
+	#[test]
+	fn shar() {
+		test_output("\tshar r9", &[0x49, 0x21]);
 	}
 }
 
