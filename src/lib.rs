@@ -44,6 +44,7 @@ enum Asm {
 	BsrF(Reg),
 	Bt(i8),
 	BtS(i8),
+	Dt(Reg),
 }
 
 fn extra_rules(src: Pair<Rule>) {
@@ -62,6 +63,8 @@ fn rename_rules(rule: &Rule) -> String {
 		Rule::lbl_line => "Label",
 		Rule::val_line => "Value",
 		Rule::bin => "a binary value",
+		Rule::sp => "SP register",
+		Rule::reg => "general register",
 		_ => unreachable!("{rule:?}"),
 	}.to_owned()
 }
@@ -145,6 +148,11 @@ fn parse_ins_line(source: Pair<Rule>, mut output: Output) -> ParseResult<Output>
 				let disp = parse_disp_pc(arg)?;
 				output.push(Asm::BtS(disp));
 			}
+			Rule::ins_dt => {
+				let arg = src.into_inner().next().unwrap();
+				let reg = parse_reg_or_sp(arg)?;
+				output.push(Asm::Dt(reg));
+			}
 			_ => {
 				extra_rules(src);
 				continue;
@@ -152,6 +160,31 @@ fn parse_ins_line(source: Pair<Rule>, mut output: Output) -> ParseResult<Output>
 		}
 	}
 	Ok(output)
+}
+
+#[instrument]
+fn parse_reg_or_sp(source: Pair<Rule>) -> ParseResult<Reg> {
+	trace!("{source} - '{}'", source.as_str());
+
+	let s = source.as_str();
+	if s.chars().next() == Some('r') {
+		s[1..].parse::<Reg>()
+			.map_err(|_| Error::new_from_span(
+				ErrorVariant::CustomError {
+					message: format!("expected register (ex: r4), found {}", source.as_str()),
+				},
+				source.as_span(),
+			))
+	} else if s == "sp" {
+		Ok(15)
+	} else {
+		Err(Error::new_from_span(
+			ErrorVariant::CustomError {
+				message: format!("expected register or SP, found {}", source.as_str()),
+			},
+			source.as_span(),
+		))
+	}
 }
 
 #[instrument]
@@ -472,6 +505,11 @@ mod parser {
 	}
 
 	#[test]
+	fn dt() {
+		test_single!("\tdt r2", Asm::Dt(2));
+	}
+
+	#[test]
 	#[should_panic = " --> 1:1
   |
 1 | stuff
@@ -515,6 +553,7 @@ fn output(asm: &[Asm]) -> Vec<u8> {
 			Asm::BsrF(r) => out.push(0x0003 | (*r as u16) << 8),
 			Asm::Bt(d)   => out.push(0x8900 | *d as u16),
 			Asm::BtS(d)  => out.push(0x8D00 | *d as u16),
+			Asm::Dt(r)   => out.push(0x4010 | (*r as u16) << 8),
 		}
 	}
 	out.into_iter()
@@ -613,6 +652,11 @@ mod output {
 	#[test]
 	fn bts() {
 		test_output("\tbt/s @(%100,pc)", &[0x8D, 0x04]);
+	}
+
+	#[test]
+	fn dt() {
+		test_output("\tdt r10", &[0x4A, 0x10]);
 	}
 }
 
