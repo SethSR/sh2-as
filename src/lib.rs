@@ -50,6 +50,8 @@ enum Asm {
 	MovT(Reg),
 	RotCL(Reg),
 	RotCR(Reg),
+	RotL(Reg),
+	RotR(Reg),
 }
 
 fn extra_rules(src: Pair<Rule>) {
@@ -125,6 +127,8 @@ fn parse_ins_line(source: Pair<Rule>, mut output: Output) -> ParseResult<Output>
 			Rule::ins_movt   => output.push(parse_ins_reg_or_sp(Asm::MovT, src)?),
 			Rule::ins_rotcl  => output.push(parse_ins_reg_or_sp(Asm::RotCL, src)?),
 			Rule::ins_rotcr  => output.push(parse_ins_reg_or_sp(Asm::RotCR, src)?),
+			Rule::ins_rotl   => output.push(parse_ins_reg_or_sp(Asm::RotL, src)?),
+			Rule::ins_rotr   => output.push(parse_ins_reg_or_sp(Asm::RotR, src)?),
 			_ => {
 				extra_rules(src);
 				continue;
@@ -536,6 +540,16 @@ mod parser {
 	}
 
 	#[test]
+	fn rotl() {
+		test_single!("\trotl r4", Asm::RotL(4));
+	}
+
+	#[test]
+	fn rotr() {
+		test_single!("\trotr r5", Asm::RotR(5));
+	}
+
+	#[test]
 	#[should_panic = " --> 1:1
   |
 1 | stuff
@@ -585,6 +599,8 @@ fn output(asm: &[Asm]) -> Vec<u8> {
 			Asm::MovT(r)  => out.push(0x0029 | (*r as u16) << 8),
 			Asm::RotCL(r) => out.push(0x4044 | (*r as u16) << 8),
 			Asm::RotCR(r) => out.push(0x4045 | (*r as u16) << 8),
+			Asm::RotL(r)  => out.push(0x4004 | (*r as u16) << 8),
+			Asm::RotR(r)  => out.push(0x4005 | (*r as u16) << 8),
 		}
 	}
 	out.into_iter()
@@ -713,6 +729,16 @@ mod output {
 	#[test]
 	fn rotcr() {
 		test_output("\trotcr r14", &[0x4E, 0x45]);
+	}
+
+	#[test]
+	fn rotl() {
+		test_output("\trotl r4", &[0x44, 0x04]);
+	}
+
+	#[test]
+	fn rotr() {
+		test_output("\trotr r5", &[0x45, 0x05]);
 	}
 }
 
