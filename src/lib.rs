@@ -86,6 +86,10 @@ enum Asm {
 	SwapByte(Reg, Reg),
 	SwapWord(Reg, Reg),
 	Xtrct(Reg, Reg),
+
+	AndReg(Reg, Reg),
+	AndImm(u8),
+	AndByte(u8),
 }
 
 fn extra_rules(src: Pair<Rule>) {
@@ -99,16 +103,22 @@ fn extra_rules(src: Pair<Rule>) {
 fn rename_rules(rule: &Rule) -> String {
 	match rule {
 		Rule::EOI => "EOF",
+
+		Rule::bin => "a binary value",
+		Rule::sp => "SP register",
+		Rule::reg => "general register",
+		Rule::r0 => "R0",
+		Rule::gbr => "GBR",
+
 		Rule::ins_line | Rule::ins => "instruction",
 		Rule::dir_line | Rule::dir => "assembler directive",
 		Rule::lbl_line => "Label",
 		Rule::val_line => "Value",
-		Rule::bin => "a binary value",
-		Rule::sp => "SP register",
-		Rule::reg => "general register",
+
 		Rule::addr_reg_or_sp => "indirect register or SP (ex: '@r1')",
 		Rule::reg_post_inc => "indirect register or SP w/ post-increment (ex: '@r2+')",
 		Rule::reg_pre_dec => "indirect register or SP w/ pre-decrement (ex: '@-r3')",
+
 		_ => unreachable!("{rule:?}"),
 	}.to_owned()
 }
@@ -207,6 +217,10 @@ fn parse_ins_line(source: Pair<Rule>, mut output: Output) -> ParseResult<Output>
 			Rule::ins_swapw => output.push(parse_ins_rs_rs(Asm::SwapWord, src)?),
 			Rule::ins_xtrct => output.push(parse_ins_rs_rs(Asm::Xtrct, src)?),
 
+			Rule::ins_and_reg => output.push(parse_ins_rs_rs(Asm::AndReg, src)?),
+			Rule::ins_and_imm => output.push(parse_ins_imm_r0(Asm::AndImm, src)?),
+			Rule::ins_and_byt => output.push(parse_ins_imm_disp_r0_gbr(Asm::AndByte, src)?),
+
 			_ => {
 				extra_rules(src);
 				continue;
@@ -261,11 +275,41 @@ fn parse_ins_addr_reg_or_sp(f: fn(Reg) -> Asm, source: Pair<Rule>) -> ParseResul
 	Ok(f(reg))
 }
 
+fn parse_ins_imm_r0(f: fn(u8) -> Asm, source: Pair<Rule>) -> ParseResult<Asm> {
+	let mut args = source.into_inner();
+	let imm = parse_u8(args.next().unwrap())?;
+	parse_r0(args.next().unwrap())?;
+	Ok(f(imm))
+}
+
+fn parse_ins_imm_disp_r0_gbr(f: fn(u8) -> Asm, source: Pair<Rule>) -> ParseResult<Asm> {
+	let mut args = source.into_inner();
+	let imm = parse_u8(args.next().unwrap())?;
+	parse_disp_r0_gbr(args.next().unwrap())?;
+	Ok(f(imm))
+}
+
 fn error_message(span: pest::Span, message: &str) -> Error<Rule> {
 	Error::new_from_span(
 		ErrorVariant::CustomError { message: message.to_string() },
 		span,
 	)
+}
+
+fn parse_r0(source: Pair<Rule>) -> ParseResult<()> {
+	if let Rule::r0 = source.as_rule() {
+		Ok(())
+	} else {
+		Err(error_message(source.as_span(), "expected R0"))
+	}
+}
+
+fn parse_disp_r0_gbr(source: Pair<Rule>) -> ParseResult<()> {
+	if let Rule::disp_r0_gbr = source.as_rule() {
+		Ok(())
+	} else {
+		Err(error_message(source.as_span(), "expected '@(R0,GBR)'"))
+	}
 }
 
 fn reg_or_sp(s: &str, err_msg: Error<Rule>) -> ParseResult<Reg> {
@@ -544,6 +588,10 @@ mod parser {
 	test_single!(swapw, "\tswap.w r0,r13",   Asm::SwapWord(0, 13));
 	test_single!(xtrct, "\txtrct r5,r14",    Asm::Xtrct(5, 14));
 
+	test_single!(and,  "\tand r7,r8",            Asm::AndReg(7, 8));
+	test_single!(andi, "\tand #$12,r0",          Asm::AndImm(18));
+	test_single!(andb, "\tand.b #250,@(r0,gbr)", Asm::AndByte(250));
+
 	#[test]
 	#[should_panic = " --> 1:7
   |
@@ -586,6 +634,39 @@ mod parser {
   = expected a decimal value between -128 and 127"]
 	fn bt_too_far_behind() {
 		test_single!("\tbt @(-243,pc)", Asm::Bt(0));
+	}
+
+	#[test]
+	#[should_panic = " --> 1:11
+  |
+1 | 	and #$40,r3
+  | 	         ^---
+  |
+  = expected R0"]
+	fn andi_requires_r0_as_dst() {
+		test_single!("\tand #$40,r3", Asm::AndImm(64));
+	}
+
+	#[test]
+	#[should_panic = " --> 1:13
+  |
+1 | 	and.b #0,@(r9,gbr)
+  | 	           ^---
+  |
+  = expected R0"]
+	fn andb_requires_r0_as_displacement() {
+		test_single!("\tand.b #0,@(r9,gbr)", Asm::AndByte(0));
+	}
+
+	#[test]
+	#[should_panic = " --> 1:16
+  |
+1 | 	and.b #5,@(r0,vbr)
+  | 	              ^---
+  |
+  = expected GBR"]
+	fn andb_requires_gbr_as_base() {
+		test_single!("\tand.b #5,@(r0,vbr)", Asm::AndByte(5));
 	}
 
 	#[test]
@@ -678,6 +759,10 @@ fn output(asm: &[Asm]) -> Vec<u8> {
 			Asm::SwapByte(m,n) => push(0x6008, m, n, &mut out),
 			Asm::SwapWord(m,n) => push(0x6009, m, n, &mut out),
 			Asm::Xtrct(m,n)    => push(0x200D, m, n, &mut out),
+
+			Asm::AndReg(m,n)   => push(0x2009, m, n, &mut out),
+			Asm::AndImm(i)     => out.push(0xC900 | *i as u16),
+			Asm::AndByte(i)    => out.push(0xCD00 | *i as u16),
 		}
 	}
 
@@ -759,5 +844,9 @@ mod output {
 	test_output!(swapb,  "\tswap.b r7,r2",    &[0x62, 0x78]);
 	test_output!(swapw,  "\tswap.w r8,r3",    &[0x63, 0x89]);
 	test_output!(xtrct,  "\txtrct r11,r10",   &[0x2A, 0xBD]);
+
+	test_output!(and,    "\tand r2,r3",            &[0x23, 0x29]);
+	test_output!(andi,   "\tand #25,r0",           &[0xC9, 0x19]);
+	test_output!(andb,   "\tand.b #$EE,@(r0,gbr)", &[0xCD, 0xEE]);
 }
 
