@@ -70,6 +70,8 @@ enum Asm {
 	AddV(Reg, Reg),
 	Div0S(Reg, Reg),
 	Div1(Reg, Reg),
+	ExtSByte(Reg, Reg),
+	ExtSWord(Reg, Reg),
 }
 
 fn extra_rules(src: Pair<Rule>) {
@@ -163,30 +165,12 @@ fn parse_ins_line(source: Pair<Rule>, mut output: Output) -> ParseResult<Output>
 				let imm = parse_u8(args.next().unwrap())?;
 				output.push(Asm::TrapA(imm));
 			}
-			Rule::ins_addc => {
-				let mut args = src.into_inner();
-				let src = parse_reg_or_sp(args.next().unwrap())?;
-				let dst = parse_reg_or_sp(args.next().unwrap())?;
-				output.push(Asm::AddC(src, dst));
-			}
-			Rule::ins_addv => {
-				let mut args = src.into_inner();
-				let src = parse_reg_or_sp(args.next().unwrap())?;
-				let dst = parse_reg_or_sp(args.next().unwrap())?;
-				output.push(Asm::AddV(src, dst));
-			}
-			Rule::ins_div0s => {
-				let mut args = src.into_inner();
-				let src = parse_reg_or_sp(args.next().unwrap())?;
-				let dst = parse_reg_or_sp(args.next().unwrap())?;
-				output.push(Asm::Div0S(src, dst));
-			}
-			Rule::ins_div1 => {
-				let mut args = src.into_inner();
-				let src = parse_reg_or_sp(args.next().unwrap())?;
-				let dst = parse_reg_or_sp(args.next().unwrap())?;
-				output.push(Asm::Div1(src, dst));
-			}
+			Rule::ins_addc  => output.push(parse_ins_rs_rs(Asm::AddC, src)?),
+			Rule::ins_addv  => output.push(parse_ins_rs_rs(Asm::AddV, src)?),
+			Rule::ins_div0s => output.push(parse_ins_rs_rs(Asm::Div0S, src)?),
+			Rule::ins_div1  => output.push(parse_ins_rs_rs(Asm::Div1, src)?),
+			Rule::ins_extsb => output.push(parse_ins_rs_rs(Asm::ExtSByte, src)?),
+			Rule::ins_extsw => output.push(parse_ins_rs_rs(Asm::ExtSWord, src)?),
 
 			_ => {
 				extra_rules(src);
@@ -195,6 +179,14 @@ fn parse_ins_line(source: Pair<Rule>, mut output: Output) -> ParseResult<Output>
 		}
 	}
 	Ok(output)
+}
+
+#[instrument]
+fn parse_ins_rs_rs(f: fn(Reg,Reg) -> Asm, source: Pair<Rule>) -> ParseResult<Asm> {
+	let mut args = source.into_inner();
+	let src = parse_reg_or_sp(args.next().unwrap())?;
+	let dst = parse_reg_or_sp(args.next().unwrap())?;
+	Ok(f(src, dst))
 }
 
 #[instrument]
@@ -689,6 +681,16 @@ mod parser {
 	}
 
 	#[test]
+	fn extsb() {
+		test_single!("\texts.b sp,sp", Asm::ExtSByte(15, 15));
+	}
+
+	#[test]
+	fn extsw() {
+		test_single!("\texts.w sp,sp", Asm::ExtSWord(15, 15));
+	}
+
+	#[test]
 	#[should_panic = " --> 1:1
   |
 1 | stuff
@@ -756,6 +758,8 @@ fn output(asm: &[Asm]) -> Vec<u8> {
 			Asm::AddV(m,n)  => out.push(0x300F | (*n as u16) << 8 | (*m as u16) << 4),
 			Asm::Div0S(m,n) => out.push(0x2007 | (*n as u16) << 8 | (*m as u16) << 4),
 			Asm::Div1(m,n)  => out.push(0x3004 | (*n as u16) << 8 | (*m as u16) << 4),
+			Asm::ExtSByte(m,n) => out.push(0x600E | (*n as u16) << 8 | (*m as u16) << 4),
+			Asm::ExtSWord(m,n) => out.push(0x600F | (*n as u16) << 8 | (*m as u16) << 4),
 		}
 	}
 
@@ -975,6 +979,16 @@ mod output {
 	#[test]
 	fn div1() {
 		test_output("\tdiv1 r1,r1", &[0x31, 0x14]);
+	}
+
+	#[test]
+	fn extsb() {
+		test_output("\texts.b r15,r0", &[0x60, 0xFE]);
+	}
+
+	#[test]
+	fn extsw() {
+		test_output("\texts.w r15,r1", &[0x61, 0xFF]);
 	}
 }
 
