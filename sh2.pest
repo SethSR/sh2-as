@@ -316,7 +316,7 @@ dir_repeat   = { ^".repeat" ~ num }
 dir_endr     = { ^".endr" }
 dir_include  = { ^".include" ~ file_path }
 dir_binclude = { ^".binclude" ~ file_path }
-dir_align    = { ^".align" ~ num }
+dir_align    = { ^".align" ~ ("2" | "4") }
 
 dir = {
 	| dir_constant
