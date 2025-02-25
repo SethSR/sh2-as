@@ -90,6 +90,9 @@ enum Asm {
 	AndReg(Reg, Reg),
 	AndImm(u8),
 	AndByte(u8),
+	OrReg(Reg, Reg),
+	OrImm(u8),
+	OrByte(u8),
 }
 
 fn extra_rules(src: Pair<Rule>) {
@@ -220,6 +223,9 @@ fn parse_ins_line(source: Pair<Rule>, mut output: Output) -> ParseResult<Output>
 			Rule::ins_and_reg => output.push(parse_ins_rs_rs(Asm::AndReg, src)?),
 			Rule::ins_and_imm => output.push(parse_ins_imm_r0(Asm::AndImm, src)?),
 			Rule::ins_and_byt => output.push(parse_ins_imm_disp_r0_gbr(Asm::AndByte, src)?),
+			Rule::ins_or_reg  => output.push(parse_ins_rs_rs(Asm::OrReg, src)?),
+			Rule::ins_or_imm  => output.push(parse_ins_imm_r0(Asm::OrImm, src)?),
+			Rule::ins_or_byt  => output.push(parse_ins_imm_disp_r0_gbr(Asm::OrByte, src)?),
 
 			_ => {
 				extra_rules(src);
@@ -591,6 +597,9 @@ mod parser {
 	test_single!(and,  "\tand r7,r8",            Asm::AndReg(7, 8));
 	test_single!(andi, "\tand #$12,r0",          Asm::AndImm(18));
 	test_single!(andb, "\tand.b #250,@(r0,gbr)", Asm::AndByte(250));
+	test_single!(or,   "\tor r7,r8",             Asm::OrReg(7, 8));
+	test_single!(ori,  "\tor #$12,r0",           Asm::OrImm(18));
+	test_single!(orb,  "\tor.b #250,@(r0,gbr)",  Asm::OrByte(250));
 
 	#[test]
 	#[should_panic = " --> 1:7
@@ -760,9 +769,12 @@ fn output(asm: &[Asm]) -> Vec<u8> {
 			Asm::SwapWord(m,n) => push(0x6009, m, n, &mut out),
 			Asm::Xtrct(m,n)    => push(0x200D, m, n, &mut out),
 
-			Asm::AndReg(m,n)   => push(0x2009, m, n, &mut out),
-			Asm::AndImm(i)     => out.push(0xC900 | *i as u16),
-			Asm::AndByte(i)    => out.push(0xCD00 | *i as u16),
+			Asm::AndReg(m,n)    => push(0x2009, m, n, &mut out),
+			Asm::AndImm(i)  => out.push(0xC900 | *i as u16),
+			Asm::AndByte(i) => out.push(0xCD00 | *i as u16),
+			Asm::OrReg(m,n)     => push(0x200B, m, n, &mut out),
+			Asm::OrImm(i)   => out.push(0xCB00 | *i as u16),
+			Asm::OrByte(i)  => out.push(0xCF00 | *i as u16),
 		}
 	}
 
@@ -848,5 +860,8 @@ mod output {
 	test_output!(and,    "\tand r2,r3",            &[0x23, 0x29]);
 	test_output!(andi,   "\tand #25,r0",           &[0xC9, 0x19]);
 	test_output!(andb,   "\tand.b #$EE,@(r0,gbr)", &[0xCD, 0xEE]);
+	test_output!(or,     "\tor r2,r3",             &[0x23, 0x2B]);
+	test_output!(ori,    "\tor #25,r0",            &[0xCB, 0x19]);
+	test_output!(orb,    "\tor.b #$EE,@(r0,gbr)",  &[0xCF, 0xEE]);
 }
 
