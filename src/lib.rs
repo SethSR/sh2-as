@@ -74,6 +74,8 @@ enum Asm {
 	ExtSWord(Reg, Reg),
 	ExtUByte(Reg, Reg),
 	ExtUWord(Reg, Reg),
+	MacWord(Reg, Reg),
+	MacLong(Reg, Reg),
 }
 
 fn extra_rules(src: Pair<Rule>) {
@@ -94,6 +96,9 @@ fn rename_rules(rule: &Rule) -> String {
 		Rule::bin => "a binary value",
 		Rule::sp => "SP register",
 		Rule::reg => "general register",
+		Rule::addr_reg_or_sp => "indirect register or SP (ex: '@r1')",
+		Rule::reg_post_inc => "indirect register or SP w/ post-increment (ex: '@r2+')",
+		Rule::reg_pre_dec => "indirect register or SP w/ pre-decrement (ex: '@-r3')",
 		_ => unreachable!("{rule:?}"),
 	}.to_owned()
 }
@@ -175,6 +180,8 @@ fn parse_ins_line(source: Pair<Rule>, mut output: Output) -> ParseResult<Output>
 			Rule::ins_extsw => output.push(parse_ins_rs_rs(Asm::ExtSWord, src)?),
 			Rule::ins_extub => output.push(parse_ins_rs_rs(Asm::ExtUByte, src)?),
 			Rule::ins_extuw => output.push(parse_ins_rs_rs(Asm::ExtUWord, src)?),
+			Rule::ins_macw  => output.push(parse_ins_pi_pi(Asm::MacWord, src)?),
+			Rule::ins_macl  => output.push(parse_ins_pi_pi(Asm::MacLong, src)?),
 
 			_ => {
 				extra_rules(src);
@@ -190,6 +197,14 @@ fn parse_ins_rs_rs(f: fn(Reg,Reg) -> Asm, source: Pair<Rule>) -> ParseResult<Asm
 	let mut args = source.into_inner();
 	let src = parse_reg_or_sp(args.next().unwrap())?;
 	let dst = parse_reg_or_sp(args.next().unwrap())?;
+	Ok(f(src, dst))
+}
+
+#[instrument]
+fn parse_ins_pi_pi(f: fn(Reg,Reg) -> Asm, source: Pair<Rule>) -> ParseResult<Asm> {
+	let mut args = source.into_inner();
+	let src = parse_reg_post_inc(args.next().unwrap())?;
+	let dst = parse_reg_post_inc(args.next().unwrap())?;
 	Ok(f(src, dst))
 }
 
@@ -222,53 +237,70 @@ fn parse_ins_addr_reg_or_sp(f: fn(Reg) -> Asm, source: Pair<Rule>) -> ParseResul
 	Ok(f(reg))
 }
 
+fn error_message(span: pest::Span, message: &str) -> Error<Rule> {
+	Error::new_from_span(
+		ErrorVariant::CustomError { message: message.to_string() },
+		span,
+	)
+}
+
+fn reg_or_sp(s: &str, err_msg: Error<Rule>) -> ParseResult<Reg> {
+	eprintln!("{s}");
+	if s == "sp" {
+		Ok(15)
+	} else if s.chars().next() == Some('r') {
+		s[1..].parse::<Reg>().map_err(|_| err_msg)
+	} else {
+		Err(err_msg)
+	}
+}
+
 #[instrument]
 fn parse_reg_or_sp(source: Pair<Rule>) -> ParseResult<Reg> {
 	trace!("{source} - '{}'", source.as_str());
 
-	let s = source.as_str();
-	if s.chars().next() == Some('r') {
-		s[1..].parse::<Reg>()
-			.map_err(|_| Error::new_from_span(
-				ErrorVariant::CustomError {
-					message: format!("expected register (ex: r4), found {}", source.as_str()),
-				},
-				source.as_span(),
-			))
-	} else if s == "sp" {
-		Ok(15)
-	} else {
-		Err(Error::new_from_span(
-			ErrorVariant::CustomError {
-				message: format!("expected register or SP, found {}", source.as_str()),
-			},
-			source.as_span(),
-		))
-	}
+	let err_msg = error_message(source.as_span(), "expected register or SP");
+	reg_or_sp(source.as_str(), err_msg)
 }
 
 #[instrument]
 fn parse_addr_reg_or_sp(source: Pair<Rule>) -> ParseResult<Reg> {
 	trace!("{source} - '{}'", source.as_str());
 
-	let s = &source.as_str()[1..];
-	if s.chars().next() == Some('r') {
-		s[1..].parse::<Reg>()
-			.map_err(|_| Error::new_from_span(
-				ErrorVariant::CustomError {
-					message: format!("expected indirect register (ex: @r4), found {}", source.as_str()),
-				},
-				source.as_span(),
-			))
-	} else if s == "sp" {
-		Ok(15)
+	let err_msg = error_message(source.as_span(), "expected indirect register or SP");
+	if source.as_str().starts_with('@') {
+		reg_or_sp(&source.as_str()[1..], err_msg)
 	} else {
-		Err(Error::new_from_span(
-			ErrorVariant::CustomError {
-				message: format!("expected indirect register or SP, found {}", source.as_str()),
-			},
-			source.as_span(),
-		))
+		Err(err_msg)
+	}
+}
+
+#[instrument]
+fn parse_reg_post_inc(source: Pair<Rule>) -> ParseResult<Reg> {
+	trace!("{source} - '{}'", source.as_str());
+
+	let err_msg = error_message(source.as_span(),
+		"expected indirect register or SP w/ post-increment");
+	if source.as_str().starts_with('@')
+	&& source.as_str().ends_with('+') {
+		let len = source.as_str().len() - 1;
+		reg_or_sp(&source.as_str()[1..len], err_msg)
+	} else {
+		eprintln!("1");
+		Err(err_msg)
+	}
+}
+
+#[instrument]
+fn parse_reg_pre_dec(source: Pair<Rule>) -> ParseResult<Reg> {
+	trace!("{source} - '{}'", source.as_str());
+
+	let err_msg = error_message(source.as_span(),
+		"expected indirect register or SP w/ pre-decrement");
+	if source.as_str().starts_with("@-") {
+		reg_or_sp(&source.as_str()[2..], err_msg)
+	} else {
+		Err(err_msg)
 	}
 }
 
@@ -467,14 +499,16 @@ mod parser {
 	test_single!(tas,    "\ttas.b @r10",     Asm::TaS(10));
 	test_single!(trapa,  "\ttrapa #$AA",     Asm::TrapA(170));
 
-	test_single!(addc,  "\taddc r2,r7",   Asm::AddC(2, 7));
-	test_single!(addv,  "\taddv r2,r7",   Asm::AddV(2, 7));
-	test_single!(div0s, "\tdiv0s sp,r0",  Asm::Div0S(15, 0));
-	test_single!(div1,  "\tdiv1 r1,r1",   Asm::Div1(1, 1));
-	test_single!(extsb, "\texts.b sp,sp", Asm::ExtSByte(15, 15));
-	test_single!(extsw, "\texts.w sp,sp", Asm::ExtSWord(15, 15));
-	test_single!(extub, "\textu.b sp,sp", Asm::ExtUByte(15, 15));
-	test_single!(extuw, "\textu.w sp,sp", Asm::ExtUWord(15, 15));
+	test_single!(addc,  "\taddc r2,r7",      Asm::AddC(2, 7));
+	test_single!(addv,  "\taddv r2,r7",      Asm::AddV(2, 7));
+	test_single!(div0s, "\tdiv0s sp,r0",     Asm::Div0S(15, 0));
+	test_single!(div1,  "\tdiv1 r1,r1",      Asm::Div1(1, 1));
+	test_single!(extsb, "\texts.b sp,sp",    Asm::ExtSByte(15, 15));
+	test_single!(extsw, "\texts.w sp,sp",    Asm::ExtSWord(15, 15));
+	test_single!(extub, "\textu.b sp,sp",    Asm::ExtUByte(15, 15));
+	test_single!(extuw, "\textu.w sp,sp",    Asm::ExtUWord(15, 15));
+	test_single!(macw,  "\tmac.w @r3+,@r6+", Asm::MacWord(3, 6));
+	test_single!(macl,  "\tmac.l @r6+,@r3+", Asm::MacLong(6, 3));
 
 	#[test]
 	#[should_panic = " --> 1:7
@@ -594,6 +628,8 @@ fn output(asm: &[Asm]) -> Vec<u8> {
 			Asm::ExtSWord(m,n) => out.push(0x600F | (*n as u16) << 8 | (*m as u16) << 4),
 			Asm::ExtUByte(m,n) => out.push(0x600C | (*n as u16) << 8 | (*m as u16) << 4),
 			Asm::ExtUWord(m,n) => out.push(0x600D | (*n as u16) << 8 | (*m as u16) << 4),
+			Asm::MacWord(m,n)  => out.push(0x400F | (*n as u16) << 8 | (*m as u16) << 4),
+			Asm::MacLong(m,n)  => out.push(0x000F | (*n as u16) << 8 | (*m as u16) << 4),
 		}
 	}
 
@@ -663,6 +699,8 @@ mod output {
 	test_output!(extsw,  "\texts.w r15,r1",   &[0x61, 0xFF]);
 	test_output!(extub,  "\textu.b r15,r0",   &[0x60, 0xFC]);
 	test_output!(extuw,  "\textu.w r15,r1",   &[0x61, 0xFD]);
+	test_output!(macw,   "\tmac.w @sp+,@r3+", &[0x43, 0xFF]);
+	test_output!(macl,   "\tmac.l @sp+,@r3+", &[0x03, 0xFF]);
 }
 
 /*
