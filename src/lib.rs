@@ -76,6 +76,7 @@ enum Asm {
 	ExtUWord(Reg, Reg),
 	MacWord(Reg, Reg),
 	MacLong(Reg, Reg),
+	MovA(u8),
 }
 
 fn extra_rules(src: Pair<Rule>) {
@@ -182,6 +183,11 @@ fn parse_ins_line(source: Pair<Rule>, mut output: Output) -> ParseResult<Output>
 			Rule::ins_extuw => output.push(parse_ins_rs_rs(Asm::ExtUWord, src)?),
 			Rule::ins_macw  => output.push(parse_ins_pi_pi(Asm::MacWord, src)?),
 			Rule::ins_macl  => output.push(parse_ins_pi_pi(Asm::MacLong, src)?),
+			Rule::ins_mova  => {
+				let mut args = src.into_inner();
+				let disp = parse_disp_pc(args.next().unwrap())?;
+				output.push(Asm::MovA(disp as u8));
+			}
 
 			_ => {
 				extra_rules(src);
@@ -499,16 +505,17 @@ mod parser {
 	test_single!(tas,    "\ttas.b @r10",     Asm::TaS(10));
 	test_single!(trapa,  "\ttrapa #$AA",     Asm::TrapA(170));
 
-	test_single!(addc,  "\taddc r2,r7",      Asm::AddC(2, 7));
-	test_single!(addv,  "\taddv r2,r7",      Asm::AddV(2, 7));
-	test_single!(div0s, "\tdiv0s sp,r0",     Asm::Div0S(15, 0));
-	test_single!(div1,  "\tdiv1 r1,r1",      Asm::Div1(1, 1));
-	test_single!(extsb, "\texts.b sp,sp",    Asm::ExtSByte(15, 15));
-	test_single!(extsw, "\texts.w sp,sp",    Asm::ExtSWord(15, 15));
-	test_single!(extub, "\textu.b sp,sp",    Asm::ExtUByte(15, 15));
-	test_single!(extuw, "\textu.w sp,sp",    Asm::ExtUWord(15, 15));
-	test_single!(macw,  "\tmac.w @r3+,@r6+", Asm::MacWord(3, 6));
-	test_single!(macl,  "\tmac.l @r6+,@r3+", Asm::MacLong(6, 3));
+	test_single!(addc,  "\taddc r2,r7",        Asm::AddC(2, 7));
+	test_single!(addv,  "\taddv r2,r7",        Asm::AddV(2, 7));
+	test_single!(div0s, "\tdiv0s sp,r0",       Asm::Div0S(15, 0));
+	test_single!(div1,  "\tdiv1 r1,r1",        Asm::Div1(1, 1));
+	test_single!(extsb, "\texts.b sp,sp",      Asm::ExtSByte(15, 15));
+	test_single!(extsw, "\texts.w sp,sp",      Asm::ExtSWord(15, 15));
+	test_single!(extub, "\textu.b sp,sp",      Asm::ExtUByte(15, 15));
+	test_single!(extuw, "\textu.w sp,sp",      Asm::ExtUWord(15, 15));
+	test_single!(macw,  "\tmac.w @r3+,@r6+",   Asm::MacWord(3, 6));
+	test_single!(macl,  "\tmac.l @r6+,@r3+",   Asm::MacLong(6, 3));
+	test_single!(mova,  "\tmova @($57,pc),r0", Asm::MovA(0x57));
 
 	#[test]
 	#[should_panic = " --> 1:7
@@ -630,6 +637,7 @@ fn output(asm: &[Asm]) -> Vec<u8> {
 			Asm::ExtUWord(m,n) => out.push(0x600D | (*n as u16) << 8 | (*m as u16) << 4),
 			Asm::MacWord(m,n)  => out.push(0x400F | (*n as u16) << 8 | (*m as u16) << 4),
 			Asm::MacLong(m,n)  => out.push(0x000F | (*n as u16) << 8 | (*m as u16) << 4),
+			Asm::MovA(d)       => out.push(0xC700 | *d as u16),
 		}
 	}
 
@@ -691,16 +699,17 @@ mod output {
 	test_output!(tas,    "\ttas.b @sp",       &[0x4F, 0x1B]);
 	test_output!(trapa,  "\ttrapa #240",      &[0xC3, 0xF0]);
 
-	test_output!(addc,   "\taddc r12, r8",    &[0x38, 0xCE]);
-	test_output!(addv,   "\taddv r4, r11",    &[0x3B, 0x4F]);
-	test_output!(div0s,  "\tdiv0s r14,r13",   &[0x2D, 0xE7]);
-	test_output!(div1,   "\tdiv1 r1,r1",      &[0x31, 0x14]);
-	test_output!(extsb,  "\texts.b r15,r0",   &[0x60, 0xFE]);
-	test_output!(extsw,  "\texts.w r15,r1",   &[0x61, 0xFF]);
-	test_output!(extub,  "\textu.b r15,r0",   &[0x60, 0xFC]);
-	test_output!(extuw,  "\textu.w r15,r1",   &[0x61, 0xFD]);
-	test_output!(macw,   "\tmac.w @sp+,@r3+", &[0x43, 0xFF]);
-	test_output!(macl,   "\tmac.l @sp+,@r3+", &[0x03, 0xFF]);
+	test_output!(addc,   "\taddc r12, r8",      &[0x38, 0xCE]);
+	test_output!(addv,   "\taddv r4, r11",      &[0x3B, 0x4F]);
+	test_output!(div0s,  "\tdiv0s r14,r13",     &[0x2D, 0xE7]);
+	test_output!(div1,   "\tdiv1 r1,r1",        &[0x31, 0x14]);
+	test_output!(extsb,  "\texts.b r15,r0",     &[0x60, 0xFE]);
+	test_output!(extsw,  "\texts.w r15,r1",     &[0x61, 0xFF]);
+	test_output!(extub,  "\textu.b r15,r0",     &[0x60, 0xFC]);
+	test_output!(extuw,  "\textu.w r15,r1",     &[0x61, 0xFD]);
+	test_output!(macw,   "\tmac.w @sp+,@r3+",   &[0x43, 0xFF]);
+	test_output!(macl,   "\tmac.l @sp+,@r3+",   &[0x03, 0xFF]);
+	test_output!(mova,   "\tmova @($80,pc),r0", &[0xC7, 0x80]);
 }
 
 /*
