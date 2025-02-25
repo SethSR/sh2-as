@@ -93,6 +93,9 @@ enum Asm {
 	OrReg(Reg, Reg),
 	OrImm(u8),
 	OrByte(u8),
+	TstReg(Reg, Reg),
+	TstImm(u8),
+	TstByte(u8),
 }
 
 fn extra_rules(src: Pair<Rule>) {
@@ -226,6 +229,9 @@ fn parse_ins_line(source: Pair<Rule>, mut output: Output) -> ParseResult<Output>
 			Rule::ins_or_reg  => output.push(parse_ins_rs_rs(Asm::OrReg, src)?),
 			Rule::ins_or_imm  => output.push(parse_ins_imm_r0(Asm::OrImm, src)?),
 			Rule::ins_or_byt  => output.push(parse_ins_imm_disp_r0_gbr(Asm::OrByte, src)?),
+			Rule::ins_tst_reg => output.push(parse_ins_rs_rs(Asm::TstReg, src)?),
+			Rule::ins_tst_imm => output.push(parse_ins_imm_r0(Asm::TstImm, src)?),
+			Rule::ins_tst_byt => output.push(parse_ins_imm_disp_r0_gbr(Asm::TstByte, src)?),
 
 			_ => {
 				extra_rules(src);
@@ -600,6 +606,9 @@ mod parser {
 	test_single!(or,   "\tor r7,r8",             Asm::OrReg(7, 8));
 	test_single!(ori,  "\tor #$12,r0",           Asm::OrImm(18));
 	test_single!(orb,  "\tor.b #250,@(r0,gbr)",  Asm::OrByte(250));
+	test_single!(tst,  "\ttst r7,r8",            Asm::TstReg(7, 8));
+	test_single!(tsti, "\ttst #$12,r0",          Asm::TstImm(18));
+	test_single!(tstb, "\ttst.b #250,@(r0,gbr)", Asm::TstByte(250));
 
 	#[test]
 	#[should_panic = " --> 1:7
@@ -775,6 +784,9 @@ fn output(asm: &[Asm]) -> Vec<u8> {
 			Asm::OrReg(m,n)     => push(0x200B, m, n, &mut out),
 			Asm::OrImm(i)   => out.push(0xCB00 | *i as u16),
 			Asm::OrByte(i)  => out.push(0xCF00 | *i as u16),
+			Asm::TstReg(m,n)    => push(0x2008, m, n, &mut out),
+			Asm::TstImm(i)  => out.push(0xC800 | *i as u16),
+			Asm::TstByte(i) => out.push(0xCC00 | *i as u16),
 		}
 	}
 
@@ -863,5 +875,8 @@ mod output {
 	test_output!(or,     "\tor r2,r3",             &[0x23, 0x2B]);
 	test_output!(ori,    "\tor #25,r0",            &[0xCB, 0x19]);
 	test_output!(orb,    "\tor.b #$EE,@(r0,gbr)",  &[0xCF, 0xEE]);
+	test_output!(tst,    "\ttst r2,r3",            &[0x23, 0x28]);
+	test_output!(tsti,   "\ttst #25,r0",           &[0xC8, 0x19]);
+	test_output!(tstb,   "\ttst.b #$EE,@(r0,gbr)", &[0xCC, 0xEE]);
 }
 
