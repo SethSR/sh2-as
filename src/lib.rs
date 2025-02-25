@@ -96,6 +96,9 @@ enum Asm {
 	TstReg(Reg, Reg),
 	TstImm(u8),
 	TstByte(u8),
+	XorReg(Reg, Reg),
+	XorImm(u8),
+	XorByte(u8),
 }
 
 fn extra_rules(src: Pair<Rule>) {
@@ -232,6 +235,9 @@ fn parse_ins_line(source: Pair<Rule>, mut output: Output) -> ParseResult<Output>
 			Rule::ins_tst_reg => output.push(parse_ins_rs_rs(Asm::TstReg, src)?),
 			Rule::ins_tst_imm => output.push(parse_ins_imm_r0(Asm::TstImm, src)?),
 			Rule::ins_tst_byt => output.push(parse_ins_imm_disp_r0_gbr(Asm::TstByte, src)?),
+			Rule::ins_xor_reg => output.push(parse_ins_rs_rs(Asm::XorReg, src)?),
+			Rule::ins_xor_imm => output.push(parse_ins_imm_r0(Asm::XorImm, src)?),
+			Rule::ins_xor_byt => output.push(parse_ins_imm_disp_r0_gbr(Asm::XorByte, src)?),
 
 			_ => {
 				extra_rules(src);
@@ -452,7 +458,6 @@ fn parse_i12(source: Pair<Rule>) -> ParseResult<i16> {
 	trace!("{source} - '{}'", source.as_str());
 
 	fn fix_value(n: u16) -> i16 {
-		eprintln!("fix({n})");
 		if (n & 0x800) > 0 {
 			(n | 0xF000) as i16
 		} else {
@@ -609,6 +614,9 @@ mod parser {
 	test_single!(tst,  "\ttst r7,r8",            Asm::TstReg(7, 8));
 	test_single!(tsti, "\ttst #$12,r0",          Asm::TstImm(18));
 	test_single!(tstb, "\ttst.b #250,@(r0,gbr)", Asm::TstByte(250));
+	test_single!(xor,  "\txor r7,r8",            Asm::XorReg(7, 8));
+	test_single!(xori, "\txor #$12,r0",          Asm::XorImm(18));
+	test_single!(xorb, "\txor.b #250,@(r0,gbr)", Asm::XorByte(250));
 
 	#[test]
 	#[should_panic = " --> 1:7
@@ -787,6 +795,9 @@ fn output(asm: &[Asm]) -> Vec<u8> {
 			Asm::TstReg(m,n)    => push(0x2008, m, n, &mut out),
 			Asm::TstImm(i)  => out.push(0xC800 | *i as u16),
 			Asm::TstByte(i) => out.push(0xCC00 | *i as u16),
+			Asm::XorReg(m,n)    => push(0x200A, m, n, &mut out),
+			Asm::XorImm(i)  => out.push(0xCA00 | *i as u16),
+			Asm::XorByte(i) => out.push(0xCE00 | *i as u16),
 		}
 	}
 
@@ -878,5 +889,8 @@ mod output {
 	test_output!(tst,    "\ttst r2,r3",            &[0x23, 0x28]);
 	test_output!(tsti,   "\ttst #25,r0",           &[0xC8, 0x19]);
 	test_output!(tstb,   "\ttst.b #$EE,@(r0,gbr)", &[0xCC, 0xEE]);
+	test_output!(xor,    "\txor r2,r3",            &[0x23, 0x2A]);
+	test_output!(xori,   "\txor #25,r0",           &[0xCA, 0x19]);
+	test_output!(xorb,   "\txor.b #$EE,@(r0,gbr)", &[0xCE, 0xEE]);
 }
 
