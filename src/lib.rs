@@ -48,6 +48,7 @@ enum Asm {
 	Dt(Reg),
 	Jmp(Reg),
 	Jsr(Reg),
+	MovA(u8),
 	MovT(Reg),
 	RotCL(Reg),
 	RotCR(Reg),
@@ -76,7 +77,8 @@ enum Asm {
 	ExtUWord(Reg, Reg),
 	MacWord(Reg, Reg),
 	MacLong(Reg, Reg),
-	MovA(u8),
+	Neg(Reg, Reg),
+	NegC(Reg, Reg),
 }
 
 fn extra_rules(src: Pair<Rule>) {
@@ -168,7 +170,7 @@ fn parse_ins_line(source: Pair<Rule>, mut output: Output) -> ParseResult<Output>
 			Rule::ins_shlr8  => output.push(parse_ins_reg_or_sp(Asm::ShLR8, src)?),
 			Rule::ins_shlr16 => output.push(parse_ins_reg_or_sp(Asm::ShLR16, src)?),
 			Rule::ins_tas    => output.push(parse_ins_addr_reg_or_sp(Asm::TaS, src)?),
-			Rule::ins_trapa => {
+			Rule::ins_trapa  => {
 				let mut args = src.into_inner();
 				let imm = parse_u8(args.next().unwrap())?;
 				output.push(Asm::TrapA(imm));
@@ -188,6 +190,8 @@ fn parse_ins_line(source: Pair<Rule>, mut output: Output) -> ParseResult<Output>
 				let disp = parse_disp_pc(args.next().unwrap())?;
 				output.push(Asm::MovA(disp as u8));
 			}
+			Rule::ins_neg  => output.push(parse_ins_rs_rs(Asm::Neg, src)?),
+			Rule::ins_negc => output.push(parse_ins_rs_rs(Asm::NegC, src)?),
 
 			_ => {
 				extra_rules(src);
@@ -476,46 +480,48 @@ mod parser {
 	test_single!(sett,   "\tsett",   Asm::SetT);
 	test_single!(sleep,  "\tsleep",  Asm::Sleep);
 
-	test_single!(bf,     "\tbf @(34,pc)",    Asm::Bf(34));
-	test_single!(bfs,    "\tbf/s @($C9,pc)", Asm::BfS(-55));
-	test_single!(bra,    "\tbra @($FFC,pc)", Asm::Bra(-4));
-	test_single!(braf,   "\tbraf @r3",       Asm::BraF(3));
-	test_single!(bsr,    "\tbsr @($7FC,pc)", Asm::Bsr(2044));
-	test_single!(bsrf,   "\tbsrf @r0",       Asm::BsrF(0));
-	test_single!(bt,     "\tbt @($07,pc)",   Asm::Bt(7));
-	test_single!(bts,    "\tbt/s @(-12,pc)", Asm::BtS(-12));
-	test_single!(dt,     "\tdt r2",          Asm::Dt(2));
-	test_single!(jmp,    "\tjmp @r7",        Asm::Jmp(7));
-	test_single!(jsr,    "\tjsr @r9",        Asm::Jsr(9));
-	test_single!(movt,   "\tmovt r0",        Asm::MovT(0));
-	test_single!(rotcl,  "\trotcl r4",       Asm::RotCL(4));
-	test_single!(rotcr,  "\trotcr r5",       Asm::RotCR(5));
-	test_single!(rotl,   "\trotl r4",        Asm::RotL(4));
-	test_single!(rotr,   "\trotr r5",        Asm::RotR(5));
-	test_single!(shal,   "\tshal r10",       Asm::ShAL(10));
-	test_single!(shar,   "\tshar r11",       Asm::ShAR(11));
-	test_single!(shll,   "\tshll r12",       Asm::ShLL(12));
-	test_single!(shll2,  "\tshll2 r15",      Asm::ShLL2(15));
-	test_single!(shll8,  "\tshll8 r14",      Asm::ShLL8(14));
-	test_single!(shll16, "\tshll16 r13",     Asm::ShLL16(13));
-	test_single!(shlr,   "\tshlr r12",       Asm::ShLR(12));
-	test_single!(shlr2,  "\tshlr2 r15",      Asm::ShLR2(15));
-	test_single!(shlr8,  "\tshlr8 r14",      Asm::ShLR8(14));
-	test_single!(shlr16, "\tshlr16 r13",     Asm::ShLR16(13));
-	test_single!(tas,    "\ttas.b @r10",     Asm::TaS(10));
-	test_single!(trapa,  "\ttrapa #$AA",     Asm::TrapA(170));
+	test_single!(bf,     "\tbf @(34,pc)",       Asm::Bf(34));
+	test_single!(bfs,    "\tbf/s @($C9,pc)",    Asm::BfS(-55));
+	test_single!(bra,    "\tbra @($FFC,pc)",    Asm::Bra(-4));
+	test_single!(braf,   "\tbraf @r3",          Asm::BraF(3));
+	test_single!(bsr,    "\tbsr @($7FC,pc)",    Asm::Bsr(2044));
+	test_single!(bsrf,   "\tbsrf @r0",          Asm::BsrF(0));
+	test_single!(bt,     "\tbt @($07,pc)",      Asm::Bt(7));
+	test_single!(bts,    "\tbt/s @(-12,pc)",    Asm::BtS(-12));
+	test_single!(dt,     "\tdt r2",             Asm::Dt(2));
+	test_single!(jmp,    "\tjmp @r7",           Asm::Jmp(7));
+	test_single!(jsr,    "\tjsr @r9",           Asm::Jsr(9));
+	test_single!(mova,   "\tmova @($57,pc),r0", Asm::MovA(0x57));
+	test_single!(movt,   "\tmovt r0",           Asm::MovT(0));
+	test_single!(rotcl,  "\trotcl r4",          Asm::RotCL(4));
+	test_single!(rotcr,  "\trotcr r5",          Asm::RotCR(5));
+	test_single!(rotl,   "\trotl r4",           Asm::RotL(4));
+	test_single!(rotr,   "\trotr r5",           Asm::RotR(5));
+	test_single!(shal,   "\tshal r10",          Asm::ShAL(10));
+	test_single!(shar,   "\tshar r11",          Asm::ShAR(11));
+	test_single!(shll,   "\tshll r12",          Asm::ShLL(12));
+	test_single!(shll2,  "\tshll2 r15",         Asm::ShLL2(15));
+	test_single!(shll8,  "\tshll8 r14",         Asm::ShLL8(14));
+	test_single!(shll16, "\tshll16 r13",        Asm::ShLL16(13));
+	test_single!(shlr,   "\tshlr r12",          Asm::ShLR(12));
+	test_single!(shlr2,  "\tshlr2 r15",         Asm::ShLR2(15));
+	test_single!(shlr8,  "\tshlr8 r14",         Asm::ShLR8(14));
+	test_single!(shlr16, "\tshlr16 r13",        Asm::ShLR16(13));
+	test_single!(tas,    "\ttas.b @r10",        Asm::TaS(10));
+	test_single!(trapa,  "\ttrapa #$AA",        Asm::TrapA(170));
 
-	test_single!(addc,  "\taddc r2,r7",        Asm::AddC(2, 7));
-	test_single!(addv,  "\taddv r2,r7",        Asm::AddV(2, 7));
-	test_single!(div0s, "\tdiv0s sp,r0",       Asm::Div0S(15, 0));
-	test_single!(div1,  "\tdiv1 r1,r1",        Asm::Div1(1, 1));
-	test_single!(extsb, "\texts.b sp,sp",      Asm::ExtSByte(15, 15));
-	test_single!(extsw, "\texts.w sp,sp",      Asm::ExtSWord(15, 15));
-	test_single!(extub, "\textu.b sp,sp",      Asm::ExtUByte(15, 15));
-	test_single!(extuw, "\textu.w sp,sp",      Asm::ExtUWord(15, 15));
-	test_single!(macw,  "\tmac.w @r3+,@r6+",   Asm::MacWord(3, 6));
-	test_single!(macl,  "\tmac.l @r6+,@r3+",   Asm::MacLong(6, 3));
-	test_single!(mova,  "\tmova @($57,pc),r0", Asm::MovA(0x57));
+	test_single!(addc,  "\taddc r2,r7",      Asm::AddC(2, 7));
+	test_single!(addv,  "\taddv r2,r7",      Asm::AddV(2, 7));
+	test_single!(div0s, "\tdiv0s sp,r0",     Asm::Div0S(15, 0));
+	test_single!(div1,  "\tdiv1 r1,r1",      Asm::Div1(1, 1));
+	test_single!(extsb, "\texts.b sp,sp",    Asm::ExtSByte(15, 15));
+	test_single!(extsw, "\texts.w sp,sp",    Asm::ExtSWord(15, 15));
+	test_single!(extub, "\textu.b sp,sp",    Asm::ExtUByte(15, 15));
+	test_single!(extuw, "\textu.w sp,sp",    Asm::ExtUWord(15, 15));
+	test_single!(macw,  "\tmac.w @r3+,@r6+", Asm::MacWord(3, 6));
+	test_single!(macl,  "\tmac.l @r6+,@r3+", Asm::MacLong(6, 3));
+	test_single!(neg,   "\tneg r3,r0",       Asm::Neg(3, 0));
+	test_single!(negc,  "\tnegc r7,r7",      Asm::NegC(7, 7));
 
 	#[test]
 	#[should_panic = " --> 1:7
@@ -609,6 +615,7 @@ fn output(asm: &[Asm]) -> Vec<u8> {
 			Asm::Dt(r)     => out.push(0x4010 | (*r as u16) << 8),
 			Asm::Jmp(r)    => out.push(0x402B | (*r as u16) << 8),
 			Asm::Jsr(r)    => out.push(0x400B | (*r as u16) << 8),
+			Asm::MovA(d)   => out.push(0xC700 | *d as u16),
 			Asm::MovT(r)   => out.push(0x0029 | (*r as u16) << 8),
 			Asm::RotCL(r)  => out.push(0x4044 | (*r as u16) << 8),
 			Asm::RotCR(r)  => out.push(0x4045 | (*r as u16) << 8),
@@ -637,7 +644,8 @@ fn output(asm: &[Asm]) -> Vec<u8> {
 			Asm::ExtUWord(m,n) => out.push(0x600D | (*n as u16) << 8 | (*m as u16) << 4),
 			Asm::MacWord(m,n)  => out.push(0x400F | (*n as u16) << 8 | (*m as u16) << 4),
 			Asm::MacLong(m,n)  => out.push(0x000F | (*n as u16) << 8 | (*m as u16) << 4),
-			Asm::MovA(d)       => out.push(0xC700 | *d as u16),
+			Asm::Neg(m,n)      => out.push(0x600B | (*n as u16) << 8 | (*m as u16) << 4),
+			Asm::NegC(m,n)     => out.push(0x600A | (*n as u16) << 8 | (*m as u16) << 4),
 		}
 	}
 
@@ -670,46 +678,48 @@ mod output {
 	test_output!(sett,   "\tsett",   &[0x00, 0x18]);
 	test_output!(sleep,  "\tsleep",  &[0x00, 0x1B]);
 
-	test_output!(bf,     "\tbf @($78,pc)",    &[0x8B, 0x78]);
-	test_output!(bfs,    "\tbf/s @($52,pc)",  &[0x8F, 0x52]);
-	test_output!(bra,    "\tbra @(-2000,pc)", &[0xA8, 0x30]);
-	test_output!(braf,   "\tbraf @sp",        &[0x0F, 0x23]);
-	test_output!(bsr,    "\tbsr @($63D,pc)",  &[0xB6, 0x3D]);
-	test_output!(bsrf,   "\tbsrf @r8",        &[0x08, 0x03]);
-	test_output!(bt,     "\tbt @(100,pc)",    &[0x89, 0x64]);
-	test_output!(bts,    "\tbt/s @(%100,pc)", &[0x8D, 0x04]);
-	test_output!(dt,     "\tdt r10",          &[0x4A, 0x10]);
-	test_output!(jmp,    "\tjmp @r13",        &[0x4D, 0x2B]);
-	test_output!(jsr,    "\tjsr @r3",         &[0x43, 0x0B]);
-	test_output!(movt,   "\tmovt r6",         &[0x06, 0x29]);
-	test_output!(rotcl,  "\trotcl r15",       &[0x4F, 0x44]);
-	test_output!(rotcr,  "\trotcr r14",       &[0x4E, 0x45]);
-	test_output!(rotl,   "\trotl r4",         &[0x44, 0x04]);
-	test_output!(rotr,   "\trotr r5",         &[0x45, 0x05]);
-	test_output!(shal,   "\tshal r8",         &[0x48, 0x20]);
-	test_output!(shar,   "\tshar r9",         &[0x49, 0x21]);
-	test_output!(shll,   "\tshll r0",         &[0x40, 0x00]);
-	test_output!(shll2,  "\tshll2 r2",        &[0x42, 0x08]);
-	test_output!(shll8,  "\tshll8 r8",        &[0x48, 0x18]);
-	test_output!(shll16, "\tshll16 r15",      &[0x4F, 0x28]);
-	test_output!(shlr,   "\tshlr r0",         &[0x40, 0x01]);
-	test_output!(shlr2,  "\tshlr2 r2",        &[0x42, 0x09]);
-	test_output!(shlr8,  "\tshlr8 r8",        &[0x48, 0x19]);
-	test_output!(shlr16, "\tshlr16 r15",      &[0x4F, 0x29]);
-	test_output!(tas,    "\ttas.b @sp",       &[0x4F, 0x1B]);
-	test_output!(trapa,  "\ttrapa #240",      &[0xC3, 0xF0]);
-
-	test_output!(addc,   "\taddc r12, r8",      &[0x38, 0xCE]);
-	test_output!(addv,   "\taddv r4, r11",      &[0x3B, 0x4F]);
-	test_output!(div0s,  "\tdiv0s r14,r13",     &[0x2D, 0xE7]);
-	test_output!(div1,   "\tdiv1 r1,r1",        &[0x31, 0x14]);
-	test_output!(extsb,  "\texts.b r15,r0",     &[0x60, 0xFE]);
-	test_output!(extsw,  "\texts.w r15,r1",     &[0x61, 0xFF]);
-	test_output!(extub,  "\textu.b r15,r0",     &[0x60, 0xFC]);
-	test_output!(extuw,  "\textu.w r15,r1",     &[0x61, 0xFD]);
-	test_output!(macw,   "\tmac.w @sp+,@r3+",   &[0x43, 0xFF]);
-	test_output!(macl,   "\tmac.l @sp+,@r3+",   &[0x03, 0xFF]);
+	test_output!(bf,     "\tbf @($78,pc)",      &[0x8B, 0x78]);
+	test_output!(bfs,    "\tbf/s @($52,pc)",    &[0x8F, 0x52]);
+	test_output!(bra,    "\tbra @(-2000,pc)",   &[0xA8, 0x30]);
+	test_output!(braf,   "\tbraf @sp",          &[0x0F, 0x23]);
+	test_output!(bsr,    "\tbsr @($63D,pc)",    &[0xB6, 0x3D]);
+	test_output!(bsrf,   "\tbsrf @r8",          &[0x08, 0x03]);
+	test_output!(bt,     "\tbt @(100,pc)",      &[0x89, 0x64]);
+	test_output!(bts,    "\tbt/s @(%100,pc)",   &[0x8D, 0x04]);
+	test_output!(dt,     "\tdt r10",            &[0x4A, 0x10]);
+	test_output!(jmp,    "\tjmp @r13",          &[0x4D, 0x2B]);
+	test_output!(jsr,    "\tjsr @r3",           &[0x43, 0x0B]);
 	test_output!(mova,   "\tmova @($80,pc),r0", &[0xC7, 0x80]);
+	test_output!(movt,   "\tmovt r6",           &[0x06, 0x29]);
+	test_output!(rotcl,  "\trotcl r15",         &[0x4F, 0x44]);
+	test_output!(rotcr,  "\trotcr r14",         &[0x4E, 0x45]);
+	test_output!(rotl,   "\trotl r4",           &[0x44, 0x04]);
+	test_output!(rotr,   "\trotr r5",           &[0x45, 0x05]);
+	test_output!(shal,   "\tshal r8",           &[0x48, 0x20]);
+	test_output!(shar,   "\tshar r9",           &[0x49, 0x21]);
+	test_output!(shll,   "\tshll r0",           &[0x40, 0x00]);
+	test_output!(shll2,  "\tshll2 r2",          &[0x42, 0x08]);
+	test_output!(shll8,  "\tshll8 r8",          &[0x48, 0x18]);
+	test_output!(shll16, "\tshll16 r15",        &[0x4F, 0x28]);
+	test_output!(shlr,   "\tshlr r0",           &[0x40, 0x01]);
+	test_output!(shlr2,  "\tshlr2 r2",          &[0x42, 0x09]);
+	test_output!(shlr8,  "\tshlr8 r8",          &[0x48, 0x19]);
+	test_output!(shlr16, "\tshlr16 r15",        &[0x4F, 0x29]);
+	test_output!(tas,    "\ttas.b @sp",         &[0x4F, 0x1B]);
+	test_output!(trapa,  "\ttrapa #240",        &[0xC3, 0xF0]);
+
+	test_output!(addc,   "\taddc r12, r8",    &[0x38, 0xCE]);
+	test_output!(addv,   "\taddv r4, r11",    &[0x3B, 0x4F]);
+	test_output!(div0s,  "\tdiv0s r14,r13",   &[0x2D, 0xE7]);
+	test_output!(div1,   "\tdiv1 r1,r1",      &[0x31, 0x14]);
+	test_output!(extsb,  "\texts.b r15,r0",   &[0x60, 0xFE]);
+	test_output!(extsw,  "\texts.w r15,r1",   &[0x61, 0xFF]);
+	test_output!(extub,  "\textu.b r15,r0",   &[0x60, 0xFC]);
+	test_output!(extuw,  "\textu.w r15,r1",   &[0x61, 0xFD]);
+	test_output!(macw,   "\tmac.w @sp+,@r3+", &[0x43, 0xFF]);
+	test_output!(macl,   "\tmac.l @sp+,@r3+", &[0x03, 0xFF]);
+	test_output!(neg,    "\tneg r4,sp",       &[0x6F, 0x4B]);
+	test_output!(negc,   "\tnegc sp,r8",      &[0x68, 0xFA]);
 }
 
 /*
