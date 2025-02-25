@@ -99,6 +99,16 @@ enum Asm {
 	XorReg(Reg, Reg),
 	XorImm(u8),
 	XorByte(u8),
+
+	CmpEqImm(i8),
+	CmpEqReg(Reg, Reg),
+	CmpGE(Reg, Reg),
+	CmpGT(Reg, Reg),
+	CmpHI(Reg, Reg),
+	CmpHS(Reg, Reg),
+	CmpSTR(Reg, Reg),
+	CmpPL(Reg),
+	CmpPZ(Reg),
 }
 
 fn extra_rules(src: Pair<Rule>) {
@@ -239,6 +249,16 @@ fn parse_ins_line(source: Pair<Rule>, mut output: Output) -> ParseResult<Output>
 			Rule::ins_xor_imm => output.push(parse_ins_imm_r0(Asm::XorImm, src)?),
 			Rule::ins_xor_byt => output.push(parse_ins_imm_disp_r0_gbr(Asm::XorByte, src)?),
 
+			Rule::ins_cmp_eq_imm => output.push(parse_ins_simm_r0(Asm::CmpEqImm, src)?),
+			Rule::ins_cmp_eq_reg => output.push(parse_ins_rs_rs(Asm::CmpEqReg, src)?),
+			Rule::ins_cmp_ge     => output.push(parse_ins_rs_rs(Asm::CmpGE, src)?),
+			Rule::ins_cmp_gt     => output.push(parse_ins_rs_rs(Asm::CmpGT, src)?),
+			Rule::ins_cmp_hi     => output.push(parse_ins_rs_rs(Asm::CmpHI, src)?),
+			Rule::ins_cmp_hs     => output.push(parse_ins_rs_rs(Asm::CmpHS, src)?),
+			Rule::ins_cmp_str    => output.push(parse_ins_rs_rs(Asm::CmpSTR, src)?),
+			Rule::ins_cmp_pl     => output.push(parse_ins_reg_or_sp(Asm::CmpPL, src)?),
+			Rule::ins_cmp_pz     => output.push(parse_ins_reg_or_sp(Asm::CmpPZ, src)?),
+
 			_ => {
 				extra_rules(src);
 				continue;
@@ -296,6 +316,13 @@ fn parse_ins_addr_reg_or_sp(f: fn(Reg) -> Asm, source: Pair<Rule>) -> ParseResul
 fn parse_ins_imm_r0(f: fn(u8) -> Asm, source: Pair<Rule>) -> ParseResult<Asm> {
 	let mut args = source.into_inner();
 	let imm = parse_u8(args.next().unwrap())?;
+	parse_r0(args.next().unwrap())?;
+	Ok(f(imm))
+}
+
+fn parse_ins_simm_r0(f: fn(i8) -> Asm, source: Pair<Rule>) -> ParseResult<Asm> {
+	let mut args = source.into_inner();
+	let imm = parse_i8(args.next().unwrap())?;
 	parse_r0(args.next().unwrap())?;
 	Ok(f(imm))
 }
@@ -618,6 +645,16 @@ mod parser {
 	test_single!(xori, "\txor #$12,r0",          Asm::XorImm(18));
 	test_single!(xorb, "\txor.b #250,@(r0,gbr)", Asm::XorByte(250));
 
+	test_single!(cmpeqi, "\tcmp/eq #-7,r0",  Asm::CmpEqImm(-7));
+	test_single!(cmpeqr, "\tcmp/eq r5,r7",   Asm::CmpEqReg(5, 7));
+	test_single!(cmpge,  "\tcmp/ge r1,r15",  Asm::CmpGE(1, 15));
+	test_single!(cmpgt,  "\tcmp/gt r2,r14",  Asm::CmpGT(2, 14));
+	test_single!(cmphi,  "\tcmp/hi r3,r13",  Asm::CmpHI(3, 13));
+	test_single!(cmphs,  "\tcmp/hs r4,r12",  Asm::CmpHS(4, 12));
+	test_single!(cmpstr, "\tcmp/str r5,r11", Asm::CmpSTR(5, 11));
+	test_single!(cmppl,  "\tcmp/pl r6",      Asm::CmpPL(6));
+	test_single!(cmppz,  "\tcmp/pz r10",     Asm::CmpPZ(10));
+
 	#[test]
 	#[should_panic = " --> 1:7
   |
@@ -798,6 +835,16 @@ fn output(asm: &[Asm]) -> Vec<u8> {
 			Asm::XorReg(m,n)    => push(0x200A, m, n, &mut out),
 			Asm::XorImm(i)  => out.push(0xCA00 | *i as u16),
 			Asm::XorByte(i) => out.push(0xCE00 | *i as u16),
+
+			Asm::CmpEqReg(m,n)   => push(0x3000, m, n, &mut out),
+			Asm::CmpGE(m,n)      => push(0x3003, m, n, &mut out),
+			Asm::CmpGT(m,n)      => push(0x3007, m, n, &mut out),
+			Asm::CmpHI(m,n)      => push(0x3006, m, n, &mut out),
+			Asm::CmpHS(m,n)      => push(0x3002, m, n, &mut out),
+			Asm::CmpPL(r)    => out.push(0x4015 | (*r as u16) << 8),
+			Asm::CmpPZ(r)    => out.push(0x4011 | (*r as u16) << 8),
+			Asm::CmpSTR(m,n)     => push(0x200C, m, n, &mut out),
+			Asm::CmpEqImm(i) => out.push(0x8800 | *i as u16),
 		}
 	}
 
@@ -892,5 +939,15 @@ mod output {
 	test_output!(xor,    "\txor r2,r3",            &[0x23, 0x2A]);
 	test_output!(xori,   "\txor #25,r0",           &[0xCA, 0x19]);
 	test_output!(xorb,   "\txor.b #$EE,@(r0,gbr)", &[0xCE, 0xEE]);
+
+	test_output!(cmpeqi, "\tcmp/eq #$7F,r0",  &[0x88, 0x7F]);
+	test_output!(cmpeqr, "\tcmp/eq r1,r2",    &[0x32, 0x10]);
+	test_output!(cmpge,  "\tcmp/ge r3,r4",    &[0x34, 0x33]);
+	test_output!(cmpgt,  "\tcmp/gt r5,r6",    &[0x36, 0x57]);
+	test_output!(cmphi,  "\tcmp/hi r7,r8",    &[0x38, 0x76]);
+	test_output!(cmphs,  "\tcmp/hs r9,r10",   &[0x3A, 0x92]);
+	test_output!(cmpstr, "\tcmp/str r11,r12", &[0x2C, 0xBC]);
+	test_output!(cmppl,  "\tcmp/pl r13",      &[0x4D, 0x15]);
+	test_output!(cmppz,  "\tcmp/pz r14",      &[0x4E, 0x11]);
 }
 
