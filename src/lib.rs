@@ -68,6 +68,8 @@ enum Asm {
 
 	AddC(Reg, Reg),
 	AddV(Reg, Reg),
+	Div0S(Reg, Reg),
+	Div1(Reg, Reg),
 }
 
 fn extra_rules(src: Pair<Rule>) {
@@ -172,6 +174,18 @@ fn parse_ins_line(source: Pair<Rule>, mut output: Output) -> ParseResult<Output>
 				let src = parse_reg_or_sp(args.next().unwrap())?;
 				let dst = parse_reg_or_sp(args.next().unwrap())?;
 				output.push(Asm::AddV(src, dst));
+			}
+			Rule::ins_div0s => {
+				let mut args = src.into_inner();
+				let src = parse_reg_or_sp(args.next().unwrap())?;
+				let dst = parse_reg_or_sp(args.next().unwrap())?;
+				output.push(Asm::Div0S(src, dst));
+			}
+			Rule::ins_div1 => {
+				let mut args = src.into_inner();
+				let src = parse_reg_or_sp(args.next().unwrap())?;
+				let dst = parse_reg_or_sp(args.next().unwrap())?;
+				output.push(Asm::Div1(src, dst));
 			}
 
 			_ => {
@@ -665,6 +679,16 @@ mod parser {
 	}
 
 	#[test]
+	fn div0s() {
+		test_single!("\tdiv0s sp,r0", Asm::Div0S(15, 0));
+	}
+
+	#[test]
+	fn div1() {
+		test_single!("\tdiv1 r1,r1", Asm::Div1(1, 1));
+	}
+
+	#[test]
 	#[should_panic = " --> 1:1
   |
 1 | stuff
@@ -692,44 +716,46 @@ fn output(asm: &[Asm]) -> Vec<u8> {
 	let mut out = Vec::with_capacity(asm.len());
 	for cmd in asm {
 		match cmd {
-			Asm::ClrT      => out.push(0x0008),
-			Asm::Nop       => out.push(0x0009),
-			Asm::Rts       => out.push(0x000B),
-			Asm::SetT      => out.push(0x0018),
-			Asm::Div0U     => out.push(0x0019),
-			Asm::Sleep     => out.push(0x001B),
-			Asm::ClrMac    => out.push(0x0028),
-			Asm::Rte       => out.push(0x002B),
-			Asm::Bf(d)     => out.push(0x8B00 | *d as u16),
-			Asm::BfS(d)    => out.push(0x8F00 | *d as u16),
-			Asm::Bra(d)    => out.push(0xA000 | (*d & 0xFFF) as u16),
-			Asm::BraF(r)   => out.push(0x0023 | (*r as u16) << 8),
-			Asm::Bsr(d)    => out.push(0xB000 | (*d & 0xFFF) as u16),
-			Asm::BsrF(r)   => out.push(0x0003 | (*r as u16) << 8),
-			Asm::Bt(d)     => out.push(0x8900 | *d as u16),
-			Asm::BtS(d)    => out.push(0x8D00 | *d as u16),
-			Asm::Dt(r)     => out.push(0x4010 | (*r as u16) << 8),
-			Asm::Jmp(r)    => out.push(0x402B | (*r as u16) << 8),
-			Asm::Jsr(r)    => out.push(0x400B | (*r as u16) << 8),
-			Asm::MovT(r)   => out.push(0x0029 | (*r as u16) << 8),
-			Asm::RotCL(r)  => out.push(0x4044 | (*r as u16) << 8),
-			Asm::RotCR(r)  => out.push(0x4045 | (*r as u16) << 8),
-			Asm::RotL(r)   => out.push(0x4004 | (*r as u16) << 8),
-			Asm::RotR(r)   => out.push(0x4005 | (*r as u16) << 8),
-			Asm::ShAL(r)   => out.push(0x4020 | (*r as u16) << 8),
-			Asm::ShAR(r)   => out.push(0x4021 | (*r as u16) << 8),
-			Asm::ShLL(r)   => out.push(0x4000 | (*r as u16) << 8),
-			Asm::ShLL2(r)  => out.push(0x4008 | (*r as u16) << 8),
-			Asm::ShLL8(r)  => out.push(0x4018 | (*r as u16) << 8),
-			Asm::ShLL16(r) => out.push(0x4028 | (*r as u16) << 8),
-			Asm::ShLR(r)   => out.push(0x4001 | (*r as u16) << 8),
-			Asm::ShLR2(r)  => out.push(0x4009 | (*r as u16) << 8),
-			Asm::ShLR8(r)  => out.push(0x4019 | (*r as u16) << 8),
-			Asm::ShLR16(r) => out.push(0x4029 | (*r as u16) << 8),
-			Asm::TaS(r)    => out.push(0x401B | (*r as u16) << 8),
-			Asm::TrapA(i)  => out.push(0xC300 | *i as u16),
-			Asm::AddC(m,n) => out.push(0x300E | (*n as u16) << 8 | (*m as u16) << 4),
-			Asm::AddV(m,n) => out.push(0x300F | (*n as u16) << 8 | (*m as u16) << 4),
+			Asm::ClrT       => out.push(0x0008),
+			Asm::Nop        => out.push(0x0009),
+			Asm::Rts        => out.push(0x000B),
+			Asm::SetT       => out.push(0x0018),
+			Asm::Div0U      => out.push(0x0019),
+			Asm::Sleep      => out.push(0x001B),
+			Asm::ClrMac     => out.push(0x0028),
+			Asm::Rte        => out.push(0x002B),
+			Asm::Bf(d)      => out.push(0x8B00 | *d as u16),
+			Asm::BfS(d)     => out.push(0x8F00 | *d as u16),
+			Asm::Bra(d)     => out.push(0xA000 | (*d & 0xFFF) as u16),
+			Asm::BraF(r)    => out.push(0x0023 | (*r as u16) << 8),
+			Asm::Bsr(d)     => out.push(0xB000 | (*d & 0xFFF) as u16),
+			Asm::BsrF(r)    => out.push(0x0003 | (*r as u16) << 8),
+			Asm::Bt(d)      => out.push(0x8900 | *d as u16),
+			Asm::BtS(d)     => out.push(0x8D00 | *d as u16),
+			Asm::Dt(r)      => out.push(0x4010 | (*r as u16) << 8),
+			Asm::Jmp(r)     => out.push(0x402B | (*r as u16) << 8),
+			Asm::Jsr(r)     => out.push(0x400B | (*r as u16) << 8),
+			Asm::MovT(r)    => out.push(0x0029 | (*r as u16) << 8),
+			Asm::RotCL(r)   => out.push(0x4044 | (*r as u16) << 8),
+			Asm::RotCR(r)   => out.push(0x4045 | (*r as u16) << 8),
+			Asm::RotL(r)    => out.push(0x4004 | (*r as u16) << 8),
+			Asm::RotR(r)    => out.push(0x4005 | (*r as u16) << 8),
+			Asm::ShAL(r)    => out.push(0x4020 | (*r as u16) << 8),
+			Asm::ShAR(r)    => out.push(0x4021 | (*r as u16) << 8),
+			Asm::ShLL(r)    => out.push(0x4000 | (*r as u16) << 8),
+			Asm::ShLL2(r)   => out.push(0x4008 | (*r as u16) << 8),
+			Asm::ShLL8(r)   => out.push(0x4018 | (*r as u16) << 8),
+			Asm::ShLL16(r)  => out.push(0x4028 | (*r as u16) << 8),
+			Asm::ShLR(r)    => out.push(0x4001 | (*r as u16) << 8),
+			Asm::ShLR2(r)   => out.push(0x4009 | (*r as u16) << 8),
+			Asm::ShLR8(r)   => out.push(0x4019 | (*r as u16) << 8),
+			Asm::ShLR16(r)  => out.push(0x4029 | (*r as u16) << 8),
+			Asm::TaS(r)     => out.push(0x401B | (*r as u16) << 8),
+			Asm::TrapA(i)   => out.push(0xC300 | *i as u16),
+			Asm::AddC(m,n)  => out.push(0x300E | (*n as u16) << 8 | (*m as u16) << 4),
+			Asm::AddV(m,n)  => out.push(0x300F | (*n as u16) << 8 | (*m as u16) << 4),
+			Asm::Div0S(m,n) => out.push(0x2007 | (*n as u16) << 8 | (*m as u16) << 4),
+			Asm::Div1(m,n)  => out.push(0x3004 | (*n as u16) << 8 | (*m as u16) << 4),
 		}
 	}
 
@@ -939,6 +965,16 @@ mod output {
 	#[test]
 	fn addv() {
 		test_output("\taddv r4, r11", &[0x3B, 0x4F]);
+	}
+
+	#[test]
+	fn div0s() {
+		test_output("\tdiv0s r14,r13", &[0x2D, 0xE7]);
+	}
+
+	#[test]
+	fn div1() {
+		test_output("\tdiv1 r1,r1", &[0x31, 0x14]);
 	}
 }
 
