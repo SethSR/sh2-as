@@ -44,6 +44,8 @@ imm = _{ "#" ~ term }
 /** Argument Types **/
 
 reg_or_sp      = _{ reg | sp }
+// NOTE - srenshaw - Make sure to place this rule after 'reg_post_inc' whenever
+// both are present!
 addr_reg_or_sp = @{ "@" ~ reg_or_sp }
 reg_post_inc   = @{ "@" ~ reg_or_sp ~ "+" }
 reg_pre_dec    = @{ "@" ~ "-" ~ reg_or_sp }
@@ -136,6 +138,7 @@ ins_extsw = { ^"exts.w" ~ reg_or_sp__reg_or_sp }
 ins_extub = { ^"extu.b" ~ reg_or_sp__reg_or_sp }
 ins_extuw = { ^"extu.w" ~ reg_or_sp__reg_or_sp }
 ins_macw  = { ^"mac.w"  ~ reg_post_inc__reg_post_inc }
+ins_macl  = { ^"mac.l"  ~ reg_post_inc__reg_post_inc }
 ins_mova  = { ^"mova"   ~ disp_pc__r0 }
 ins_neg   = { ^"neg"    ~ reg_or_sp__reg_or_sp }
 ins_negc  = { ^"negc"   ~ reg_or_sp__reg_or_sp }
@@ -200,7 +203,6 @@ ins_stc     = { ^"stc"   ~ reg_ctrl__reg_or_sp }
 ins_stc_dec = { ^"stc.l" ~ reg_ctrl__reg_pre_dec }
 ins_sts     = { ^"sts"   ~ reg_spec__reg_or_sp }
 ins_sts_dec = { ^"sts.l" ~ reg_spec__reg_pre_dec }
-ins_macl    = { (^"mac.l"   | ^"mac")   ~ reg_post_inc__reg_post_inc }
 ins_dmuls   = { (^"dmuls.l" | ^"dmuls") ~ reg_or_sp__reg_or_sp }
 ins_dmulu   = { (^"dmulu.l" | ^"dmulu") ~ reg_or_sp__reg_or_sp }
 
