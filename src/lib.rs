@@ -85,6 +85,7 @@ enum Asm {
 	SubV(Reg, Reg),
 	SwapByte(Reg, Reg),
 	SwapWord(Reg, Reg),
+	Xtrct(Reg, Reg),
 }
 
 fn extra_rules(src: Pair<Rule>) {
@@ -204,6 +205,7 @@ fn parse_ins_line(source: Pair<Rule>, mut output: Output) -> ParseResult<Output>
 			Rule::ins_subv  => output.push(parse_ins_rs_rs(Asm::SubV, src)?),
 			Rule::ins_swapb => output.push(parse_ins_rs_rs(Asm::SwapByte, src)?),
 			Rule::ins_swapw => output.push(parse_ins_rs_rs(Asm::SwapWord, src)?),
+			Rule::ins_xtrct => output.push(parse_ins_rs_rs(Asm::Xtrct, src)?),
 
 			_ => {
 				extra_rules(src);
@@ -540,6 +542,7 @@ mod parser {
 	test_single!(subv,  "\tsubv r3,r4",      Asm::SubV(3, 4));
 	test_single!(swapb, "\tswap.b r5,r12",   Asm::SwapByte(5, 12));
 	test_single!(swapw, "\tswap.w r0,r13",   Asm::SwapWord(0, 13));
+	test_single!(xtrct, "\txtrct r5,r14",    Asm::Xtrct(5, 14));
 
 	#[test]
 	#[should_panic = " --> 1:7
@@ -674,6 +677,7 @@ fn output(asm: &[Asm]) -> Vec<u8> {
 			Asm::SubV(m,n)     => push(0x300B, m, n, &mut out),
 			Asm::SwapByte(m,n) => push(0x6008, m, n, &mut out),
 			Asm::SwapWord(m,n) => push(0x6009, m, n, &mut out),
+			Asm::Xtrct(m,n)    => push(0x200D, m, n, &mut out),
 		}
 	}
 
@@ -754,19 +758,6 @@ mod output {
 	test_output!(subv,   "\tsubv r3,r3",      &[0x33, 0x3B]);
 	test_output!(swapb,  "\tswap.b r7,r2",    &[0x62, 0x78]);
 	test_output!(swapw,  "\tswap.w r8,r3",    &[0x63, 0x89]);
+	test_output!(xtrct,  "\txtrct r11,r10",   &[0x2A, 0xBD]);
 }
-
-/*
-#[instrument]
-fn main() {
-	tracing_subscriber::fmt::init();
-
-	let mut args = std::env::args();
-	args.next();
-
-	let source = args.next().expect("missing source file");
-	let _input = read_to_string(&source).expect("unable to read source file");
-	let _target = args.next().unwrap_or("asm.out".to_string());
-}
-*/
 
