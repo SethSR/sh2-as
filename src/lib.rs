@@ -83,6 +83,8 @@ enum Asm {
 	Sub(Reg, Reg),
 	SubC(Reg, Reg),
 	SubV(Reg, Reg),
+	SwapByte(Reg, Reg),
+	SwapWord(Reg, Reg),
 }
 
 fn extra_rules(src: Pair<Rule>) {
@@ -194,12 +196,14 @@ fn parse_ins_line(source: Pair<Rule>, mut output: Output) -> ParseResult<Output>
 				let disp = parse_disp_pc(args.next().unwrap())?;
 				output.push(Asm::MovA(disp as u8));
 			}
-			Rule::ins_neg  => output.push(parse_ins_rs_rs(Asm::Neg, src)?),
-			Rule::ins_negc => output.push(parse_ins_rs_rs(Asm::NegC, src)?),
-			Rule::ins_not  => output.push(parse_ins_rs_rs(Asm::Not, src)?),
-			Rule::ins_sub  => output.push(parse_ins_rs_rs(Asm::Sub, src)?),
-			Rule::ins_subc => output.push(parse_ins_rs_rs(Asm::SubC, src)?),
-			Rule::ins_subv => output.push(parse_ins_rs_rs(Asm::SubV, src)?),
+			Rule::ins_neg   => output.push(parse_ins_rs_rs(Asm::Neg, src)?),
+			Rule::ins_negc  => output.push(parse_ins_rs_rs(Asm::NegC, src)?),
+			Rule::ins_not   => output.push(parse_ins_rs_rs(Asm::Not, src)?),
+			Rule::ins_sub   => output.push(parse_ins_rs_rs(Asm::Sub, src)?),
+			Rule::ins_subc  => output.push(parse_ins_rs_rs(Asm::SubC, src)?),
+			Rule::ins_subv  => output.push(parse_ins_rs_rs(Asm::SubV, src)?),
+			Rule::ins_swapb => output.push(parse_ins_rs_rs(Asm::SwapByte, src)?),
+			Rule::ins_swapw => output.push(parse_ins_rs_rs(Asm::SwapWord, src)?),
 
 			_ => {
 				extra_rules(src);
@@ -534,6 +538,8 @@ mod parser {
 	test_single!(sub,   "\tsub r5,r4",       Asm::Sub(5, 4));
 	test_single!(subc,  "\tsubc r2,r1",      Asm::SubC(2, 1));
 	test_single!(subv,  "\tsubv r3,r4",      Asm::SubV(3, 4));
+	test_single!(swapb, "\tswap.b r5,r12",   Asm::SwapByte(5, 12));
+	test_single!(swapw, "\tswap.w r0,r13",   Asm::SwapWord(0, 13));
 
 	#[test]
 	#[should_panic = " --> 1:7
@@ -604,8 +610,8 @@ mod parser {
 
 #[instrument]
 fn output(asm: &[Asm]) -> Vec<u8> {
-	fn push(base: u16, m: Reg, n: Reg, output: &mut Vec<u16>) {
-		output.push(base | (n as u16) << 8 | (m as u16) << 4);
+	fn push(base: u16, m: &Reg, n: &Reg, output: &mut Vec<u16>) {
+		output.push(base | (*n as u16) << 8 | (*m as u16) << 4);
 	}
 
 	let mut out = Vec::with_capacity(asm.len());
@@ -650,22 +656,24 @@ fn output(asm: &[Asm]) -> Vec<u8> {
 			Asm::TaS(r)    => out.push(0x401B | (*r as u16) << 8),
 			Asm::TrapA(i)  => out.push(0xC300 | *i as u16),
 
-			Asm::AddC(m,n)     => push(0x300E, *m, *n, &mut out),
-			Asm::AddV(m,n)     => push(0x300F, *m, *n, &mut out),
-			Asm::Div0S(m,n)    => push(0x2007, *m, *n, &mut out),
-			Asm::Div1(m,n)     => push(0x3004, *m, *n, &mut out),
-			Asm::ExtSByte(m,n) => push(0x600E, *m, *n, &mut out),
-			Asm::ExtSWord(m,n) => push(0x600F, *m, *n, &mut out),
-			Asm::ExtUByte(m,n) => push(0x600C, *m, *n, &mut out),
-			Asm::ExtUWord(m,n) => push(0x600D, *m, *n, &mut out),
-			Asm::MacWord(m,n)  => push(0x400F, *m, *n, &mut out),
-			Asm::MacLong(m,n)  => push(0x000F, *m, *n, &mut out),
-			Asm::Neg(m,n)      => push(0x600B, *m, *n, &mut out),
-			Asm::NegC(m,n)     => push(0x600A, *m, *n, &mut out),
-			Asm::Not(m,n)      => push(0x6007, *m, *n, &mut out),
-			Asm::Sub(m,n)      => push(0x3008, *m, *n, &mut out),
-			Asm::SubC(m,n)     => push(0x300A, *m, *n, &mut out),
-			Asm::SubV(m,n)     => push(0x300B, *m, *n, &mut out),
+			Asm::AddC(m,n)     => push(0x300E, m, n, &mut out),
+			Asm::AddV(m,n)     => push(0x300F, m, n, &mut out),
+			Asm::Div0S(m,n)    => push(0x2007, m, n, &mut out),
+			Asm::Div1(m,n)     => push(0x3004, m, n, &mut out),
+			Asm::ExtSByte(m,n) => push(0x600E, m, n, &mut out),
+			Asm::ExtSWord(m,n) => push(0x600F, m, n, &mut out),
+			Asm::ExtUByte(m,n) => push(0x600C, m, n, &mut out),
+			Asm::ExtUWord(m,n) => push(0x600D, m, n, &mut out),
+			Asm::MacWord(m,n)  => push(0x400F, m, n, &mut out),
+			Asm::MacLong(m,n)  => push(0x000F, m, n, &mut out),
+			Asm::Neg(m,n)      => push(0x600B, m, n, &mut out),
+			Asm::NegC(m,n)     => push(0x600A, m, n, &mut out),
+			Asm::Not(m,n)      => push(0x6007, m, n, &mut out),
+			Asm::Sub(m,n)      => push(0x3008, m, n, &mut out),
+			Asm::SubC(m,n)     => push(0x300A, m, n, &mut out),
+			Asm::SubV(m,n)     => push(0x300B, m, n, &mut out),
+			Asm::SwapByte(m,n) => push(0x6008, m, n, &mut out),
+			Asm::SwapWord(m,n) => push(0x6009, m, n, &mut out),
 		}
 	}
 
@@ -744,6 +752,8 @@ mod output {
 	test_output!(sub,    "\tsub r3,r3",       &[0x33, 0x38]);
 	test_output!(subc,   "\tsubc r3,r3",      &[0x33, 0x3A]);
 	test_output!(subv,   "\tsubv r3,r3",      &[0x33, 0x3B]);
+	test_output!(swapb,  "\tswap.b r7,r2",    &[0x62, 0x78]);
+	test_output!(swapw,  "\tswap.w r8,r3",    &[0x63, 0x89]);
 }
 
 /*
