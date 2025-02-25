@@ -79,6 +79,7 @@ enum Asm {
 	MacLong(Reg, Reg),
 	Neg(Reg, Reg),
 	NegC(Reg, Reg),
+	Not(Reg, Reg),
 }
 
 fn extra_rules(src: Pair<Rule>) {
@@ -192,6 +193,7 @@ fn parse_ins_line(source: Pair<Rule>, mut output: Output) -> ParseResult<Output>
 			}
 			Rule::ins_neg  => output.push(parse_ins_rs_rs(Asm::Neg, src)?),
 			Rule::ins_negc => output.push(parse_ins_rs_rs(Asm::NegC, src)?),
+			Rule::ins_not  => output.push(parse_ins_rs_rs(Asm::Not, src)?),
 
 			_ => {
 				extra_rules(src);
@@ -522,6 +524,7 @@ mod parser {
 	test_single!(macl,  "\tmac.l @r6+,@r3+", Asm::MacLong(6, 3));
 	test_single!(neg,   "\tneg r3,r0",       Asm::Neg(3, 0));
 	test_single!(negc,  "\tnegc r7,r7",      Asm::NegC(7, 7));
+	test_single!(not,   "\tnot r9,r0",       Asm::Not(9, 0));
 
 	#[test]
 	#[should_panic = " --> 1:7
@@ -646,6 +649,7 @@ fn output(asm: &[Asm]) -> Vec<u8> {
 			Asm::MacLong(m,n)  => out.push(0x000F | (*n as u16) << 8 | (*m as u16) << 4),
 			Asm::Neg(m,n)      => out.push(0x600B | (*n as u16) << 8 | (*m as u16) << 4),
 			Asm::NegC(m,n)     => out.push(0x600A | (*n as u16) << 8 | (*m as u16) << 4),
+			Asm::Not(m,n)      => out.push(0x6007 | (*n as u16) << 8 | (*m as u16) << 4),
 		}
 	}
 
@@ -720,6 +724,7 @@ mod output {
 	test_output!(macl,   "\tmac.l @sp+,@r3+", &[0x03, 0xFF]);
 	test_output!(neg,    "\tneg r4,sp",       &[0x6F, 0x4B]);
 	test_output!(negc,   "\tnegc sp,r8",      &[0x68, 0xFA]);
+	test_output!(not,    "\tnot r6,r6",       &[0x66, 0x67]);
 }
 
 /*
