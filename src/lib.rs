@@ -72,6 +72,8 @@ enum Asm {
 	Div1(Reg, Reg),
 	ExtSByte(Reg, Reg),
 	ExtSWord(Reg, Reg),
+	ExtUByte(Reg, Reg),
+	ExtUWord(Reg, Reg),
 }
 
 fn extra_rules(src: Pair<Rule>) {
@@ -171,6 +173,8 @@ fn parse_ins_line(source: Pair<Rule>, mut output: Output) -> ParseResult<Output>
 			Rule::ins_div1  => output.push(parse_ins_rs_rs(Asm::Div1, src)?),
 			Rule::ins_extsb => output.push(parse_ins_rs_rs(Asm::ExtSByte, src)?),
 			Rule::ins_extsw => output.push(parse_ins_rs_rs(Asm::ExtSWord, src)?),
+			Rule::ins_extub => output.push(parse_ins_rs_rs(Asm::ExtUByte, src)?),
+			Rule::ins_extuw => output.push(parse_ins_rs_rs(Asm::ExtUWord, src)?),
 
 			_ => {
 				extra_rules(src);
@@ -382,21 +386,24 @@ mod parser {
 	use super::*;
 
 	macro_rules! test_single {
-		($input:expr, $val:expr, u8) => {
-			test_single!($input, $val, parse_u8)
+		($name:ident, $input:expr, $val:expr, u8) => {
+			test_single!($name, $input, $val, parse_u8);
 		};
-		($input:expr, $val:expr, i8) => {
-			test_single!($input, $val, parse_i8)
+		($name:ident, $input:expr, $val:expr, i8) => {
+			test_single!($name, $input, $val, parse_i8);
 		};
-		($input:expr, $val:expr, $parse:ident) => {
-			let mut source = Sh2Parser::parse(Rule::num, $input)
-				.map_err(|e| panic!("{e}"))
-				.unwrap();
-			let src = source.next().unwrap();
-			let num = $parse(src)
-				.map_err(|e| panic!("{e}"))
-				.unwrap();
-			assert_eq!($val, num);
+		($name:ident, $input:expr, $val:expr, $parse:ident) => {
+			#[test]
+			fn $name() {
+				let mut source = Sh2Parser::parse(Rule::num, $input)
+					.map_err(|e| panic!("{e}"))
+					.unwrap();
+				let src = source.next().unwrap();
+				let num = $parse(src)
+					.map_err(|e| panic!("{e}"))
+					.unwrap();
+				assert_eq!($val, num);
+			}
 		};
 		($input:expr, $asm:expr) => {
 			let out = super::parser($input)
@@ -404,82 +411,70 @@ mod parser {
 				.unwrap();
 			assert_eq!(out.0, vec![$asm]);
 		};
+		($name:ident, $input:expr, $asm:expr) => {
+			#[test]
+			fn $name() {
+				let out = super::parser($input)
+					.map_err(|e| panic!("{e}"))
+					.unwrap();
+				assert_eq!(out.0, vec![$asm]);
+			}
+		};
 	}
 
-	#[test]
-	fn u8_hex() {
-		test_single!("$C9", 201, u8);
-	}
+	test_single!(u8_hex,     "$C9",        201, u8);
+	test_single!(u8_bin,     "%1100_1001", 201, u8);
+	test_single!(i8_hex_pos, "$49",         73, i8);
+	test_single!(i8_hex_neg, "$C9",        -55, i8);
+	test_single!(i8_bin_pos, "%0100_1001",  73, i8);
+	test_single!(i8_bin_neg, "%1100_1001", -55, i8);
 
-	#[test]
-	fn u8_bin() {
-		test_single!("%1100_1001", 201, u8);
-	}
+	test_single!(clrmac, "\tclrmac", Asm::ClrMac);
+	test_single!(clrt,   "\tclrt",   Asm::ClrT);
+	test_single!(div0u,  "\tdiv0u",  Asm::Div0U);
+	test_single!(nop,    "\tnop",    Asm::Nop);
+	test_single!(rte,    "\trte",    Asm::Rte);
+	test_single!(rts,    "\trts",    Asm::Rts);
+	test_single!(sett,   "\tsett",   Asm::SetT);
+	test_single!(sleep,  "\tsleep",  Asm::Sleep);
 
-	#[test]
-	fn i8_hex_pos() {
-		test_single!("$49", 73, i8);
-	}
+	test_single!(bf,     "\tbf @(34,pc)",    Asm::Bf(34));
+	test_single!(bfs,    "\tbf/s @($C9,pc)", Asm::BfS(-55));
+	test_single!(bra,    "\tbra @($FFC,pc)", Asm::Bra(-4));
+	test_single!(braf,   "\tbraf @r3",       Asm::BraF(3));
+	test_single!(bsr,    "\tbsr @($7FC,pc)", Asm::Bsr(2044));
+	test_single!(bsrf,   "\tbsrf @r0",       Asm::BsrF(0));
+	test_single!(bt,     "\tbt @($07,pc)",   Asm::Bt(7));
+	test_single!(bts,    "\tbt/s @(-12,pc)", Asm::BtS(-12));
+	test_single!(dt,     "\tdt r2",          Asm::Dt(2));
+	test_single!(jmp,    "\tjmp @r7",        Asm::Jmp(7));
+	test_single!(jsr,    "\tjsr @r9",        Asm::Jsr(9));
+	test_single!(movt,   "\tmovt r0",        Asm::MovT(0));
+	test_single!(rotcl,  "\trotcl r4",       Asm::RotCL(4));
+	test_single!(rotcr,  "\trotcr r5",       Asm::RotCR(5));
+	test_single!(rotl,   "\trotl r4",        Asm::RotL(4));
+	test_single!(rotr,   "\trotr r5",        Asm::RotR(5));
+	test_single!(shal,   "\tshal r10",       Asm::ShAL(10));
+	test_single!(shar,   "\tshar r11",       Asm::ShAR(11));
+	test_single!(shll,   "\tshll r12",       Asm::ShLL(12));
+	test_single!(shll2,  "\tshll2 r15",      Asm::ShLL2(15));
+	test_single!(shll8,  "\tshll8 r14",      Asm::ShLL8(14));
+	test_single!(shll16, "\tshll16 r13",     Asm::ShLL16(13));
+	test_single!(shlr,   "\tshlr r12",       Asm::ShLR(12));
+	test_single!(shlr2,  "\tshlr2 r15",      Asm::ShLR2(15));
+	test_single!(shlr8,  "\tshlr8 r14",      Asm::ShLR8(14));
+	test_single!(shlr16, "\tshlr16 r13",     Asm::ShLR16(13));
+	test_single!(tas,    "\ttas.b @r10",     Asm::TaS(10));
+	test_single!(trapa,  "\ttrapa #$AA",     Asm::TrapA(170));
 
-	#[test]
-	fn i8_hex_neg() {
-		test_single!("$C9", -55, i8);
-	}
-
-	#[test]
-	fn i8_bin_pos() {
-		test_single!("%0100_1001", 73, i8);
-	}
-
-	#[test]
-	fn i8_bin_neg() {
-		test_single!("%1100_1001", -55, i8);
-	}
-
-	#[test]
-	fn clrmac() {
-		test_single!("\tclrmac", Asm::ClrMac);
-	}
-
-	#[test]
-	fn clrt() {
-		test_single!("\tclrt", Asm::ClrT);
-	}
-
-	#[test]
-	fn div0u() {
-		test_single!("\tdiv0u", Asm::Div0U);
-	}
-
-	#[test]
-	fn nop() {
-		test_single!("\tnop", Asm::Nop);
-	}
-
-	#[test]
-	fn rte() {
-		test_single!("\trte", Asm::Rte);
-	}
-
-	#[test]
-	fn rts() {
-		test_single!("\trts", Asm::Rts);
-	}
-
-	#[test]
-	fn sett() {
-		test_single!("\tsett", Asm::SetT);
-	}
-
-	#[test]
-	fn sleep() {
-		test_single!("\tsleep", Asm::Sleep);
-	}
-
-	#[test]
-	fn bf() {
-		test_single!("\tbf @(34,pc)", Asm::Bf(34));
-	}
+	test_single!(addc,  "\taddc r2,r7",   Asm::AddC(2, 7));
+	test_single!(addv,  "\taddv r2,r7",   Asm::AddV(2, 7));
+	test_single!(div0s, "\tdiv0s sp,r0",  Asm::Div0S(15, 0));
+	test_single!(div1,  "\tdiv1 r1,r1",   Asm::Div1(1, 1));
+	test_single!(extsb, "\texts.b sp,sp", Asm::ExtSByte(15, 15));
+	test_single!(extsw, "\texts.w sp,sp", Asm::ExtSWord(15, 15));
+	test_single!(extub, "\textu.b sp,sp", Asm::ExtUByte(15, 15));
+	test_single!(extuw, "\textu.w sp,sp", Asm::ExtUWord(15, 15));
 
 	#[test]
 	#[should_panic = " --> 1:7
@@ -504,41 +499,6 @@ mod parser {
 	}
 
 	#[test]
-	fn bfs() {
-		test_single!("\tbf/s @(%1100_1001,pc)", Asm::BfS(-55));
-	}
-
-	#[test]
-	fn bra() {
-		test_single!("\tbra @($FFC,pc)", Asm::Bra(-4));
-	}
-
-	#[test]
-	fn braf() {
-		test_single!("\tbraf @r3", Asm::BraF(3));
-	}
-
-	#[test]
-	fn bsr() {
-		test_single!("\tbsr @($7FC,pc)", Asm::Bsr(2044));
-	}
-
-	#[test]
-	fn bsrf() {
-		test_single!("\tbsrf @r0", Asm::BsrF(0));
-	}
-
-	#[test]
-	fn bt() {
-		test_single!("\tbt @($07,pc)", Asm::Bt(7));
-	}
-
-	#[test]
-	fn bts() {
-		test_single!("\tbt/s @(-12,pc)", Asm::BtS(-12));
-	}
-
-	#[test]
 	#[should_panic = " --> 1:7
   |
 1 | 	bt @(243,pc)
@@ -558,136 +518,6 @@ mod parser {
   = expected a decimal value between -128 and 127"]
 	fn bt_too_far_behind() {
 		test_single!("\tbt @(-243,pc)", Asm::Bt(0));
-	}
-
-	#[test]
-	fn dt() {
-		test_single!("\tdt r2", Asm::Dt(2));
-	}
-
-	#[test]
-	fn jmp() {
-		test_single!("\tjmp @r7", Asm::Jmp(7));
-	}
-
-	#[test]
-	fn jsr() {
-		test_single!("\tjsr @r9", Asm::Jsr(9));
-	}
-
-	#[test]
-	fn movt() {
-		test_single!("\tmovt r0", Asm::MovT(0));
-	}
-
-	#[test]
-	fn rotcl() {
-		test_single!("\trotcl r4", Asm::RotCL(4));
-	}
-
-	#[test]
-	fn rotcr() {
-		test_single!("\trotcr r5", Asm::RotCR(5));
-	}
-
-	#[test]
-	fn rotl() {
-		test_single!("\trotl r4", Asm::RotL(4));
-	}
-
-	#[test]
-	fn rotr() {
-		test_single!("\trotr r5", Asm::RotR(5));
-	}
-
-	#[test]
-	fn shal() {
-		test_single!("\tshal r10", Asm::ShAL(10));
-	}
-
-	#[test]
-	fn shar() {
-		test_single!("\tshar r11", Asm::ShAR(11));
-	}
-
-	#[test]
-	fn shll() {
-		test_single!("\tshll r12", Asm::ShLL(12));
-	}
-
-	#[test]
-	fn shll2() {
-		test_single!("\tshll2 r15", Asm::ShLL2(15));
-	}
-
-	#[test]
-	fn shll8() {
-		test_single!("\tshll8 r14", Asm::ShLL8(14));
-	}
-
-	#[test]
-	fn shll16() {
-		test_single!("\tshll16 r13", Asm::ShLL16(13));
-	}
-
-	#[test]
-	fn shlr() {
-		test_single!("\tshlr r12", Asm::ShLR(12));
-	}
-
-	#[test]
-	fn shlr2() {
-		test_single!("\tshlr2 r15", Asm::ShLR2(15));
-	}
-
-	#[test]
-	fn shlr8() {
-		test_single!("\tshlr8 r14", Asm::ShLR8(14));
-	}
-
-	#[test]
-	fn shlr16() {
-		test_single!("\tshlr16 r13", Asm::ShLR16(13));
-	}
-
-	#[test]
-	fn tas() {
-		test_single!("\ttas.b @r10", Asm::TaS(10));
-	}
-
-	#[test]
-	fn trapa() {
-		test_single!("\ttrapa #$AA", Asm::TrapA(170));
-	}
-
-	#[test]
-	fn addc() {
-		test_single!("\taddc r2,r7", Asm::AddC(2, 7));
-	}
-
-	#[test]
-	fn addv() {
-		test_single!("\taddv r2,r7", Asm::AddV(2, 7));
-	}
-
-	#[test]
-	fn div0s() {
-		test_single!("\tdiv0s sp,r0", Asm::Div0S(15, 0));
-	}
-
-	#[test]
-	fn div1() {
-		test_single!("\tdiv1 r1,r1", Asm::Div1(1, 1));
-	}
-
-	#[test]
-	fn extsb() {
-		test_single!("\texts.b sp,sp", Asm::ExtSByte(15, 15));
-	}
-
-	#[test]
-	fn extsw() {
-		test_single!("\texts.w sp,sp", Asm::ExtSWord(15, 15));
 	}
 
 	#[test]
@@ -718,48 +548,52 @@ fn output(asm: &[Asm]) -> Vec<u8> {
 	let mut out = Vec::with_capacity(asm.len());
 	for cmd in asm {
 		match cmd {
-			Asm::ClrT       => out.push(0x0008),
-			Asm::Nop        => out.push(0x0009),
-			Asm::Rts        => out.push(0x000B),
-			Asm::SetT       => out.push(0x0018),
-			Asm::Div0U      => out.push(0x0019),
-			Asm::Sleep      => out.push(0x001B),
-			Asm::ClrMac     => out.push(0x0028),
-			Asm::Rte        => out.push(0x002B),
-			Asm::Bf(d)      => out.push(0x8B00 | *d as u16),
-			Asm::BfS(d)     => out.push(0x8F00 | *d as u16),
-			Asm::Bra(d)     => out.push(0xA000 | (*d & 0xFFF) as u16),
-			Asm::BraF(r)    => out.push(0x0023 | (*r as u16) << 8),
-			Asm::Bsr(d)     => out.push(0xB000 | (*d & 0xFFF) as u16),
-			Asm::BsrF(r)    => out.push(0x0003 | (*r as u16) << 8),
-			Asm::Bt(d)      => out.push(0x8900 | *d as u16),
-			Asm::BtS(d)     => out.push(0x8D00 | *d as u16),
-			Asm::Dt(r)      => out.push(0x4010 | (*r as u16) << 8),
-			Asm::Jmp(r)     => out.push(0x402B | (*r as u16) << 8),
-			Asm::Jsr(r)     => out.push(0x400B | (*r as u16) << 8),
-			Asm::MovT(r)    => out.push(0x0029 | (*r as u16) << 8),
-			Asm::RotCL(r)   => out.push(0x4044 | (*r as u16) << 8),
-			Asm::RotCR(r)   => out.push(0x4045 | (*r as u16) << 8),
-			Asm::RotL(r)    => out.push(0x4004 | (*r as u16) << 8),
-			Asm::RotR(r)    => out.push(0x4005 | (*r as u16) << 8),
-			Asm::ShAL(r)    => out.push(0x4020 | (*r as u16) << 8),
-			Asm::ShAR(r)    => out.push(0x4021 | (*r as u16) << 8),
-			Asm::ShLL(r)    => out.push(0x4000 | (*r as u16) << 8),
-			Asm::ShLL2(r)   => out.push(0x4008 | (*r as u16) << 8),
-			Asm::ShLL8(r)   => out.push(0x4018 | (*r as u16) << 8),
-			Asm::ShLL16(r)  => out.push(0x4028 | (*r as u16) << 8),
-			Asm::ShLR(r)    => out.push(0x4001 | (*r as u16) << 8),
-			Asm::ShLR2(r)   => out.push(0x4009 | (*r as u16) << 8),
-			Asm::ShLR8(r)   => out.push(0x4019 | (*r as u16) << 8),
-			Asm::ShLR16(r)  => out.push(0x4029 | (*r as u16) << 8),
-			Asm::TaS(r)     => out.push(0x401B | (*r as u16) << 8),
-			Asm::TrapA(i)   => out.push(0xC300 | *i as u16),
-			Asm::AddC(m,n)  => out.push(0x300E | (*n as u16) << 8 | (*m as u16) << 4),
-			Asm::AddV(m,n)  => out.push(0x300F | (*n as u16) << 8 | (*m as u16) << 4),
-			Asm::Div0S(m,n) => out.push(0x2007 | (*n as u16) << 8 | (*m as u16) << 4),
-			Asm::Div1(m,n)  => out.push(0x3004 | (*n as u16) << 8 | (*m as u16) << 4),
+			Asm::ClrT   => out.push(0x0008),
+			Asm::Nop    => out.push(0x0009),
+			Asm::Rts    => out.push(0x000B),
+			Asm::SetT   => out.push(0x0018),
+			Asm::Div0U  => out.push(0x0019),
+			Asm::Sleep  => out.push(0x001B),
+			Asm::ClrMac => out.push(0x0028),
+			Asm::Rte    => out.push(0x002B),
+
+			Asm::Bf(d)     => out.push(0x8B00 | *d as u16),
+			Asm::BfS(d)    => out.push(0x8F00 | *d as u16),
+			Asm::Bra(d)    => out.push(0xA000 | (*d & 0xFFF) as u16),
+			Asm::BraF(r)   => out.push(0x0023 | (*r as u16) << 8),
+			Asm::Bsr(d)    => out.push(0xB000 | (*d & 0xFFF) as u16),
+			Asm::BsrF(r)   => out.push(0x0003 | (*r as u16) << 8),
+			Asm::Bt(d)     => out.push(0x8900 | *d as u16),
+			Asm::BtS(d)    => out.push(0x8D00 | *d as u16),
+			Asm::Dt(r)     => out.push(0x4010 | (*r as u16) << 8),
+			Asm::Jmp(r)    => out.push(0x402B | (*r as u16) << 8),
+			Asm::Jsr(r)    => out.push(0x400B | (*r as u16) << 8),
+			Asm::MovT(r)   => out.push(0x0029 | (*r as u16) << 8),
+			Asm::RotCL(r)  => out.push(0x4044 | (*r as u16) << 8),
+			Asm::RotCR(r)  => out.push(0x4045 | (*r as u16) << 8),
+			Asm::RotL(r)   => out.push(0x4004 | (*r as u16) << 8),
+			Asm::RotR(r)   => out.push(0x4005 | (*r as u16) << 8),
+			Asm::ShAL(r)   => out.push(0x4020 | (*r as u16) << 8),
+			Asm::ShAR(r)   => out.push(0x4021 | (*r as u16) << 8),
+			Asm::ShLL(r)   => out.push(0x4000 | (*r as u16) << 8),
+			Asm::ShLL2(r)  => out.push(0x4008 | (*r as u16) << 8),
+			Asm::ShLL8(r)  => out.push(0x4018 | (*r as u16) << 8),
+			Asm::ShLL16(r) => out.push(0x4028 | (*r as u16) << 8),
+			Asm::ShLR(r)   => out.push(0x4001 | (*r as u16) << 8),
+			Asm::ShLR2(r)  => out.push(0x4009 | (*r as u16) << 8),
+			Asm::ShLR8(r)  => out.push(0x4019 | (*r as u16) << 8),
+			Asm::ShLR16(r) => out.push(0x4029 | (*r as u16) << 8),
+			Asm::TaS(r)    => out.push(0x401B | (*r as u16) << 8),
+			Asm::TrapA(i)  => out.push(0xC300 | *i as u16),
+
+			Asm::AddC(m,n)     => out.push(0x300E | (*n as u16) << 8 | (*m as u16) << 4),
+			Asm::AddV(m,n)     => out.push(0x300F | (*n as u16) << 8 | (*m as u16) << 4),
+			Asm::Div0S(m,n)    => out.push(0x2007 | (*n as u16) << 8 | (*m as u16) << 4),
+			Asm::Div1(m,n)     => out.push(0x3004 | (*n as u16) << 8 | (*m as u16) << 4),
 			Asm::ExtSByte(m,n) => out.push(0x600E | (*n as u16) << 8 | (*m as u16) << 4),
 			Asm::ExtSWord(m,n) => out.push(0x600F | (*n as u16) << 8 | (*m as u16) << 4),
+			Asm::ExtUByte(m,n) => out.push(0x600C | (*n as u16) << 8 | (*m as u16) << 4),
+			Asm::ExtUWord(m,n) => out.push(0x600D | (*n as u16) << 8 | (*m as u16) << 4),
 		}
 	}
 
@@ -770,226 +604,65 @@ fn output(asm: &[Asm]) -> Vec<u8> {
 
 #[cfg(test)]
 mod output {
-	use super::*;
-
-	fn test_output(input: &str, bytes: &[u8]) {
-		let asm = parser(input)
-			.map_err(|e| panic!("{e}"))
-			.unwrap();
-		let out = output(&asm.0);
-		assert_eq!(out, bytes);
+	macro_rules! test_output {
+		($name:ident, $input:expr, $bytes:expr) => {
+			#[test]
+			fn $name() {
+				let asm = super::parser($input)
+					.map_err(|e| panic!("{e}"))
+					.unwrap();
+				let out = super::output(&asm.0);
+				assert_eq!(out, $bytes);
+			}
+		};
 	}
 
-	#[test]
-	fn clrmac() {
-		test_output("\tclrmac", &[0x00, 0x28]);
-	}
+	test_output!(clrmac, "\tclrmac", &[0x00, 0x28]);
+	test_output!(clrt,   "\tclrt",   &[0x00, 0x08]);
+	test_output!(div0u,  "\tdiv0u",  &[0x00, 0x19]);
+	test_output!(nop,    "\tnop",    &[0x00, 0x09]);
+	test_output!(rte,    "\trte",    &[0x00, 0x2B]);
+	test_output!(rts,    "\trts",    &[0x00, 0x0B]);
+	test_output!(sett,   "\tsett",   &[0x00, 0x18]);
+	test_output!(sleep,  "\tsleep",  &[0x00, 0x1B]);
 
-	#[test]
-	fn clrt() {
-		test_output("\tclrt", &[0x00, 0x08]);
-	}
+	test_output!(bf,     "\tbf @($78,pc)",    &[0x8B, 0x78]);
+	test_output!(bfs,    "\tbf/s @($52,pc)",  &[0x8F, 0x52]);
+	test_output!(bra,    "\tbra @(-2000,pc)", &[0xA8, 0x30]);
+	test_output!(braf,   "\tbraf @sp",        &[0x0F, 0x23]);
+	test_output!(bsr,    "\tbsr @($63D,pc)",  &[0xB6, 0x3D]);
+	test_output!(bsrf,   "\tbsrf @r8",        &[0x08, 0x03]);
+	test_output!(bt,     "\tbt @(100,pc)",    &[0x89, 0x64]);
+	test_output!(bts,    "\tbt/s @(%100,pc)", &[0x8D, 0x04]);
+	test_output!(dt,     "\tdt r10",          &[0x4A, 0x10]);
+	test_output!(jmp,    "\tjmp @r13",        &[0x4D, 0x2B]);
+	test_output!(jsr,    "\tjsr @r3",         &[0x43, 0x0B]);
+	test_output!(movt,   "\tmovt r6",         &[0x06, 0x29]);
+	test_output!(rotcl,  "\trotcl r15",       &[0x4F, 0x44]);
+	test_output!(rotcr,  "\trotcr r14",       &[0x4E, 0x45]);
+	test_output!(rotl,   "\trotl r4",         &[0x44, 0x04]);
+	test_output!(rotr,   "\trotr r5",         &[0x45, 0x05]);
+	test_output!(shal,   "\tshal r8",         &[0x48, 0x20]);
+	test_output!(shar,   "\tshar r9",         &[0x49, 0x21]);
+	test_output!(shll,   "\tshll r0",         &[0x40, 0x00]);
+	test_output!(shll2,  "\tshll2 r2",        &[0x42, 0x08]);
+	test_output!(shll8,  "\tshll8 r8",        &[0x48, 0x18]);
+	test_output!(shll16, "\tshll16 r15",      &[0x4F, 0x28]);
+	test_output!(shlr,   "\tshlr r0",         &[0x40, 0x01]);
+	test_output!(shlr2,  "\tshlr2 r2",        &[0x42, 0x09]);
+	test_output!(shlr8,  "\tshlr8 r8",        &[0x48, 0x19]);
+	test_output!(shlr16, "\tshlr16 r15",      &[0x4F, 0x29]);
+	test_output!(tas,    "\ttas.b @sp",       &[0x4F, 0x1B]);
+	test_output!(trapa,  "\ttrapa #240",      &[0xC3, 0xF0]);
 
-	#[test]
-	fn div0u() {
-		test_output("\tdiv0u", &[0x00, 0x19]);
-	}
-
-	#[test]
-	fn nop() {
-		test_output("\tnop", &[0x00, 0x09]);
-	}
-
-	#[test]
-	fn rte() {
-		test_output("\trte", &[0x00, 0x2B]);
-	}
-
-	#[test]
-	fn rts() {
-		test_output("\trts", &[0x00, 0x0B]);
-	}
-
-	#[test]
-	fn sett() {
-		test_output("\tsett", &[0x00, 0x18]);
-	}
-
-	#[test]
-	fn sleep() {
-		test_output("\tsleep", &[0x00, 0x1B]);
-	}
-
-	#[test]
-	fn bf() {
-		test_output("\tbf @($78,pc)", &[0x8B, 0x78]);
-	}
-
-	#[test]
-	fn bfs() {
-		test_output("\tbf/s @($52,pc)", &[0x8F, 0x52]);
-	}
-
-	#[test]
-	fn bra() {
-		// -2000 -> 0x708 -> 0x8F8
-		test_output("\tbra @(-2000,pc)", &[0xA8, 0x30]);
-	}
-
-	#[test]
-	fn braf() {
-		test_output("\tbraf @sp", &[0x0F, 0x23]);
-	}
-
-	#[test]
-	fn bsr() {
-		test_output("\tbsr @(%0110_0011_1101,pc)", &[0xB6, 0x3D]);
-	}
-
-	#[test]
-	fn bsrf() {
-		test_output("\tbsrf @r8", &[0x08, 0x03]);
-	}
-
-	#[test]
-	fn bt() {
-		test_output("\tbt @(100,pc)", &[0x89, 0x64]);
-	}
-
-	#[test]
-	fn bts() {
-		test_output("\tbt/s @(%100,pc)", &[0x8D, 0x04]);
-	}
-
-	#[test]
-	fn dt() {
-		test_output("\tdt r10", &[0x4A, 0x10]);
-	}
-
-	#[test]
-	fn jmp() {
-		test_output("\tjmp @r13", &[0x4D, 0x2B]);
-	}
-
-	#[test]
-	fn jsr() {
-		test_output("\tjsr @r3", &[0x43, 0x0B]);
-	}
-
-	#[test]
-	fn movt() {
-		test_output("\tmovt r6", &[0x06, 0x29]);
-	}
-
-	#[test]
-	fn rotcl() {
-		test_output("\trotcl r15", &[0x4F, 0x44]);
-	}
-
-	#[test]
-	fn rotcr() {
-		test_output("\trotcr r14", &[0x4E, 0x45]);
-	}
-
-	#[test]
-	fn rotl() {
-		test_output("\trotl r4", &[0x44, 0x04]);
-	}
-
-	#[test]
-	fn rotr() {
-		test_output("\trotr r5", &[0x45, 0x05]);
-	}
-
-	#[test]
-	fn shal() {
-		test_output("\tshal r8", &[0x48, 0x20]);
-	}
-
-	#[test]
-	fn shar() {
-		test_output("\tshar r9", &[0x49, 0x21]);
-	}
-
-	#[test]
-	fn shll() {
-		test_output("\tshll r0", &[0x40, 0x00]);
-	}
-
-	#[test]
-	fn shll2() {
-		test_output("\tshll2 r2", &[0x42, 0x08]);
-	}
-
-	#[test]
-	fn shll8() {
-		test_output("\tshll8 r8", &[0x48, 0x18]);
-	}
-
-	#[test]
-	fn shll16() {
-		test_output("\tshll16 r15", &[0x4F, 0x28]);
-	}
-
-	#[test]
-	fn shlr() {
-		test_output("\tshlr r0", &[0x40, 0x01]);
-	}
-
-	#[test]
-	fn shlr2() {
-		test_output("\tshlr2 r2", &[0x42, 0x09]);
-	}
-
-	#[test]
-	fn shlr8() {
-		test_output("\tshlr8 r8", &[0x48, 0x19]);
-	}
-
-	#[test]
-	fn shlr16() {
-		test_output("\tshlr16 r15", &[0x4F, 0x29]);
-	}
-
-	#[test]
-	fn tas() {
-		test_output("\ttas.b @sp", &[0x4F, 0x1B]);
-	}
-
-	#[test]
-	fn trapa() {
-		test_output("\ttrapa #240", &[0xC3, 0xF0]);
-	}
-
-	#[test]
-	fn addc() {
-		test_output("\taddc r12, r8", &[0x38, 0xCE]);
-	}
-
-	#[test]
-	fn addv() {
-		test_output("\taddv r4, r11", &[0x3B, 0x4F]);
-	}
-
-	#[test]
-	fn div0s() {
-		test_output("\tdiv0s r14,r13", &[0x2D, 0xE7]);
-	}
-
-	#[test]
-	fn div1() {
-		test_output("\tdiv1 r1,r1", &[0x31, 0x14]);
-	}
-
-	#[test]
-	fn extsb() {
-		test_output("\texts.b r15,r0", &[0x60, 0xFE]);
-	}
-
-	#[test]
-	fn extsw() {
-		test_output("\texts.w r15,r1", &[0x61, 0xFF]);
-	}
+	test_output!(addc,   "\taddc r12, r8",    &[0x38, 0xCE]);
+	test_output!(addv,   "\taddv r4, r11",    &[0x3B, 0x4F]);
+	test_output!(div0s,  "\tdiv0s r14,r13",   &[0x2D, 0xE7]);
+	test_output!(div1,   "\tdiv1 r1,r1",      &[0x31, 0x14]);
+	test_output!(extsb,  "\texts.b r15,r0",   &[0x60, 0xFE]);
+	test_output!(extsw,  "\texts.w r15,r1",   &[0x61, 0xFF]);
+	test_output!(extub,  "\textu.b r15,r0",   &[0x60, 0xFC]);
+	test_output!(extuw,  "\textu.w r15,r1",   &[0x61, 0xFD]);
 }
 
 /*
