@@ -80,6 +80,9 @@ enum Asm {
 	Neg(Reg, Reg),
 	NegC(Reg, Reg),
 	Not(Reg, Reg),
+	Sub(Reg, Reg),
+	SubC(Reg, Reg),
+	SubV(Reg, Reg),
 }
 
 fn extra_rules(src: Pair<Rule>) {
@@ -194,6 +197,9 @@ fn parse_ins_line(source: Pair<Rule>, mut output: Output) -> ParseResult<Output>
 			Rule::ins_neg  => output.push(parse_ins_rs_rs(Asm::Neg, src)?),
 			Rule::ins_negc => output.push(parse_ins_rs_rs(Asm::NegC, src)?),
 			Rule::ins_not  => output.push(parse_ins_rs_rs(Asm::Not, src)?),
+			Rule::ins_sub  => output.push(parse_ins_rs_rs(Asm::Sub, src)?),
+			Rule::ins_subc => output.push(parse_ins_rs_rs(Asm::SubC, src)?),
+			Rule::ins_subv => output.push(parse_ins_rs_rs(Asm::SubV, src)?),
 
 			_ => {
 				extra_rules(src);
@@ -525,6 +531,9 @@ mod parser {
 	test_single!(neg,   "\tneg r3,r0",       Asm::Neg(3, 0));
 	test_single!(negc,  "\tnegc r7,r7",      Asm::NegC(7, 7));
 	test_single!(not,   "\tnot r9,r0",       Asm::Not(9, 0));
+	test_single!(sub,   "\tsub r5,r4",       Asm::Sub(5, 4));
+	test_single!(subc,  "\tsubc r2,r1",      Asm::SubC(2, 1));
+	test_single!(subv,  "\tsubv r3,r4",      Asm::SubV(3, 4));
 
 	#[test]
 	#[should_panic = " --> 1:7
@@ -595,6 +604,10 @@ mod parser {
 
 #[instrument]
 fn output(asm: &[Asm]) -> Vec<u8> {
+	fn push(base: u16, m: Reg, n: Reg, output: &mut Vec<u16>) {
+		output.push(base | (n as u16) << 8 | (m as u16) << 4);
+	}
+
 	let mut out = Vec::with_capacity(asm.len());
 	for cmd in asm {
 		match cmd {
@@ -637,19 +650,22 @@ fn output(asm: &[Asm]) -> Vec<u8> {
 			Asm::TaS(r)    => out.push(0x401B | (*r as u16) << 8),
 			Asm::TrapA(i)  => out.push(0xC300 | *i as u16),
 
-			Asm::AddC(m,n)     => out.push(0x300E | (*n as u16) << 8 | (*m as u16) << 4),
-			Asm::AddV(m,n)     => out.push(0x300F | (*n as u16) << 8 | (*m as u16) << 4),
-			Asm::Div0S(m,n)    => out.push(0x2007 | (*n as u16) << 8 | (*m as u16) << 4),
-			Asm::Div1(m,n)     => out.push(0x3004 | (*n as u16) << 8 | (*m as u16) << 4),
-			Asm::ExtSByte(m,n) => out.push(0x600E | (*n as u16) << 8 | (*m as u16) << 4),
-			Asm::ExtSWord(m,n) => out.push(0x600F | (*n as u16) << 8 | (*m as u16) << 4),
-			Asm::ExtUByte(m,n) => out.push(0x600C | (*n as u16) << 8 | (*m as u16) << 4),
-			Asm::ExtUWord(m,n) => out.push(0x600D | (*n as u16) << 8 | (*m as u16) << 4),
-			Asm::MacWord(m,n)  => out.push(0x400F | (*n as u16) << 8 | (*m as u16) << 4),
-			Asm::MacLong(m,n)  => out.push(0x000F | (*n as u16) << 8 | (*m as u16) << 4),
-			Asm::Neg(m,n)      => out.push(0x600B | (*n as u16) << 8 | (*m as u16) << 4),
-			Asm::NegC(m,n)     => out.push(0x600A | (*n as u16) << 8 | (*m as u16) << 4),
-			Asm::Not(m,n)      => out.push(0x6007 | (*n as u16) << 8 | (*m as u16) << 4),
+			Asm::AddC(m,n)     => push(0x300E, *m, *n, &mut out),
+			Asm::AddV(m,n)     => push(0x300F, *m, *n, &mut out),
+			Asm::Div0S(m,n)    => push(0x2007, *m, *n, &mut out),
+			Asm::Div1(m,n)     => push(0x3004, *m, *n, &mut out),
+			Asm::ExtSByte(m,n) => push(0x600E, *m, *n, &mut out),
+			Asm::ExtSWord(m,n) => push(0x600F, *m, *n, &mut out),
+			Asm::ExtUByte(m,n) => push(0x600C, *m, *n, &mut out),
+			Asm::ExtUWord(m,n) => push(0x600D, *m, *n, &mut out),
+			Asm::MacWord(m,n)  => push(0x400F, *m, *n, &mut out),
+			Asm::MacLong(m,n)  => push(0x000F, *m, *n, &mut out),
+			Asm::Neg(m,n)      => push(0x600B, *m, *n, &mut out),
+			Asm::NegC(m,n)     => push(0x600A, *m, *n, &mut out),
+			Asm::Not(m,n)      => push(0x6007, *m, *n, &mut out),
+			Asm::Sub(m,n)      => push(0x3008, *m, *n, &mut out),
+			Asm::SubC(m,n)     => push(0x300A, *m, *n, &mut out),
+			Asm::SubV(m,n)     => push(0x300B, *m, *n, &mut out),
 		}
 	}
 
@@ -725,6 +741,9 @@ mod output {
 	test_output!(neg,    "\tneg r4,sp",       &[0x6F, 0x4B]);
 	test_output!(negc,   "\tnegc sp,r8",      &[0x68, 0xFA]);
 	test_output!(not,    "\tnot r6,r6",       &[0x66, 0x67]);
+	test_output!(sub,    "\tsub r3,r3",       &[0x33, 0x38]);
+	test_output!(subc,   "\tsubc r3,r3",      &[0x33, 0x3A]);
+	test_output!(subv,   "\tsubv r3,r3",      &[0x33, 0x3B]);
 }
 
 /*
