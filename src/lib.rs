@@ -221,6 +221,10 @@ enum Asm {
 	LdsMaclInc(Reg),
 	///               $4m26 | LDS.L @Rm+,PR
 	LdsPrInc(Reg),
+	///               $3nmD | DMULS.L Rm,Rn
+	DMulS(Reg, Reg),
+	///               $3nm5 | DMULU.L Rm,Rn
+	DMulU(Reg, Reg),
 }
 
 fn extra_rules(src: Pair<Rule>) {
@@ -421,6 +425,8 @@ fn parse_ins_line(source: Pair<Rule>, mut output: Output) -> ParseResult<Output>
 				};
 				output.push(ins);
 			}
+			Rule::ins_dmuls => output.push(parse_ins_rs_rs(Asm::DMulS, src)?),
+			Rule::ins_dmulu => output.push(parse_ins_rs_rs(Asm::DMulU, src)?),
 
 			_ => {
 				extra_rules(src);
@@ -859,6 +865,8 @@ mod parser {
 	test_single!(ldsmach2, "\tlds.l @r7+,mach", Asm::LdsMachInc(7));
 	test_single!(ldsmacl2, "\tlds.l @r8+,macl", Asm::LdsMaclInc(8));
 	test_single!(ldspr2,   "\tlds.l @r9+,pr",   Asm::LdsPrInc(9));
+	test_single!(dmuls,    "\tdmuls.l r3,r2",   Asm::DMulS(3, 2));
+	test_single!(dmulu,    "\tdmulu.l r1,r0",   Asm::DMulU(1, 0));
 
 	#[test]
 	#[should_panic = " --> 1:7
@@ -1068,6 +1076,8 @@ fn output(asm: &[Asm]) -> Vec<u8> {
 			Asm::LdsMachInc(r) => out.push(0x4006 | (*r as u16) << 8),
 			Asm::LdsMaclInc(r) => out.push(0x4016 | (*r as u16) << 8),
 			Asm::LdsPrInc(r)   => out.push(0x4026 | (*r as u16) << 8),
+			Asm::DMulS(m,n)    =>     push(0x300D, m, n, &mut out),
+			Asm::DMulU(m,n)    =>     push(0x3005, m, n, &mut out),
 		}
 	}
 
@@ -1190,5 +1200,7 @@ mod output {
 	test_output!(ldsmach2, "\tlds.l @r2+,mach", &[0x42, 0x06]);
 	test_output!(ldsmacl2, "\tlds.l @r2+,macl", &[0x42, 0x16]);
 	test_output!(ldspr2,   "\tlds.l @r2+,pr",   &[0x42, 0x26]);
+	test_output!(dmuls,    "\tdmuls.l r0,r0",   &[0x30, 0x0D]);
+	test_output!(dmulu,    "\tdmulu.l r0,r0",   &[0x30, 0x05]);
 }
 
