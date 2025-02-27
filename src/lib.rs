@@ -197,7 +197,25 @@ enum Asm {
 	MulS(Reg, Reg),
 	///               $2nmE | MULU.W Rm,Rn
 	MulU(Reg, Reg),
+	///               $4m1E | LDC Rm,GBR
+	LdcGbr(Reg),
+	///               $4m0E | LDC Rm,SR
+	LdcSr(Reg),
+	///               $4m2E | LDC Rm,VBR
+	LdcVbr(Reg),
+	///               $4m17 | LDC.L @Rm+,GBR
+	LdcGbrInc(Reg),
+	///               $4m07 | LDC.L @Rm+,SR
+	LdcSrInc(Reg),
+	///               $4m27 | LDC.L @Rm+,VBR
+	LdcVbrInc(Reg),
 }
+	///               $4m0A | LDS Rm,MACH
+	///               $4m1A | LDS Rm,MACL
+	///               $4m2A | LDS Rm,PR
+	///               $4m06 | LDS.L @Rm+,MACH
+	///               $4m16 | LDS.L @Rm+,MACL
+	///               $4m26 | LDS.L @Rm+,PR
 
 fn extra_rules(src: Pair<Rule>) {
 	#[cfg(not(test))]
@@ -357,6 +375,26 @@ fn parse_ins_line(source: Pair<Rule>, mut output: Output) -> ParseResult<Output>
 			Rule::ins_mul  => output.push(parse_ins_rs_rs(Asm::Mul, src)?),
 			Rule::ins_muls => output.push(parse_ins_rs_rs(Asm::MulS, src)?),
 			Rule::ins_mulu => output.push(parse_ins_rs_rs(Asm::MulU, src)?),
+			Rule::ins_ldc  => {
+				let mut args = src.into_inner();
+				let src = parse_reg_or_sp(args.next().unwrap())?;
+				let ins = match parse_ctrl(args.next().unwrap()) {
+					Ctrl::Gbr => Asm::LdcGbr(src),
+					Ctrl::Sr  => Asm::LdcSr(src),
+					Ctrl::Vbr => Asm::LdcVbr(src),
+				};
+				output.push(ins);
+			}
+			Rule::ins_ldc_inc => {
+				let mut args = src.into_inner();
+				let src = parse_reg_post_inc(args.next().unwrap())?;
+				let ins = match parse_ctrl(args.next().unwrap()) {
+					Ctrl::Gbr => Asm::LdcGbrInc(src),
+					Ctrl::Sr  => Asm::LdcSrInc(src),
+					Ctrl::Vbr => Asm::LdcVbrInc(src),
+				};
+				output.push(ins);
+			}
 
 			_ => {
 				extra_rules(src);
@@ -624,6 +662,18 @@ fn parse_i12(source: Pair<Rule>) -> ParseResult<i16> {
 		))
 }
 
+enum Ctrl { Gbr, Sr, Vbr }
+
+#[instrument]
+fn parse_ctrl(source: Pair<Rule>) -> Ctrl {
+	match source.as_rule() {
+		Rule::gbr => Ctrl::Gbr,
+		Rule::sr  => Ctrl::Sr,
+		Rule::vbr => Ctrl::Vbr,
+		_ => unreachable!("{source} - '{}'", source.as_str()),
+	}
+}
+
 #[cfg(test)]
 mod parser {
 	use super::*;
@@ -754,11 +804,17 @@ mod parser {
 	test_single!(cmppl,  "\tcmp/pl r6",      Asm::CmpPL(6));
 	test_single!(cmppz,  "\tcmp/pz r10",     Asm::CmpPZ(10));
 
-	test_single!(add,  "\tadd r2,r3",     Asm::AddReg(2, 3));
-	test_single!(addi, "\tadd #45,r5",    Asm::AddImm(45, 5));
-	test_single!(mul,  "\tmul.l r0,r10",  Asm::Mul(0, 10));
-	test_single!(muls, "\tmuls.w r1,r11", Asm::MulS(1, 11));
-	test_single!(mulu, "\tmulu.w r2,r12", Asm::MulU(2, 12));
+	test_single!(add,     "\tadd r2,r3",      Asm::AddReg(2, 3));
+	test_single!(addi,    "\tadd #45,r5",     Asm::AddImm(45, 5));
+	test_single!(mul,     "\tmul.l r0,r10",   Asm::Mul(0, 10));
+	test_single!(muls,    "\tmuls.w r1,r11",  Asm::MulS(1, 11));
+	test_single!(mulu,    "\tmulu.w r2,r12",  Asm::MulU(2, 12));
+	test_single!(ldcgbr,  "\tldc r2,gbr",     Asm::LdcGbr(2));
+	test_single!(ldcsr,   "\tldc r3,sr",      Asm::LdcSr(3));
+	test_single!(ldcvbr,  "\tldc r4,vbr",     Asm::LdcVbr(4));
+	test_single!(ldcgbr2, "\tldc.l @r2+,gbr", Asm::LdcGbrInc(2));
+	test_single!(ldcsr2,  "\tldc.l @r3+,sr",  Asm::LdcSrInc(3));
+	test_single!(ldcvbr2, "\tldc.l @r4+,vbr", Asm::LdcVbrInc(4));
 
 	#[test]
 	#[should_panic = " --> 1:7
@@ -951,11 +1007,17 @@ fn output(asm: &[Asm]) -> Vec<u8> {
 			Asm::CmpSTR(m,n)     => push(0x200C, m, n, &mut out),
 			Asm::CmpEqImm(i) => out.push(0x8800 | *i as u16),
 
-			Asm::AddImm(i,r) => out.push(0x7000 | (*r as u16) << 8 | *i as u16),
-			Asm::AddReg(m,n)     => push(0x300C, m, n, &mut out),
-			Asm::Mul(m,n)        => push(0x0007, m, n, &mut out),
-			Asm::MulS(m,n)       => push(0x200F, m, n, &mut out),
-			Asm::MulU(m,n)       => push(0x200E, m, n, &mut out),
+			Asm::AddImm(i,r)  => out.push(0x7000 | (*r as u16) << 8 | *i as u16),
+			Asm::AddReg(m,n)  =>     push(0x300C, m, n, &mut out),
+			Asm::Mul(m,n)     =>     push(0x0007, m, n, &mut out),
+			Asm::MulS(m,n)    =>     push(0x200F, m, n, &mut out),
+			Asm::MulU(m,n)    =>     push(0x200E, m, n, &mut out),
+			Asm::LdcGbr(r)    => out.push(0x401E | (*r as u16) << 8),
+			Asm::LdcSr(r)     => out.push(0x400E | (*r as u16) << 8),
+			Asm::LdcVbr(r)    => out.push(0x402E | (*r as u16) << 8),
+			Asm::LdcGbrInc(r) => out.push(0x4017 | (*r as u16) << 8),
+			Asm::LdcSrInc(r)  => out.push(0x4007 | (*r as u16) << 8),
+			Asm::LdcVbrInc(r) => out.push(0x4027 | (*r as u16) << 8),
 		}
 	}
 
@@ -1061,10 +1123,16 @@ mod output {
 	test_output!(cmppl,  "\tcmp/pl r13",      &[0x4D, 0x15]);
 	test_output!(cmppz,  "\tcmp/pz r14",      &[0x4E, 0x11]);
 
-	test_output!(add,  "\tadd r6,r7",      &[0x37, 0x6C]);
-	test_output!(addi, "\tadd #37,r4",     &[0x74, 0x25]);
-	test_output!(mul,  "\tmul.l r0,sp",    &[0x0F, 0x07]);
-	test_output!(muls, "\tmuls.w r14,r13", &[0x2D, 0xEF]);
-	test_output!(mulu, "\tmulu.w r11,r12", &[0x2C, 0xBE]);
+	test_output!(add,     "\tadd r6,r7",       &[0x37, 0x6C]);
+	test_output!(addi,    "\tadd #37,r4",      &[0x74, 0x25]);
+	test_output!(mul,     "\tmul.l r0,sp",     &[0x0F, 0x07]);
+	test_output!(muls,    "\tmuls.w r14,r13",  &[0x2D, 0xEF]);
+	test_output!(mulu,    "\tmulu.w r11,r12",  &[0x2C, 0xBE]);
+	test_output!(ldcgbr,  "\tldc r9,gbr",      &[0x49, 0x1E]);
+	test_output!(ldcsr,   "\tldc r9,sr",       &[0x49, 0x0E]);
+	test_output!(ldcvbr,  "\tldc r9,vbr",      &[0x49, 0x2E]);
+	test_output!(ldcgbr2, "\tldc.l @r7+,gbr",  &[0x47, 0x17]);
+	test_output!(ldcsr2,  "\tldc.l @r7+,sr",   &[0x47, 0x07]);
+	test_output!(ldcvbr2, "\tldc.l @r7+,vbr",  &[0x47, 0x27]);
 }
 
