@@ -34,10 +34,15 @@ enum Asm {
 	ClrT,
 	///               $0019 | DIV0U
 	Div0U,
+	///               $0009 | NOP
 	Nop,
+	///               $002B | RTE
 	Rte,
+	///               $000B | RTS
 	Rts,
+	///               $0018 | SETT
 	SetT,
+	///               $001B | SLEEP
 	Sleep,
 
 	///               $8Bdd | BF label
@@ -56,27 +61,47 @@ enum Asm {
 	Bt(i8),
 	///               $8Ddd | BT/S label
 	BtS(i8),
-	///               $
+	///               $4n10 | DT Rn
 	Dt(Reg),
+	///               $4m2B | JMP @Rm
 	Jmp(Reg),
+	///               $4m0B | JSR @Rm
 	Jsr(Reg),
+	///               $C7dd | MOVA @(disp,PC),R0
 	MovA(u8),
+	///               $0n29 | MOVT Rn
 	MovT(Reg),
+	///               $4n24 | ROTCL Rn
 	RotCL(Reg),
+	///               $4n25 | ROTCR Rn
 	RotCR(Reg),
+	///               $4n04 | ROTL Rn
 	RotL(Reg),
+	///               $4n05 | ROTR Rn
 	RotR(Reg),
+	///               $4n20 | SHAL Rn
 	ShAL(Reg),
+	///               $4n21 | SHAR Rn
 	ShAR(Reg),
+	///               $4n00 | SHLL Rn
 	ShLL(Reg),
+	///               $4n08 | SHLL2 Rn
 	ShLL2(Reg),
+	///               $4n18 | SHLL8 Rn
 	ShLL8(Reg),
+	///               $4n28 | SHLL16 Rn
 	ShLL16(Reg),
+	///               $4n01 | SHLR Rn
 	ShLR(Reg),
+	///               $4n09 | SHLR2 Rn
 	ShLR2(Reg),
+	///               $4n19 | SHLR8 Rn
 	ShLR8(Reg),
+	///               $4n29 | SHLR16 Rn
 	ShLR16(Reg),
+	///               $4n1B | TAS.B @Rn
 	TaS(Reg),
+	///               $C3ii | TRAPA #imm
 	TrapA(u8),
 
 	///               $3nmE | ADDC Rm,Rn
@@ -87,36 +112,60 @@ enum Asm {
 	Div0S(Reg, Reg),
 	///               $3nm4 | DIV1 Rm,Rn
 	Div1(Reg, Reg),
+	///               $6nmE | EXTS.B Rm,Rn
 	ExtSByte(Reg, Reg),
+	///               $6nmF | EXTS.W Rm,Rn
 	ExtSWord(Reg, Reg),
+	///               $6nmC | EXTU.B Rm,Rn
 	ExtUByte(Reg, Reg),
+	///               $6nmD | EXTU.W Rm,Rn
 	ExtUWord(Reg, Reg),
+	///               $4nmF | MAC.W Rm,Rn
 	MacWord(Reg, Reg),
+	///               $0nmF | MAC.L Rm,Rn
 	MacLong(Reg, Reg),
+	///               $6nmB | NEG Rm,Rn
 	Neg(Reg, Reg),
+	///               $6nmA | NEGC Rm,Rn
 	NegC(Reg, Reg),
+	///               $6nm7 | NOT Rm,Rn
 	Not(Reg, Reg),
+	///               $3nm8 | SUB Rm,Rn
 	Sub(Reg, Reg),
+	///               $3nmA | SUBC Rm,Rn
 	SubC(Reg, Reg),
+	///               $3nmB | SUBV Rm,Rn
 	SubV(Reg, Reg),
+	///               $6nm8 | SWAP.B Rm,Rn
 	SwapByte(Reg, Reg),
+	///               $6nm9 | SWAP.W Rm,Rn
 	SwapWord(Reg, Reg),
+	///               $2nmD | XTRCT Rm,Rn
 	Xtrct(Reg, Reg),
 
 	///               $2nm9 | AND Rm,Rn
 	AndReg(Reg, Reg),
 	///               $C9ii | AND #imm,Rn
 	AndImm(u8),
-	///               $CDii | AND.B Rm,Rn
+	///               $CDii | AND.B #imm,@(R0,GBR)
 	AndByte(u8),
+	///               $2nmB | OR Rm,Rn
 	OrReg(Reg, Reg),
+	///               $CBii | OR #imm,Rn
 	OrImm(u8),
+	///               $CFii | OR.B #imm,@(R0,GBR)
 	OrByte(u8),
+	///               $2nm8 | TST Rm,Rn
 	TstReg(Reg, Reg),
+	///               $C8ii | TST #imm,Rn
 	TstImm(u8),
+	///               $CCii | TST.B #imm,@(R0,GBR)
 	TstByte(u8),
+	///               $2nmA | XOR Rm,Rn
 	XorReg(Reg, Reg),
+	///               $CAii | XOR #imm,Rn
 	XorImm(u8),
+	///               $CEii | XOR.B #imm,@(R0,GBR)
 	XorByte(u8),
 
 	///               $88ii | CMP/EQ #imm,R0
@@ -142,6 +191,12 @@ enum Asm {
 	AddImm(i8, Reg),
 	///               $3nmC | ADD Rm,Rn
 	AddReg(Reg, Reg),
+	///               $0nm7 | MUL.L Rm,Rn
+	Mul(Reg, Reg),
+	///               $2nmF | MULS.W Rm,Rn
+	MulS(Reg, Reg),
+	///               $2nmE | MULU.W Rm,Rn
+	MulU(Reg, Reg),
 }
 
 fn extra_rules(src: Pair<Rule>) {
@@ -299,6 +354,9 @@ fn parse_ins_line(source: Pair<Rule>, mut output: Output) -> ParseResult<Output>
 				let dst = parse_reg_or_sp(args.next().unwrap())?;
 				output.push(Asm::AddImm(src, dst));
 			}
+			Rule::ins_mul  => output.push(parse_ins_rs_rs(Asm::Mul, src)?),
+			Rule::ins_muls => output.push(parse_ins_rs_rs(Asm::MulS, src)?),
+			Rule::ins_mulu => output.push(parse_ins_rs_rs(Asm::MulU, src)?),
 
 			_ => {
 				extra_rules(src);
@@ -696,8 +754,11 @@ mod parser {
 	test_single!(cmppl,  "\tcmp/pl r6",      Asm::CmpPL(6));
 	test_single!(cmppz,  "\tcmp/pz r10",     Asm::CmpPZ(10));
 
-	test_single!(add,  "\tadd r2,r3",  Asm::AddReg(2, 3));
-	test_single!(addi, "\tadd #45,r5", Asm::AddImm(45, 5));
+	test_single!(add,  "\tadd r2,r3",     Asm::AddReg(2, 3));
+	test_single!(addi, "\tadd #45,r5",    Asm::AddImm(45, 5));
+	test_single!(mul,  "\tmul.l r0,r10",  Asm::Mul(0, 10));
+	test_single!(muls, "\tmuls.w r1,r11", Asm::MulS(1, 11));
+	test_single!(mulu, "\tmulu.w r2,r12", Asm::MulU(2, 12));
 
 	#[test]
 	#[should_panic = " --> 1:7
@@ -892,6 +953,9 @@ fn output(asm: &[Asm]) -> Vec<u8> {
 
 			Asm::AddImm(i,r) => out.push(0x7000 | (*r as u16) << 8 | *i as u16),
 			Asm::AddReg(m,n)     => push(0x300C, m, n, &mut out),
+			Asm::Mul(m,n)        => push(0x0007, m, n, &mut out),
+			Asm::MulS(m,n)       => push(0x200F, m, n, &mut out),
+			Asm::MulU(m,n)       => push(0x200E, m, n, &mut out),
 		}
 	}
 
@@ -997,7 +1061,10 @@ mod output {
 	test_output!(cmppl,  "\tcmp/pl r13",      &[0x4D, 0x15]);
 	test_output!(cmppz,  "\tcmp/pz r14",      &[0x4E, 0x11]);
 
-	test_output!(add,  "\tadd r6,r7",  &[0x37, 0x6C]);
-	test_output!(addi, "\tadd #37,r4", &[0x74, 0x25]);
+	test_output!(add,  "\tadd r6,r7",      &[0x37, 0x6C]);
+	test_output!(addi, "\tadd #37,r4",     &[0x74, 0x25]);
+	test_output!(mul,  "\tmul.l r0,sp",    &[0x0F, 0x07]);
+	test_output!(muls, "\tmuls.w r14,r13", &[0x2D, 0xEF]);
+	test_output!(mulu, "\tmulu.w r11,r12", &[0x2C, 0xBE]);
 }
 
