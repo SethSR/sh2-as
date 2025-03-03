@@ -6,12 +6,16 @@ use pest_derive::Parser;
 
 use tracing::{
 	instrument,
-	debug, error, info, trace, warn,
+	//debug, info,
+	trace, warn,
 };
 
 type Reg = u8;
 
 type ParseResult<T> = Result<T, Error<Rule>>;
+
+mod i4;
+use i4::I4;
 
 #[derive(Parser)]
 #[grammar = "../sh2.pest"]
@@ -25,6 +29,9 @@ impl Output {
 		self.0.push(asm);
 	}
 }
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Size { Byte, Word, Long }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Asm {
@@ -225,11 +232,65 @@ enum Asm {
 	DMulS(Reg, Reg),
 	///               $3nm5 | DMULU.L Rm,Rn
 	DMulU(Reg, Reg),
+
+	///                              $Enii | MOV #imm,Rn
+	MovImm(i8, Reg),
+	///                              $6nm3 | MOV Rm,Rn
+	MovReg(Reg, Reg),
+	///                              $6nm0 | MOV.B @Rm,Rn
+	///                              $6nm1 | MOV.W @Rm,Rn
+	///                              $6nm2 | MOV.L @Rm,Rn
+	MovAddrToReg(Size, Reg, Reg),
+	///                              $2nm0 | MOV.B Rm,@Rn
+	///                              $2nm1 | MOV.W Rm,@Rn
+	///                              $2nm2 | MOV.L Rm,@Rn
+	MovRegToAddr(Size, Reg, Reg),
+	///                              $C4dd | MOV.B @(disp,GBR),R0
+	///                              $C5dd | MOV.W @(disp,GBR),R0
+	///                              $C6dd | MOV.W @(disp,GBR),R0
+	MovGbrToR0(Size, i8),
+	///                              $C0dd | MOV.B R0,@(disp,GBR)
+	///                              $C1dd | MOV.W R0,@(disp,GBR)
+	///                              $C2dd | MOV.L R0,@(disp,GBR)
+	MovR0ToGbr(Size, i8),
+	///                              $0nmC | MOV.B @(R0,Rm),Rn
+	///                              $0nmD | MOV.W @(R0,Rm),Rn
+	///                              $0nmE | MOV.L @(R0,Rm),Rn
+	MovDispR0ToReg(Size, Reg, Reg),
+	///                              $0nm4 | MOV.B Rm,@(R0,Rn)
+	///                              $0nm5 | MOV.W Rm,@(R0,Rn)
+	///                              $0nm6 | MOV.L Rm,@(R0,Rn)
+	MovRegToDispR0(Size, Reg, Reg),
+	///                              $6nm4 | MOV.B @Rm+,Rn
+	///                              $6nm5 | MOV.W @Rm+,Rn
+	///                              $6nm6 | MOV.L @Rm+,Rn
+	MovIncToReg(Size, Reg, Reg),
+	///                              $2nm4 | MOV.B Rm,@-Rn
+	///                              $2nm5 | MOV.W Rm,@-Rn
+	///                              $2nm6 | MOV.L Rm,@-Rn
+	MovRegToDec(Size, Reg, Reg),
+
+	///                              $84md | MOV.B @(disp,Rm),R0
+	MovByteDispRegToR0(I4, Reg),
+	///                              $80nd | MOV.B R0,@(disp,Rn)
+	MovByteR0ToDispReg(I4, Reg),
+	///                              $85md | MOV.W @(disp,Rm),R0
+	MovWordDispRegToR0(I4, Reg),
+	///                              $81nd | MOV.W R0,@(disp,Rn)
+	MovWordR0ToDispReg(I4, Reg),
+	///                              $9ndd | MOV.W @(disp,PC),Rn
+	MovWordDispPCToReg(i8, Reg),
+	///                              $Dndd | MOV.L @(disp,PC),Rn
+	MovLongDispPCToReg(i8, Reg),
+	///                              $5nmd | MOV.L @(disp,Rm),Rn
+	MovLongDispRegToReg(I4, Reg, Reg),
+	///                              $1nmd | MOV.L Rm,@(disp,Rn)
+	MovLongRegToDispReg(Reg, I4, Reg),
 }
 
 fn extra_rules(src: Pair<Rule>) {
 	#[cfg(not(test))]
-	error!("unexpected {src} - '{}'", src.as_str());
+	tracing::error!("unexpected {src} - '{}'", src.as_str());
 
 	#[cfg(test)]
 	panic!("unexpected {src} - '{}'", src.as_str());
@@ -428,6 +489,8 @@ fn parse_ins_line(source: Pair<Rule>, mut output: Output) -> ParseResult<Output>
 			Rule::ins_dmuls => output.push(parse_ins_rs_rs(Asm::DMulS, src)?),
 			Rule::ins_dmulu => output.push(parse_ins_rs_rs(Asm::DMulU, src)?),
 
+			Rule::ins_mov => output.push(parse_ins_mov(src)?),
+
 			_ => {
 				extra_rules(src);
 				continue;
@@ -435,6 +498,163 @@ fn parse_ins_line(source: Pair<Rule>, mut output: Output) -> ParseResult<Output>
 		}
 	}
 	Ok(output)
+}
+
+#[instrument]
+fn parse_ins_mov(source: Pair<Rule>) -> ParseResult<Asm> {
+	trace!("{source} - '{}'", source.as_str());
+
+	let mut args = source.into_inner();
+	let src = args.next().unwrap();
+	match src.as_rule() {
+		Rule::ins_movb => parse_ins_movb(src),
+		Rule::ins_movw => parse_ins_movw(src),
+		Rule::ins_movl => parse_ins_movl(src),
+		Rule::dec | Rule::hex | Rule::bin => {
+			let src = parse_i8(src)?;
+			let dst = parse_reg_or_sp(args.next().unwrap())?;
+			let ins = Asm::MovImm(src, dst);
+			Ok(ins)
+		}
+		Rule::reg | Rule::sp => {
+			let src = parse_reg_or_sp(src)?;
+			let dst = parse_reg_or_sp(args.next().unwrap())?;
+			Ok(Asm::MovReg(src, dst))
+		}
+		_ => unreachable!("{src} - '{}'", src.as_str()),
+	}
+}
+
+#[instrument]
+fn parse_ins_mov_common(source: Pair<Rule>, size: Size) -> ParseResult<Asm> {
+	trace!("{source} - '{}'", source.as_str());
+
+	let mut args = source.into_inner();
+	let src = args.next().unwrap();
+	match src.as_rule() {
+		Rule::disp_gbr => {
+			let disp = parse_disp_gbr(src)?;
+			parse_r0(args.next().unwrap())?;
+			Ok(Asm::MovGbrToR0(size, disp))
+		}
+		Rule::disp_r0 => {
+			let src = parse_disp_r0(src)?;
+			let dst = parse_reg_or_sp(args.next().unwrap())?;
+			Ok(Asm::MovDispR0ToReg(size, src, dst))
+		}
+		Rule::reg_post_inc => {
+			let src = parse_reg_post_inc(src)?;
+			let dst = parse_reg_or_sp(args.next().unwrap())?;
+			Ok(Asm::MovIncToReg(size, src, dst))
+		}
+		Rule::addr_reg_or_sp => {
+			let src = parse_addr_reg_or_sp(src)?;
+			let dst = parse_reg_or_sp(args.next().unwrap())?;
+			Ok(Asm::MovAddrToReg(size, src, dst))
+		}
+		Rule::r0 => {
+			parse_r0(src)?;
+			let disp = parse_disp_gbr(args.next().unwrap())?;
+			Ok(Asm::MovR0ToGbr(size, disp))
+		}
+		Rule::reg | Rule::sp => {
+			let src = parse_reg_or_sp(src)?;
+			let dst = args.next().unwrap();
+			match dst.as_rule() {
+				Rule::disp_r0 => {
+					let disp = parse_disp_r0(dst)?;
+					Ok(Asm::MovRegToDispR0(size, src, disp))
+				}
+				Rule::reg_pre_dec => {
+					let dst = parse_reg_pre_dec(dst)?;
+					Ok(Asm::MovRegToDec(size, src, dst))
+				}
+				Rule::addr_reg_or_sp => {
+					let dst = parse_addr_reg_or_sp(dst)?;
+					Ok(Asm::MovRegToAddr(size, src, dst))
+				}
+				_ => unreachable!("{dst} - '{}'", dst.as_str()),
+			}
+		}
+		_ => unreachable!("{src} - '{}'", src.as_str()),
+	}
+}
+
+#[instrument]
+fn parse_ins_movb(source: Pair<Rule>) -> ParseResult<Asm> {
+	trace!("{source} - '{}'", source.as_str());
+
+	let mut args = source.into_inner();
+	let src = args.next().unwrap();
+	match src.as_rule() {
+		Rule::mov_common => parse_ins_mov_common(src, Size::Byte),
+		Rule::disp_reg => {
+			let (disp, src) = parse_disp_reg(src)?;
+			let dst = args.next().unwrap();
+			parse_r0(dst)?;
+			Ok(Asm::MovByteDispRegToR0(disp, src))
+		}
+		Rule::r0 => {
+			parse_r0(src)?;
+			let (disp, dst) = parse_disp_reg(args.next().unwrap())?;
+			Ok(Asm::MovByteR0ToDispReg(disp, dst))
+		}
+		_ => unreachable!("{src} - '{}'", src.as_str()),
+	}
+}
+
+#[instrument]
+fn parse_ins_movw(source: Pair<Rule>) -> ParseResult<Asm> {
+	trace!("{source} - '{}'", source.as_str());
+
+	let mut args = source.into_inner();
+	let src = args.next().unwrap();
+	match src.as_rule() {
+		Rule::mov_common => parse_ins_mov_common(src, Size::Word),
+		Rule::disp_reg => {
+			let (disp, src) = parse_disp_reg(src)?;
+			parse_r0(args.next().unwrap())?;
+			Ok(Asm::MovWordDispRegToR0(disp, src))
+		}
+		Rule::r0 => {
+			parse_r0(src)?;
+			let (disp, dst) = parse_disp_reg(args.next().unwrap())?;
+			Ok(Asm::MovWordR0ToDispReg(disp, dst))
+		}
+		Rule::disp_pc => {
+			let disp = parse_disp_pc(src)?;
+			let dst = parse_reg_or_sp(args.next().unwrap())?;
+			Ok(Asm::MovWordDispPCToReg(disp, dst))
+		}
+		_ => unreachable!("{src} - '{}'", src.as_str()),
+	}
+}
+
+#[instrument]
+fn parse_ins_movl(source: Pair<Rule>) -> ParseResult<Asm> {
+	trace!("{source} - '{}'", source.as_str());
+
+	let mut args = source.into_inner();
+	let src = args.next().unwrap();
+	match src.as_rule() {
+		Rule::mov_common => parse_ins_mov_common(src, Size::Long),
+		Rule::disp_pc => {
+			let disp = parse_disp_pc(src)?;
+			let dst = parse_reg_or_sp(args.next().unwrap())?;
+			Ok(Asm::MovLongDispPCToReg(disp, dst))
+		}
+		Rule::disp_reg => {
+			let (disp, src) = parse_disp_reg(src)?;
+			let dst = parse_reg_or_sp(args.next().unwrap())?;
+			Ok(Asm::MovLongDispRegToReg(disp, src, dst))
+		}
+		Rule::reg | Rule::sp => {
+			let src = parse_reg_or_sp(src)?;
+			let (disp,dst) = parse_disp_reg(args.next().unwrap())?;
+			Ok(Asm::MovLongRegToDispReg(src, disp, dst))
+		}
+		_ => unreachable!("{src} - '{}'", src.as_str()),
+	}
 }
 
 #[instrument]
@@ -527,10 +747,9 @@ fn parse_disp_r0_gbr(source: Pair<Rule>) -> ParseResult<()> {
 }
 
 fn reg_or_sp(s: &str, err_msg: Error<Rule>) -> ParseResult<Reg> {
-	eprintln!("{s}");
 	if s == "sp" {
 		Ok(15)
-	} else if s.chars().next() == Some('r') {
+	} else if s.starts_with(['r','R']) {
 		s[1..].parse::<Reg>().map_err(|_| err_msg)
 	} else {
 		Err(err_msg)
@@ -568,7 +787,6 @@ fn parse_reg_post_inc(source: Pair<Rule>) -> ParseResult<Reg> {
 		let len = source.as_str().len() - 1;
 		reg_or_sp(&source.as_str()[1..len], err_msg)
 	} else {
-		eprintln!("1");
 		Err(err_msg)
 	}
 }
@@ -587,11 +805,42 @@ fn parse_reg_pre_dec(source: Pair<Rule>) -> ParseResult<Reg> {
 }
 
 #[instrument]
+fn parse_disp_reg(source: Pair<Rule>) -> ParseResult<(I4,Reg)> {
+	trace!("{source} - '{}'", source.as_str());
+
+	let mut args = source.into_inner();
+	let src = args.next().unwrap();
+	let src_span = src.as_span();
+	let disp = parse_i8(src)?;
+	let disp: I4 = disp.try_into()
+		.map_err(|e| error_message(src_span, e))?;
+	let reg = parse_reg_or_sp(args.next().unwrap())?;
+	Ok((disp, reg))
+}
+
+#[instrument]
+fn parse_disp_gbr(source: Pair<Rule>) -> ParseResult<i8> {
+	trace!("{source} - '{}'", source.as_str());
+
+	let mut args = source.into_inner();
+	parse_i8(args.next().unwrap())
+}
+
+#[instrument]
 fn parse_disp_pc(source: Pair<Rule>) -> ParseResult<i8> {
 	trace!("{source} - '{}'", source.as_str());
 
 	let mut args = source.into_inner();
 	parse_i8(args.next().unwrap())
+}
+
+#[instrument]
+fn parse_disp_r0(source: Pair<Rule>) -> ParseResult<Reg> {
+	trace!("{source} - '{}'", source.as_str());
+
+	let mut args = source.into_inner();
+	parse_r0(args.next().unwrap())?;
+	parse_reg_or_sp(args.next().unwrap())
 }
 
 #[instrument]
@@ -669,7 +918,6 @@ fn parse_i12(source: Pair<Rule>) -> ParseResult<i16> {
 	}
 
 	fn check_range(n: i16, src: &Pair<Rule>) -> Result<i16, String> {
-		eprintln!("check({n})");
 		if (-2048..2048).contains(&n) {
 			Ok(n)
 		} else {
@@ -867,6 +1115,33 @@ mod parser {
 	test_single!(ldspr2,   "\tlds.l @r9+,pr",   Asm::LdsPrInc(9));
 	test_single!(dmuls,    "\tdmuls.l r3,r2",   Asm::DMulS(3, 2));
 	test_single!(dmulu,    "\tdmulu.l r1,r0",   Asm::DMulU(1, 0));
+
+	test_single!(movi,   "\tmov #78,R3",         Asm::MovImm(78, 3));
+	test_single!(mov,    "\tmov r13,r9",         Asm::MovReg(13, 9));
+	test_single!(movbar, "\tmov.b @r7,r9",       Asm::MovAddrToReg(Size::Byte, 7, 9));
+	test_single!(movwar, "\tmov.w @r7,r9",       Asm::MovAddrToReg(Size::Word, 7, 9));
+	test_single!(movlar, "\tmov.l @r7,r9",       Asm::MovAddrToReg(Size::Long, 7, 9));
+	test_single!(movbra, "\tmov.b r3,@r4",       Asm::MovRegToAddr(Size::Byte, 3, 4));
+	test_single!(movwra, "\tmov.w r3,@r4",       Asm::MovRegToAddr(Size::Word, 3, 4));
+	test_single!(movlra, "\tmov.l r3,@r4",       Asm::MovRegToAddr(Size::Long, 3, 4));
+	test_single!(movbg0, "\tmov.b @(45,gbr),r0", Asm::MovGbrToR0(Size::Byte, 45));
+	test_single!(movwg0, "\tmov.w @(45,gbr),r0", Asm::MovGbrToR0(Size::Word, 45));
+	test_single!(movlg0, "\tmov.l @(45,gbr),r0", Asm::MovGbrToR0(Size::Long, 45));
+	test_single!(movb0g, "\tmov.b r0,@(35,gbr)", Asm::MovR0ToGbr(Size::Byte, 35));
+	test_single!(movw0g, "\tmov.w r0,@(35,gbr)", Asm::MovR0ToGbr(Size::Word, 35));
+	test_single!(movl0g, "\tmov.l r0,@(35,gbr)", Asm::MovR0ToGbr(Size::Long, 35));
+	test_single!(movbd0, "\tmov.b @(r0,r2),r6",  Asm::MovDispR0ToReg(Size::Byte, 2, 6));
+	test_single!(movwd0, "\tmov.w @(r0,r2),r6",  Asm::MovDispR0ToReg(Size::Word, 2, 6));
+	test_single!(movld0, "\tmov.l @(r0,r2),r6",  Asm::MovDispR0ToReg(Size::Long, 2, 6));
+	test_single!(movb0d, "\tmov.b r7,@(r0,r5)",  Asm::MovRegToDispR0(Size::Byte, 7, 5));
+	test_single!(movw0d, "\tmov.w r7,@(r0,r5)",  Asm::MovRegToDispR0(Size::Word, 7, 5));
+	test_single!(movl0d, "\tmov.l r7,@(r0,r5)",  Asm::MovRegToDispR0(Size::Long, 7, 5));
+	test_single!(movbir, "\tmov.b @r11+,r14",    Asm::MovIncToReg(Size::Byte, 11, 14));
+	test_single!(movwir, "\tmov.w @r11+,r14",    Asm::MovIncToReg(Size::Word, 11, 14));
+	test_single!(movlir, "\tmov.l @r11+,r14",    Asm::MovIncToReg(Size::Long, 11, 14));
+	test_single!(movbrd, "\tmov.b r15,@-sp",     Asm::MovRegToDec(Size::Byte, 15, 15));
+	test_single!(movwrd, "\tmov.w r15,@-sp",     Asm::MovRegToDec(Size::Word, 15, 15));
+	test_single!(movlrd, "\tmov.l r15,@-sp",     Asm::MovRegToDec(Size::Long, 15, 15));
 
 	#[test]
 	#[should_panic = " --> 1:7
@@ -1078,6 +1353,42 @@ fn output(asm: &[Asm]) -> Vec<u8> {
 			Asm::LdsPrInc(r)   => out.push(0x4026 | (*r as u16) << 8),
 			Asm::DMulS(m,n)    =>     push(0x300D, m, n, &mut out),
 			Asm::DMulU(m,n)    =>     push(0x3005, m, n, &mut out),
+
+			Asm::MovImm(i,r)                => out.push(0xE000 | (*r as u16) << 8 | *i as u16),
+			Asm::MovReg(m,n)                    => push(0x6003, m, n, &mut out),
+			Asm::MovAddrToReg(Size::Byte,m,n)   => push(0x6000, m, n, &mut out),
+			Asm::MovAddrToReg(Size::Word,m,n)   => push(0x6001, m, n, &mut out),
+			Asm::MovAddrToReg(Size::Long,m,n)   => push(0x6002, m, n, &mut out),
+			Asm::MovRegToAddr(Size::Byte,m,n)   => push(0x2000, m, n, &mut out),
+			Asm::MovRegToAddr(Size::Word,m,n)   => push(0x2001, m, n, &mut out),
+			Asm::MovRegToAddr(Size::Long,m,n)   => push(0x2002, m, n, &mut out),
+			Asm::MovGbrToR0(Size::Byte,d)   => out.push(0xC400 | *d as u16),
+			Asm::MovGbrToR0(Size::Word,d)   => out.push(0xC500 | *d as u16),
+			Asm::MovGbrToR0(Size::Long,d)   => out.push(0xC600 | *d as u16),
+			Asm::MovR0ToGbr(Size::Byte,d)   => out.push(0xC000 | *d as u16),
+			Asm::MovR0ToGbr(Size::Word,d)   => out.push(0xC100 | *d as u16),
+			Asm::MovR0ToGbr(Size::Long,d)   => out.push(0xC200 | *d as u16),
+			Asm::MovDispR0ToReg(Size::Byte,m,n) => push(0x000C, m, n, &mut out),
+			Asm::MovDispR0ToReg(Size::Word,m,n) => push(0x000D, m, n, &mut out),
+			Asm::MovDispR0ToReg(Size::Long,m,n) => push(0x000E, m, n, &mut out),
+			Asm::MovRegToDispR0(Size::Byte,m,n) => push(0x0004, m, n, &mut out),
+			Asm::MovRegToDispR0(Size::Word,m,n) => push(0x0005, m, n, &mut out),
+			Asm::MovRegToDispR0(Size::Long,m,n) => push(0x0006, m, n, &mut out),
+			Asm::MovIncToReg(Size::Byte,m,n)    => push(0x6004, m, n, &mut out),
+			Asm::MovIncToReg(Size::Word,m,n)    => push(0x6005, m, n, &mut out),
+			Asm::MovIncToReg(Size::Long,m,n)    => push(0x6006, m, n, &mut out),
+			Asm::MovRegToDec(Size::Byte,m,n)    => push(0x2004, m, n, &mut out),
+			Asm::MovRegToDec(Size::Word,m,n)    => push(0x2005, m, n, &mut out),
+			Asm::MovRegToDec(Size::Long,m,n)    => push(0x2006, m, n, &mut out),
+
+			Asm::MovByteDispRegToR0(d,m)    => out.push(0x8400 | (*m as u16) << 4 | *d),
+			Asm::MovByteR0ToDispReg(d,n)    => out.push(0x8000 | (*n as u16) << 4 | *d),
+			Asm::MovWordDispRegToR0(d,m)    => out.push(0x8500 | (*m as u16) << 4 | *d),
+			Asm::MovWordR0ToDispReg(d,n)    => out.push(0x8100 | (*n as u16) << 4 | *d),
+			Asm::MovWordDispPCToReg(d,n)    => out.push(0x9000 | (*n as u16) << 8 | *d as u16),
+			Asm::MovLongDispPCToReg(d,n)    => out.push(0xD000 | (*n as u16) << 8 | *d as u16),
+			Asm::MovLongDispRegToReg(d,m,n) => out.push(0x5000 | (*n as u16) << 8 | (*m as u16) << 4 | *d),
+			Asm::MovLongRegToDispReg(m,d,n) => out.push(0x1000 | (*n as u16) << 8 | (*m as u16) << 4 | *d),
 		}
 	}
 
@@ -1202,5 +1513,41 @@ mod output {
 	test_output!(ldspr2,   "\tlds.l @r2+,pr",   &[0x42, 0x26]);
 	test_output!(dmuls,    "\tdmuls.l r0,r0",   &[0x30, 0x0D]);
 	test_output!(dmulu,    "\tdmulu.l r0,r0",   &[0x30, 0x05]);
+
+	test_output!(movi,   "\tmov #78,R3",         &[0xE3, 0x4E]);
+	test_output!(mov,    "\tmov r13,r9",         &[0x69, 0xD3]);
+	test_output!(movbar, "\tmov.b @r7,r9",       &[0x69, 0x70]);
+	test_output!(movwar, "\tmov.w @r7,r9",       &[0x69, 0x71]);
+	test_output!(movlar, "\tmov.l @r7,r9",       &[0x69, 0x72]);
+	test_output!(movbra, "\tmov.b r3,@r4",       &[0x24, 0x30]);
+	test_output!(movwra, "\tmov.w r3,@r4",       &[0x24, 0x31]);
+	test_output!(movlra, "\tmov.l r3,@r4",       &[0x24, 0x32]);
+	test_output!(movbg0, "\tmov.b @(45,gbr),r0", &[0xC4, 0x2D]);
+	test_output!(movwg0, "\tmov.w @(45,gbr),r0", &[0xC5, 0x2D]);
+	test_output!(movlg0, "\tmov.l @(45,gbr),r0", &[0xC6, 0x2D]);
+	test_output!(movb0g, "\tmov.b r0,@(35,gbr)", &[0xC0, 0x23]);
+	test_output!(movw0g, "\tmov.w r0,@(35,gbr)", &[0xC1, 0x23]);
+	test_output!(movl0g, "\tmov.l r0,@(35,gbr)", &[0xC2, 0x23]);
+	test_output!(movbd0, "\tmov.b @(r0,r2),r6",  &[0x06, 0x2C]);
+	test_output!(movwd0, "\tmov.w @(r0,r2),r6",  &[0x06, 0x2D]);
+	test_output!(movld0, "\tmov.l @(r0,r2),r6",  &[0x06, 0x2E]);
+	test_output!(movb0d, "\tmov.b r7,@(r0,r5)",  &[0x05, 0x74]);
+	test_output!(movw0d, "\tmov.w r7,@(r0,r5)",  &[0x05, 0x75]);
+	test_output!(movl0d, "\tmov.l r7,@(r0,r5)",  &[0x05, 0x76]);
+	test_output!(movbir, "\tmov.b @r11+,r14",    &[0x6E, 0xB4]);
+	test_output!(movwir, "\tmov.w @r11+,r14",    &[0x6E, 0xB5]);
+	test_output!(movlir, "\tmov.l @r11+,r14",    &[0x6E, 0xB6]);
+	test_output!(movbrd, "\tmov.b r15,@-sp",     &[0x2F, 0xF4]);
+	test_output!(movwrd, "\tmov.w r15,@-sp",     &[0x2F, 0xF5]);
+	test_output!(movlrd, "\tmov.l r15,@-sp",     &[0x2F, 0xF6]);
+
+	test_output!(movbr0, "\tmov.b @(-7,r2),r0",  &[0x84, 0x29]);
+	test_output!(movb0r, "\tmov.b r0,@(4,r5)",   &[0x80, 0x54]);
+	test_output!(movwr0, "\tmov.w @(-3,r4),r0",  &[0x85, 0x4D]);
+	test_output!(movw0r, "\tmov.w r0,@(1,r6)",   &[0x81, 0x61]);
+	test_output!(movwpr, "\tmov.w @(89,pc),r3",  &[0x93, 0x59]);
+	test_output!(movlpr, "\tmov.l @(34,pc),r7",  &[0xD7, 0x22]);
+	test_output!(movlr2, "\tmov.l @(6,r4),r2",   &[0x52, 0x46]);
+	test_output!(movl2r, "\tmov.l r1,@(-2,r1)",  &[0x11, 0x1E]);
 }
 

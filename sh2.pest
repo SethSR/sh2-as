@@ -206,22 +206,25 @@ ins_sts_dec = { ^"sts.l"   ~ reg_spec__reg_pre_dec }
 ins_dmuls   = { ^"dmuls.l" ~ reg_or_sp__reg_or_sp }
 ins_dmulu   = { ^"dmulu.l" ~ reg_or_sp__reg_or_sp }
 
-mov_common = _{
-	| imm__reg_or_sp
-	| addr_reg_or_sp__reg_or_sp
+mov_common = {
 	| disp_gbr__r0
 	| disp_r0__reg_or_sp
-	| r0__disp_gbr
-	| reg_or_sp__addr_reg_or_sp
-	| reg_or_sp__disp_r0
-	| reg_or_sp__reg_or_sp
-	| reg_or_sp__reg_pre_dec
 	| reg_post_inc__reg_or_sp
+	| addr_reg_or_sp__reg_or_sp
+	| r0__disp_gbr
+	| reg_or_sp__disp_r0
+	| reg_or_sp__reg_pre_dec
+	| reg_or_sp__addr_reg_or_sp
 }
-ins_movb =  { mov_common | disp_reg__r0 | r0__disp_reg }
-ins_movw =  { mov_common | disp_reg__r0 | r0__disp_reg | disp_pc__reg_or_sp }
-ins_movl =  { mov_common | disp_pc__reg_or_sp | disp_reg__reg_or_sp | reg_or_sp__disp_reg }
-ins_mov  = _{ ^"mov.b" ~ ins_movb | ^"mov.w" ~ ins_movw | (^"mov.l" | ^"mov") ~ ins_movl }
+ins_movb = { mov_common | disp_reg__r0 | r0__disp_reg }
+ins_movw = { mov_common | disp_reg__r0 | r0__disp_reg | disp_pc__reg_or_sp }
+ins_movl = { mov_common | disp_pc__reg_or_sp | disp_reg__reg_or_sp | reg_or_sp__disp_reg }
+ins_mov  = {
+	| ^"mov.b" ~ ins_movb
+	| ^"mov.w" ~ ins_movw
+	| ^"mov.l" ~ ins_movl
+	| ^"mov" ~ (imm__reg_or_sp | reg_or_sp__reg_or_sp)
+}
 
 ins = {
 	| ins_add
