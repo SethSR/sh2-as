@@ -228,6 +228,18 @@ enum Asm {
 	LdsMaclInc(Reg),
 	///               $4m26 | LDS.L @Rm+,PR
 	LdsPrInc(Reg),
+	StcGbr(Reg),
+	StcSr(Reg),
+	StcVbr(Reg),
+	StcGbrDec(Reg),
+	StcSrDec(Reg),
+	StcVbrDec(Reg),
+	StsMach(Reg),
+	StsMacl(Reg),
+	StsPr(Reg),
+	StsMachDec(Reg),
+	StsMaclDec(Reg),
+	StsPrDec(Reg),
 	///               $3nmD | DMULS.L Rm,Rn
 	DMulS(Reg, Reg),
 	///               $3nm5 | DMULU.L Rm,Rn
@@ -298,25 +310,25 @@ fn extra_rules(src: Pair<Rule>) {
 
 fn rename_rules(rule: &Rule) -> String {
 	match rule {
-		Rule::EOI => "EOF",
+		Rule::EOI => "EOF".to_string(),
 
-		Rule::bin => "a binary value",
-		Rule::sp => "SP register",
-		Rule::reg => "general register",
-		Rule::r0 => "R0",
-		Rule::gbr => "GBR",
+		Rule::bin => "a binary value".to_string(),
+		Rule::sp => "SP register".to_string(),
+		Rule::reg => "general register".to_string(),
+		Rule::r0 => "R0".to_string(),
+		Rule::gbr => "GBR".to_string(),
 
-		Rule::ins_line | Rule::ins => "instruction",
-		Rule::dir_line | Rule::dir => "assembler directive",
-		Rule::lbl_line => "Label",
-		Rule::val_line => "Value",
+		Rule::ins_line | Rule::ins => "instruction".to_string(),
+		Rule::dir_line | Rule::dir => "assembler directive".to_string(),
+		Rule::lbl_line => "Label".to_string(),
+		Rule::val_line => "Value".to_string(),
 
-		Rule::addr_reg_or_sp => "indirect register or SP (ex: '@r1')",
-		Rule::reg_post_inc => "indirect register or SP w/ post-increment (ex: '@r2+')",
-		Rule::reg_pre_dec => "indirect register or SP w/ pre-decrement (ex: '@-r3')",
+		Rule::addr_reg_or_sp => "indirect register or SP (ex: '@r1')".to_string(),
+		Rule::reg_post_inc => "indirect register or SP w/ post-increment (ex: '@r2+')".to_string(),
+		Rule::reg_pre_dec => "indirect register or SP w/ pre-decrement (ex: '@-r3')".to_string(),
 
-		_ => unreachable!("{rule:?}"),
-	}.to_owned()
+		_ => format!("{rule:?}"),
+	}
 }
 
 #[instrument]
@@ -483,6 +495,50 @@ fn parse_ins_line(source: Pair<Rule>, mut output: Output) -> ParseResult<Output>
 					Sys::Mach => Asm::LdsMachInc(src),
 					Sys::Macl => Asm::LdsMaclInc(src),
 					Sys::Pr   => Asm::LdsPrInc(src),
+				};
+				output.push(ins);
+			}
+			Rule::ins_stc => {
+				let mut args = src.into_inner();
+				let src = parse_ctrl(args.next().unwrap());
+				let dst = parse_reg_or_sp(args.next().unwrap())?;
+				let ins = match src {
+					Ctrl::Gbr => Asm::StcGbr(dst),
+					Ctrl::Sr  => Asm::StcSr(dst),
+					Ctrl::Vbr => Asm::StcVbr(dst),
+				};
+				output.push(ins);
+			}
+			Rule::ins_stc_dec => {
+				let mut args = src.into_inner();
+				let src = parse_ctrl(args.next().unwrap());
+				let dst = parse_reg_pre_dec(args.next().unwrap())?;
+				let ins = match src {
+					Ctrl::Gbr => Asm::StcGbrDec(dst),
+					Ctrl::Sr  => Asm::StcSrDec(dst),
+					Ctrl::Vbr => Asm::StcVbrDec(dst),
+				};
+				output.push(ins);
+			}
+			Rule::ins_sts => {
+				let mut args = src.into_inner();
+				let src = parse_sys(args.next().unwrap());
+				let dst = parse_reg_or_sp(args.next().unwrap())?;
+				let ins = match src {
+					Sys::Mach => Asm::StsMach(dst),
+					Sys::Macl => Asm::StsMacl(dst),
+					Sys::Pr   => Asm::StsPr(dst),
+				};
+				output.push(ins);
+			}
+			Rule::ins_sts_dec => {
+				let mut args = src.into_inner();
+				let src = parse_sys(args.next().unwrap());
+				let dst = parse_reg_pre_dec(args.next().unwrap())?;
+				let ins = match src {
+					Sys::Mach => Asm::StsMachDec(dst),
+					Sys::Macl => Asm::StsMaclDec(dst),
+					Sys::Pr   => Asm::StsPrDec(dst),
 				};
 				output.push(ins);
 			}
@@ -1113,6 +1169,18 @@ mod parser {
 	test_single!(ldsmach2, "\tlds.l @r7+,mach", Asm::LdsMachInc(7));
 	test_single!(ldsmacl2, "\tlds.l @r8+,macl", Asm::LdsMaclInc(8));
 	test_single!(ldspr2,   "\tlds.l @r9+,pr",   Asm::LdsPrInc(9));
+	test_single!(stcgbr,   "\tstc gbr,r4",      Asm::StcGbr(4));
+	test_single!(stcsr,    "\tstc sr,r4",       Asm::StcSr(4));
+	test_single!(stcvbr,   "\tstc vbr,r4",      Asm::StcVbr(4));
+	test_single!(stcgbr2,  "\tstc.l gbr,@-r5",  Asm::StcGbrDec(5));
+	test_single!(stcsr2,   "\tstc.l sr,@-r5",   Asm::StcSrDec(5));
+	test_single!(stcvbr2,  "\tstc.l vbr,@-r5",  Asm::StcVbrDec(5));
+	test_single!(stsmach,  "\tsts mach,r4",     Asm::StsMach(4));
+	test_single!(stsmacl,  "\tsts macl,r4",     Asm::StsMacl(4));
+	test_single!(stspr,    "\tsts pr,r4",       Asm::StsPr(4));
+	test_single!(stsmach2, "\tsts.l mach,@-r5", Asm::StsMachDec(5));
+	test_single!(stsmacl2, "\tsts.l macl,@-r5", Asm::StsMaclDec(5));
+	test_single!(stspr2,   "\tsts.l pr,@-r5",   Asm::StsPrDec(5));
 	test_single!(dmuls,    "\tdmuls.l r3,r2",   Asm::DMulS(3, 2));
 	test_single!(dmulu,    "\tdmulu.l r1,r0",   Asm::DMulU(1, 0));
 
@@ -1351,6 +1419,18 @@ fn output(asm: &[Asm]) -> Vec<u8> {
 			Asm::LdsMachInc(r) => out.push(0x4006 | (*r as u16) << 8),
 			Asm::LdsMaclInc(r) => out.push(0x4016 | (*r as u16) << 8),
 			Asm::LdsPrInc(r)   => out.push(0x4026 | (*r as u16) << 8),
+			Asm::StcGbr(r)     => out.push(0x0012 | (*r as u16) << 8),
+			Asm::StcSr(r)      => out.push(0x0002 | (*r as u16) << 8),
+			Asm::StcVbr(r)     => out.push(0x0022 | (*r as u16) << 8),
+			Asm::StcGbrDec(r)  => out.push(0x4013 | (*r as u16) << 8),
+			Asm::StcSrDec(r)   => out.push(0x4003 | (*r as u16) << 8),
+			Asm::StcVbrDec(r)  => out.push(0x4023 | (*r as u16) << 8),
+			Asm::StsMach(r)    => out.push(0x000A | (*r as u16) << 8),
+			Asm::StsMacl(r)    => out.push(0x001A | (*r as u16) << 8),
+			Asm::StsPr(r)      => out.push(0x002A | (*r as u16) << 8),
+			Asm::StsMachDec(r) => out.push(0x4002 | (*r as u16) << 8),
+			Asm::StsMaclDec(r) => out.push(0x4012 | (*r as u16) << 8),
+			Asm::StsPrDec(r)   => out.push(0x4022 | (*r as u16) << 8),
 			Asm::DMulS(m,n)    =>     push(0x300D, m, n, &mut out),
 			Asm::DMulU(m,n)    =>     push(0x3005, m, n, &mut out),
 
@@ -1511,6 +1591,18 @@ mod output {
 	test_output!(ldsmach2, "\tlds.l @r2+,mach", &[0x42, 0x06]);
 	test_output!(ldsmacl2, "\tlds.l @r2+,macl", &[0x42, 0x16]);
 	test_output!(ldspr2,   "\tlds.l @r2+,pr",   &[0x42, 0x26]);
+	test_output!(stcgbr,   "\tstc gbr,r4",      &[0x04, 0x12]);
+	test_output!(stcsr,    "\tstc sr,r4",       &[0x04, 0x02]);
+	test_output!(stcvbr,   "\tstc vbr,r4",      &[0x04, 0x22]);
+	test_output!(stcgbr2,  "\tstc.l gbr,@-r5",  &[0x45, 0x13]);
+	test_output!(stcsr2,   "\tstc.l sr,@-r5",   &[0x45, 0x03]);
+	test_output!(stcvbr2,  "\tstc.l vbr,@-r5",  &[0x45, 0x23]);
+	test_output!(stsmach,  "\tsts mach,r4",     &[0x04, 0x0A]);
+	test_output!(stsmacl,  "\tsts macl,r4",     &[0x04, 0x1A]);
+	test_output!(stspr,    "\tsts pr,r4",       &[0x04, 0x2A]);
+	test_output!(stsmach2, "\tsts.l mach,@-r5", &[0x45, 0x02]);
+	test_output!(stsmacl2, "\tsts.l macl,@-r5", &[0x45, 0x12]);
+	test_output!(stspr2,   "\tsts.l pr,@-r5",   &[0x45, 0x22]);
 	test_output!(dmuls,    "\tdmuls.l r0,r0",   &[0x30, 0x0D]);
 	test_output!(dmulu,    "\tdmulu.l r0,r0",   &[0x30, 0x05]);
 
