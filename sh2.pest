@@ -311,7 +311,7 @@ file_path = @{ "\"" ~ (!"\"" ~ ANY)+ ~ "\"" }
 
 dir_constant_b = { ^".dc.b" ~ num }
 dir_constant_w = { ^".dc.w" ~ num }
-dir_constant_l = { ^".dc.l" ~ (num | lbl) }
+dir_constant_l = { ^".dc.l" ~ num }
 dir_constant = _{ dir_constant_b | dir_constant_w | dir_constant_l }
 
 dir_org      = { ^".org" ~ num }
@@ -336,7 +336,7 @@ lbl = { !ASCII_DIGIT ~ (ASCII_ALPHANUMERIC | "_")+ }
 ins_line = { "\t" ~ ins }
 dir_line = { "\t" ~ dir }
 lbl_line = @{ lbl ~ ":" }
-val_line = { lbl ~ "=" ~ (num | lbl) }
+val_line = { lbl ~ "=" ~ num }
 
 line = _{ ins_line | dir_line | lbl_line | val_line | NEWLINE }
 lines = _{ line* }
