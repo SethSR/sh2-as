@@ -298,6 +298,11 @@ enum Asm {
 	MovLongDispRegToReg(I4, Reg, Reg),
 	///                              $1nmd | MOV.L Rm,@(disp,Rn)
 	MovLongRegToDispReg(Reg, I4, Reg),
+
+	/* Directives */
+	Byte(u8),
+	Word(u16),
+	Long(u32),
 }
 
 fn extra_rules(src: Pair<Rule>) {
@@ -340,7 +345,7 @@ pub fn parser(input: &str) -> ParseResult<Output> {
 		trace!("Parsing: {src} - '{}'", src.as_str());
 		output = match src.as_rule() {
 			Rule::ins_line => parse_ins_line(src, output)?,
-			Rule::dir_line => todo!("{src} - '{}'", src.as_str()),
+			Rule::dir_line => parse_dir_line(src, output)?,
 			Rule::lbl_line => todo!("{src} - '{}'", src.as_str()),
 			Rule::val_line => todo!("{src} - '{}'", src.as_str()),
 			Rule::EOI => continue,
@@ -349,6 +354,36 @@ pub fn parser(input: &str) -> ParseResult<Output> {
 				continue;
 			}
 		};
+	}
+	Ok(output)
+}
+
+#[instrument]
+fn parse_dir_line(source: Pair<Rule>, mut output: Output) -> ParseResult<Output> {
+	trace!("{source} - '{}'", source.as_str());
+
+	let dir = source.into_inner().next().unwrap();
+	match dir.as_rule() {
+		Rule::dir => {
+			let mut args = dir.into_inner();
+			let arg = args.next().unwrap();
+			match arg.as_rule() {
+				Rule::dir_constant_l => {
+					let num = parse_num(arg.into_inner().next().unwrap())?;
+					output.push(Asm::Long(num as u32));
+				}
+				Rule::dir_constant_w => {
+					let num = parse_num(arg.into_inner().next().unwrap())?;
+					output.push(Asm::Word(num as u16));
+				}
+				Rule::dir_constant_b => {
+					let num = parse_num(arg.into_inner().next().unwrap())?;
+					output.push(Asm::Byte(num as u8));
+				}
+				_ => todo!("{arg}"),
+			}
+		}
+		_ => unreachable!("unknown directive: {}", dir.as_str()),
 	}
 	Ok(output)
 }
@@ -922,6 +957,33 @@ fn parse_u8(source: Pair<Rule>) -> ParseResult<u8> {
 }
 
 #[instrument]
+fn parse_num(source: Pair<Rule>) -> ParseResult<i64> {
+	trace!("{source} - '{}'", source.as_str());
+
+	fn err_msg(base: &str) -> String {
+		format!("expected a {base} value between {} and {}", i32::MIN, u32::MAX)
+	}
+
+	let s = source.as_str().replace('_', "");
+	let num = match source.as_rule() {
+		Rule::hex => u32::from_str_radix(&s, 16)
+			.map(|n| n as i64)
+			.map_err(|_| err_msg("hexadecimal")),
+		Rule::bin => u32::from_str_radix(&s, 2)
+			.map(|n| n as i64)
+			.map_err(|_| err_msg("binary")),
+		Rule::dec => s.parse::<i64>()
+			.map_err(|_| err_msg("decimal")),
+		_ => unreachable!("{source} - '{}'", source.as_str()),
+	};
+
+	num.map_err(|message| Error::new_from_span(
+		ErrorVariant::CustomError { message },
+		source.as_span(),
+	))
+}
+
+#[instrument]
 fn parse_i8(source: Pair<Rule>) -> ParseResult<i8> {
 	trace!("{source} - '{}'", source.as_str());
 
@@ -1469,6 +1531,16 @@ fn output(asm: &[Asm]) -> Vec<u8> {
 			Asm::MovLongDispPCToReg(d,n)    => out.push(0xD000 | (*n as u16) << 8 | *d as u16),
 			Asm::MovLongDispRegToReg(d,m,n) => out.push(0x5000 | (*n as u16) << 8 | (*m as u16) << 4 | *d),
 			Asm::MovLongRegToDispReg(m,d,n) => out.push(0x1000 | (*n as u16) << 8 | (*m as u16) << 4 | *d),
+
+			Asm::Byte(b) => {
+				warn!("placing a single byte with padding: {b}");
+				out.push((*b as u16) << 8);
+			}
+			Asm::Word(w) => out.push(*w),
+			Asm::Long(l) => {
+				out.push((l >> 16) as u16);
+				out.push(*l as u16);
+			}
 		}
 	}
 
