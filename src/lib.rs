@@ -21,20 +21,27 @@ use i4::I4;
 #[grammar = "../sh2.pest"]
 struct Sh2Parser;
 
-#[derive(Debug, Default)]
-struct Output(Vec<Asm>);
+#[derive(Debug, Default, PartialEq, Eq)]
+pub struct Output {
+	asm: Vec<Asm>,
+	repeat: Option<(usize, Vec<Asm>)>,
+}
 
 impl Output {
 	fn push(&mut self, asm: Asm) {
-		self.0.push(asm);
+		if let Some((_,repeat)) = &mut self.repeat {
+			repeat.push(asm);
+		} else {
+			self.asm.push(asm);
+		}
 	}
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum Size { Byte, Word, Long }
+pub enum Size { Byte, Word, Long }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum Asm {
+pub enum Asm {
 	///               $0028 | CLRMAC
 	ClrMac,
 	///               $0008 | CLRT
@@ -337,7 +344,7 @@ fn rename_rules(rule: &Rule) -> String {
 }
 
 #[instrument]
-pub fn parser(input: &str) -> ParseResult<Output> {
+pub fn parser(input: &str) -> ParseResult<Vec<Asm>> {
 	let mut output = Output::default();
 	let source = Sh2Parser::parse(Rule::program, input)
 		.map_err(|e| e.renamed_rules(rename_rules))?;
@@ -355,7 +362,12 @@ pub fn parser(input: &str) -> ParseResult<Output> {
 			}
 		};
 	}
-	Ok(output)
+
+	if output.repeat.is_some() {
+		todo!("unclosed 'repeat' directive");
+	} else {
+		Ok(output.asm)
+	}
 }
 
 #[instrument]
@@ -379,6 +391,19 @@ fn parse_dir_line(source: Pair<Rule>, mut output: Output) -> ParseResult<Output>
 				Rule::dir_constant_b => {
 					let num = parse_num(arg.into_inner().next().unwrap())?;
 					output.push(Asm::Byte(num as u8));
+				}
+				Rule::dir_repeat => {
+					let cnt = parse_u8(arg.into_inner().next().unwrap())?;
+					output.repeat = Some((cnt as usize, Vec::default()));
+				}
+				Rule::dir_endr => {
+					if let Some((cnt, repeat)) = output.repeat.take() {
+						for _ in 0..cnt {
+							output.asm.extend(&repeat);
+						}
+					} else {
+						todo!("unexpected end-repeat directive");
+					}
 				}
 				_ => todo!("{arg}"),
 			}
@@ -1112,7 +1137,7 @@ mod parser {
 			let out = super::parser($input)
 				.map_err(|e| panic!("{e}"))
 				.unwrap();
-			assert_eq!(out.0, vec![$asm]);
+			assert_eq!(out, [$asm]);
 		};
 		($name:ident, $input:expr, $asm:expr) => {
 			#[test]
@@ -1120,9 +1145,19 @@ mod parser {
 				let out = super::parser($input)
 					.map_err(|e| panic!("{e}"))
 					.unwrap();
-				assert_eq!(out.0, vec![$asm]);
+				assert_eq!(out, [$asm]);
 			}
 		};
+	}
+
+	#[test]
+	fn repeat() {
+		let out = super::parser("
+	.repeat 16
+	nop
+	.endr
+").unwrap();
+		assert_eq!(out, [Asm::Nop; 16]);
 	}
 
 	test_single!(u8_hex,     "$C9",        201, u8);
@@ -1374,7 +1409,7 @@ mod parser {
 }
 
 #[instrument]
-fn output(asm: &[Asm]) -> Vec<u8> {
+pub fn output(asm: &[Asm]) -> Vec<u8> {
 	fn push(base: u16, m: &Reg, n: &Reg, output: &mut Vec<u16>) {
 		output.push(base | (*n as u16) << 8 | (*m as u16) << 4);
 	}
@@ -1391,21 +1426,21 @@ fn output(asm: &[Asm]) -> Vec<u8> {
 			Asm::ClrMac     => out.push(0x0028),
 			Asm::Rte        => out.push(0x002B),
 
-			Asm::Bf(d)      => out.push(0x8B00 | *d as u16),
-			Asm::BfS(d)     => out.push(0x8F00 | *d as u16),
+			Asm::Bf(d)      => out.push(0x8B00 | *d as u8 as u16),
+			Asm::BfS(d)     => out.push(0x8F00 | *d as u8 as u16),
 			Asm::Bra(d)     => out.push(0xA000 | (*d & 0xFFF) as u16),
 			Asm::BraF(r)    => out.push(0x0023 | (*r as u16) << 8),
 			Asm::Bsr(d)     => out.push(0xB000 | (*d & 0xFFF) as u16),
 			Asm::BsrF(r)    => out.push(0x0003 | (*r as u16) << 8),
-			Asm::Bt(d)      => out.push(0x8900 | *d as u16),
-			Asm::BtS(d)     => out.push(0x8D00 | *d as u16),
+			Asm::Bt(d)      => out.push(0x8900 | *d as u8 as u16),
+			Asm::BtS(d)     => out.push(0x8D00 | *d as u8 as u16),
 			Asm::Dt(r)      => out.push(0x4010 | (*r as u16) << 8),
 			Asm::Jmp(r)     => out.push(0x402B | (*r as u16) << 8),
 			Asm::Jsr(r)     => out.push(0x400B | (*r as u16) << 8),
-			Asm::MovA(d)    => out.push(0xC700 | *d as u16),
+			Asm::MovA(d)    => out.push(0xC700 | *d as u8 as u16),
 			Asm::MovT(r)    => out.push(0x0029 | (*r as u16) << 8),
-			Asm::RotCL(r)   => out.push(0x4044 | (*r as u16) << 8),
-			Asm::RotCR(r)   => out.push(0x4045 | (*r as u16) << 8),
+			Asm::RotCL(r)   => out.push(0x4024 | (*r as u16) << 8),
+			Asm::RotCR(r)   => out.push(0x4025 | (*r as u16) << 8),
 			Asm::RotL(r)    => out.push(0x4004 | (*r as u16) << 8),
 			Asm::RotR(r)    => out.push(0x4005 | (*r as u16) << 8),
 			Asm::ShAL(r)    => out.push(0x4020 | (*r as u16) << 8),
@@ -1419,7 +1454,7 @@ fn output(asm: &[Asm]) -> Vec<u8> {
 			Asm::ShLR8(r)   => out.push(0x4019 | (*r as u16) << 8),
 			Asm::ShLR16(r)  => out.push(0x4029 | (*r as u16) << 8),
 			Asm::TaS(r)     => out.push(0x401B | (*r as u16) << 8),
-			Asm::TrapA(i)   => out.push(0xC300 | *i as u16),
+			Asm::TrapA(i)   => out.push(0xC300 | *i as u8 as u16),
 
 			Asm::AddC(m,n)      => push(0x300E, m, n, &mut out),
 			Asm::AddV(m,n)      => push(0x300F, m, n, &mut out),
@@ -1442,17 +1477,17 @@ fn output(asm: &[Asm]) -> Vec<u8> {
 			Asm::Xtrct(m,n)     => push(0x200D, m, n, &mut out),
 
 			Asm::AndReg(m,n)    => push(0x2009, m, n, &mut out),
-			Asm::AndImm(i)  => out.push(0xC900 | *i as u16),
-			Asm::AndByte(i) => out.push(0xCD00 | *i as u16),
+			Asm::AndImm(i)  => out.push(0xC900 | *i as u8 as u16),
+			Asm::AndByte(i) => out.push(0xCD00 | *i as u8 as u16),
 			Asm::OrReg(m,n)     => push(0x200B, m, n, &mut out),
-			Asm::OrImm(i)   => out.push(0xCB00 | *i as u16),
-			Asm::OrByte(i)  => out.push(0xCF00 | *i as u16),
+			Asm::OrImm(i)   => out.push(0xCB00 | *i as u8 as u16),
+			Asm::OrByte(i)  => out.push(0xCF00 | *i as u8 as u16),
 			Asm::TstReg(m,n)    => push(0x2008, m, n, &mut out),
-			Asm::TstImm(i)  => out.push(0xC800 | *i as u16),
-			Asm::TstByte(i) => out.push(0xCC00 | *i as u16),
+			Asm::TstImm(i)  => out.push(0xC800 | *i as u8 as u16),
+			Asm::TstByte(i) => out.push(0xCC00 | *i as u8 as u16),
 			Asm::XorReg(m,n)    => push(0x200A, m, n, &mut out),
-			Asm::XorImm(i)  => out.push(0xCA00 | *i as u16),
-			Asm::XorByte(i) => out.push(0xCE00 | *i as u16),
+			Asm::XorImm(i)  => out.push(0xCA00 | *i as u8 as u16),
+			Asm::XorByte(i) => out.push(0xCE00 | *i as u8 as u16),
 
 			Asm::CmpEqReg(m,n)   => push(0x3000, m, n, &mut out),
 			Asm::CmpGE(m,n)      => push(0x3003, m, n, &mut out),
@@ -1462,9 +1497,9 @@ fn output(asm: &[Asm]) -> Vec<u8> {
 			Asm::CmpPL(r)    => out.push(0x4015 | (*r as u16) << 8),
 			Asm::CmpPZ(r)    => out.push(0x4011 | (*r as u16) << 8),
 			Asm::CmpSTR(m,n)     => push(0x200C, m, n, &mut out),
-			Asm::CmpEqImm(i) => out.push(0x8800 | *i as u16),
+			Asm::CmpEqImm(i) => out.push(0x8800 | *i as u8 as u16),
 
-			Asm::AddImm(i,r)   => out.push(0x7000 | (*r as u16) << 8 | *i as u16),
+			Asm::AddImm(i,r)   => out.push(0x7000 | (*r as u16) << 8 | *i as u8 as u16),
 			Asm::AddReg(m,n)   =>     push(0x300C, m, n, &mut out),
 			Asm::Mul(m,n)      =>     push(0x0007, m, n, &mut out),
 			Asm::MulS(m,n)     =>     push(0x200F, m, n, &mut out),
@@ -1558,7 +1593,7 @@ mod output {
 				let asm = super::parser($input)
 					.map_err(|e| panic!("{e}"))
 					.unwrap();
-				let out = super::output(&asm.0);
+				let out = super::output(&asm);
 				assert_eq!(out, $bytes);
 			}
 		};
@@ -1586,8 +1621,8 @@ mod output {
 	test_output!(jsr,    "\tjsr @r3",           &[0x43, 0x0B]);
 	test_output!(mova,   "\tmova @($80,pc),r0", &[0xC7, 0x80]);
 	test_output!(movt,   "\tmovt r6",           &[0x06, 0x29]);
-	test_output!(rotcl,  "\trotcl r15",         &[0x4F, 0x44]);
-	test_output!(rotcr,  "\trotcr r14",         &[0x4E, 0x45]);
+	test_output!(rotcl,  "\trotcl r15",         &[0x4F, 0x24]);
+	test_output!(rotcr,  "\trotcr r14",         &[0x4E, 0x25]);
 	test_output!(rotl,   "\trotl r4",           &[0x44, 0x04]);
 	test_output!(rotr,   "\trotr r5",           &[0x45, 0x05]);
 	test_output!(shal,   "\tshal r8",           &[0x48, 0x20]);
