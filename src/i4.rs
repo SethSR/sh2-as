@@ -20,3 +20,9 @@ impl std::ops::BitOr<I4> for u16 {
 	}
 }
 
+impl std::fmt::Display for I4 {
+	fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+		write!(f, "{}", self.0)
+	}
+}
+
