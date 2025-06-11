@@ -36,7 +36,7 @@ impl PartialEq<Type> for Token {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Type {
-	EOF,
+	Eof,
 
 	/* Literals */
 	String(Box<str>),

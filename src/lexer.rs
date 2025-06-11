@@ -24,7 +24,7 @@ impl<'a> Lexer<'a> {
 	}
 }
 
-impl<'a> Iterator for Lexer<'a> {
+impl Iterator for Lexer<'_> {
 	type Item = Result<Token, miette::Error>;
 
 	fn next(&mut self) -> Option<Self::Item> {
@@ -94,9 +94,9 @@ impl<'a> Iterator for Lexer<'a> {
 					loop {
 						if let Some((j,x)) = inner_chars.next() {
 							index = j;
-							if ('a'..='z').contains(&x)
-							|| ('A'..='Z').contains(&x)
-							|| ('0'..='9').contains(&x)
+							if x.is_ascii_lowercase()
+							|| x.is_ascii_uppercase()
+							|| x.is_ascii_digit()
 							|| x == '_'
 							|| x == '/'
 							{
@@ -210,7 +210,7 @@ impl<'a> Iterator for Lexer<'a> {
 					loop {
 						if let Some((j,x)) = inner_chars.next() {
 							index = j;
-							if ('0'..='9').contains(&x) || x == '_' {
+							if x.is_ascii_digit() || x == '_' {
 								continue;
 							}
 						} else {
@@ -228,9 +228,10 @@ impl<'a> Iterator for Lexer<'a> {
 					let mut inner_chars = self.rest.char_indices();
 					loop {
 						if let Some((j,x)) = inner_chars.next() {
-							if !x.is_whitespace() {
-								self.next(j);
+							if x.is_whitespace() {
+								continue;
 							}
+							self.next(j);
 						}
 						break;
 					}
@@ -256,7 +257,7 @@ pub(crate) fn eval(
 	use std::iter::once;
 
 	Lexer::new(input)
-		.chain(once(Ok(Token::new(Type::EOF, input.len()))))
+		.chain(once(Ok(Token::new(Type::Eof, input.len()))))
 		.collect()
 }
 
@@ -269,7 +270,7 @@ mod tokenizes {
 		check: &[Type],
 	) -> miette::Result<()> {
 		let mut check = check.to_vec();
-		check.push(Type::EOF);
+		check.push(Type::Eof);
 
 		let tokens = crate::lexer::eval(input)?;
 		assert_eq!(tokens, check);
