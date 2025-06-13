@@ -1,5 +1,5 @@
 
-use std::{env, fs};
+use std::{env, fs, path::PathBuf};
 
 mod asm;
 mod i4;
@@ -19,6 +19,9 @@ fn main() {
 
 	let file_name = args.next()
 		.expect("no source file name");
+	let file_path = PathBuf::from(&file_name);
+	let file_path = file_path.parent()
+		.expect(&format!("unable to parse parent file-path for '{file_name}'"));
 
 	let use_parser2 = args.next()
 		.map(|arg| arg == "p2")
@@ -29,9 +32,9 @@ fn main() {
 	let ins = if use_parser2 {
 		let tokens = lexer::eval(&source)
 			.expect("unable to lex source (v2)");
-		let parser = p2::eval(&tokens)
+		let parser = p2::eval(&tokens, file_path.to_path_buf())
 			.expect("unable to parse source (v2)");
-		parser.asm()
+		parser.output()
 	} else {
 		parser(&source)
 			.expect("unable to parse source")

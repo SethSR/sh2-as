@@ -1,5 +1,6 @@
 
 use std::collections::HashMap;
+use std::path::{Path, PathBuf};
 
 use crate::asm::Asm;
 use crate::tokens::{Token, Type};
@@ -7,20 +8,24 @@ use crate::tokens::{Token, Type};
 #[derive(Default)]
 pub struct Parser {
 	index: usize,
+	file_path: PathBuf,
 
 	is_recording_macro: Option<Box<str>>,
-	macro_buffer: Vec<Asm>,
-	macros: HashMap<Box<str>, Vec<Asm>>,
+	macro_buffer: Vec<Option<Asm>>,
+	macros: HashMap<Box<str>, Vec<Option<Asm>>>,
+	undefined_macro_labels: HashMap<Box<str>, Vec<usize>>,
 
 	labels: HashMap<Box<str>, u32>,
 	values: HashMap<Box<str>, i64>,
+	undefined_ins_labels: HashMap<Box<str>, Vec<usize>>,
 
 	address: u32,
-	output: Vec<(u32, Asm)>,
+	asm: Vec<(u32, Option<Asm>)>,
 }
 
-pub fn eval(tokens: &[Token]) -> Result<Parser, String> {
+pub fn eval(tokens: &[Token], file_path: PathBuf) -> Result<Parser, String> {
 	let mut parser = Parser::default();
+	parser.file_path = file_path;
 
 	parser.parse(tokens);
 
@@ -28,18 +33,47 @@ pub fn eval(tokens: &[Token]) -> Result<Parser, String> {
 }
 
 impl Parser {
-	pub fn asm(&self) -> Vec<Asm> {
-		self.output.iter()
-			.map(|(_,asm)| asm)
-			.cloned()
-			.collect()
+	pub fn output(&self) -> Vec<Asm> {
+		let mut out = vec![];
+		for (_,asm) in &self.asm {
+			match asm {
+				Some(asm) => {
+					out.push(asm.clone());
+				}
+				None => {
+					let start = self.index.saturating_sub(5);
+					let end = self.index.saturating_add(5).min(self.asm.len());
+					let window = self.asm[start..=end].iter()
+						.map(|s| format!("{s:?}"))
+						.collect::<Vec<_>>()
+						.join("\n\t");
+					panic!("Unfinished instruction @ index {}\nwindow:\n\t{window}", self.index);
+				}
+			}
+		}
+		out
 	}
 
 	fn push(&mut self, asm: Asm) {
 		if self.is_recording_macro.is_some() {
-			self.macro_buffer.push(asm);
+			self.macro_buffer.push(Some(asm));
 		} else {
-			self.output.push((self.address, asm));
+			self.asm.push((self.address, Some(asm)));
+			self.address += 1;
+		}
+	}
+
+	fn push_label(&mut self, label: Box<str>) {
+		if self.is_recording_macro.is_some() {
+			self.undefined_macro_labels.entry(label)
+				.or_default()
+				.push(self.macro_buffer.len());
+			self.macro_buffer.push(None);
+		} else {
+			self.undefined_ins_labels.entry(label)
+				.or_default()
+				.push(self.asm.len());
+			self.asm.push((self.address, None));
 			self.address += 1;
 		}
 	}
@@ -77,7 +111,20 @@ impl Parser {
 						}
 						Type::Colon => {
 							println!("found label '{s}'");
-							self.labels.insert(s, 0xFFFF_FFFF);
+							if self.is_recording_macro.is_some() {
+								if let Some(indexes) = self.undefined_macro_labels.get(&s) {
+									for idx in indexes {
+										println!("undefined macro label: '{:?}'", self.asm[*idx]);
+									}
+								}
+							} else {
+								if let Some(indexes) = self.undefined_ins_labels.get(&s) {
+									for idx in indexes {
+										println!("undefined instruction label: '{:?}'", self.asm[*idx]);
+									}
+								}
+							}
+							self.labels.insert(s, self.address);
 						}
 						Type::MacroStart => {
 							println!("found macro start for '{s}' - {:?}", self.macros);
@@ -129,9 +176,10 @@ impl Parser {
 
 				Type::Include => {
 					if let Ok(s) = self.match_string(tokens) {
-						println!("include ASM file '{s}'");
-						let file = std::fs::read_to_string(&*s)
-							.expect(&format!("unable to open file '{s}'"));
+						let s = Path::join(&self.file_path, &*s);
+						println!("include ASM file '{}'", s.display());
+						let file = std::fs::read_to_string(&s)
+							.expect(&format!("unable to open file '{}'", s.display()));
 						let file_tokens = crate::lexer::eval(&file).unwrap();
 
 						let index = self.index;
@@ -145,13 +193,14 @@ impl Parser {
 
 				Type::BInclude => {
 					if let Ok(s) = self.match_string(tokens) {
-						println!("include BINARY file '{s}'");
-						self.output.extend(std::fs::read(&*s)
-							.expect(&format!("unable to open file '{s}'"))
+						let s = Path::join(&self.file_path, &*s);
+						println!("include BINARY file '{}'", s.display());
+						self.asm.extend(std::fs::read(&s)
+							.expect(&format!("unable to open file '{}'", s.display()))
 							.into_iter()
 							.map(|byte| {
 								self.address += 1;
-								(self.address - 1, Asm::Byte(byte))
+								(self.address - 1, Some(Asm::Byte(byte)))
 							}));
 					} else {
 						self.unexpected_next(tokens, token);
@@ -222,7 +271,8 @@ impl Parser {
 										if let Some(n) = self.labels.get(&s) {
 											self.push(Asm::Long(*n));
 										} else {
-											todo!("found unknown label: '{s}'");
+											println!("found unknown label: '{s}'");
+											self.push_label(s);
 										}
 									}
 									Type::Bin(n) => {
@@ -255,6 +305,7 @@ impl Parser {
 				}
 
 				Type::Space => {}
+
 				Type::LtOrg => {
 					println!("emptying literal pool");
 				}
