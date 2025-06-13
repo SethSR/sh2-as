@@ -37,8 +37,6 @@ impl Iterator for Lexer<'_> {
 			let output = |tt| Some(Ok(Token::new(tt, c_at)));
 
 			match c {
-				'$' => break output(Type::Dollar),
-				'%' => break output(Type::Percent),
 				'(' => break output(Type::OParen),
 				')' => break output(Type::CParen),
 				'*' => break output(Type::Star),
@@ -50,6 +48,7 @@ impl Iterator for Lexer<'_> {
 				'=' => break output(Type::Eq),
 				'/' => break output(Type::Slash),
 				'-' => break output(Type::Dash),
+				'#' => break output(Type::Hash),
 
 				';' => { // Comment
 					let mut inner_chars = self.rest.char_indices();
@@ -70,22 +69,83 @@ impl Iterator for Lexer<'_> {
 
 				'"' => { // String
 					let mut inner_chars = self.rest.char_indices();
+					loop {
+						if let Some((_,x)) = inner_chars.next() {
+							if x != '"' {
+								continue;
+							}
+						}
+
+						let index = inner_chars.next()
+							.map(|(j,_)| j)
+							.unwrap_or(self.rest.len());
+						self.next(index);
+						break;
+					}
+
+					let s = self.source[c_at..self.index].trim_matches('"');
+					break output(Type::String(s.into()));
+				}
+
+				'\'' => {
+					let mut inner_chars = self.rest.char_indices();
+					for _ in 0..2 {
+						if let Some((_,x)) = inner_chars.next() {
+							if x != '\'' {
+								continue;
+							}
+						}
+
+						let index = inner_chars.next()
+							.map(|(j,_)| j)
+							.unwrap_or(self.rest.len());
+						self.next(index);
+						break;
+					}
+
+					let s = self.source[c_at..self.index].trim_matches('\'');
+					let c = s.chars().next().unwrap();
+					break output(Type::Char(c));
+				}
+
+				'$' => {
+					let mut inner_chars = self.rest.char_indices();
 					let mut index;
 					loop {
 						if let Some((j,x)) = inner_chars.next() {
 							index = j;
-							if x != '"' {
+							if ('a'..='f').contains(&x)
+							|| ('A'..='F').contains(&x)
+							|| x.is_ascii_digit()
+							|| x == '_'
+							{
 								continue;
 							}
 						} else {
 							index = self.rest.len();
 						}
-						self.next(index);
-						break;
+						break self.next(index);
 					}
+					let s = self.source[c_at..self.index].trim_start_matches('$');
+					break output(Type::Hex(s.into()));
+				}
 
-					let s = &self.source[c_at..self.index];
-					break output(Type::String(s.into()));
+				'%' => {
+					let mut inner_chars = self.rest.char_indices();
+					let mut index;
+					loop {
+						if let Some((j,x)) = inner_chars.next() {
+							index = j;
+							if ['0', '1', '_'].contains(&x) {
+								continue;
+							}
+						} else {
+							index = self.rest.len();
+						}
+						break self.next(index);
+					}
+					let s = self.source[c_at..self.index].trim_start_matches('%');
+					break output(Type::Bin(s.into()));
 				}
 
 				'a'..='z' | 'A'..='Z' | '_' => {
@@ -109,7 +169,32 @@ impl Iterator for Lexer<'_> {
 					}
 
 					let ident = &self.source[c_at..self.index];
-					break output(match ident {
+					break output(match ident.to_lowercase().as_str() {
+						"r0"       => Type::Reg(0),
+						"r1"       => Type::Reg(1),
+						"r2"       => Type::Reg(2),
+						"r3"       => Type::Reg(3),
+						"r4"       => Type::Reg(4),
+						"r5"       => Type::Reg(5),
+						"r6"       => Type::Reg(6),
+						"r7"       => Type::Reg(7),
+						"r8"       => Type::Reg(8),
+						"r9"       => Type::Reg(9),
+						"r10"      => Type::Reg(10),
+						"r11"      => Type::Reg(11),
+						"r12"      => Type::Reg(12),
+						"r13"      => Type::Reg(13),
+						"r14"      => Type::Reg(14),
+						"r15"      |
+						"sp"       => Type::Reg(15),
+						"pc"       => Type::Pc,
+						"gbr"      => Type::Gbr,
+						"vbr"      => Type::Vbr,
+						"sr"       => Type::Sr,
+						"macl"     => Type::Macl,
+						"mach"     => Type::Mach,
+						"pr"       => Type::Pr,
+
 						"org"      => Type::Org,
 						"include"  => Type::Include,
 						"binclude" => Type::BInclude,
@@ -117,6 +202,9 @@ impl Iterator for Lexer<'_> {
 						"dc"       => Type::Const,
 						"ds"       => Type::Space,
 						"ltorg"    => Type::LtOrg,
+						"macro"    => Type::MacroStart,
+						"endm"     => Type::MacroEnd,
+
 						"add"      => Type::Add,
 						"addc"     => Type::AddC,
 						"addv"     => Type::AddV,
@@ -196,10 +284,10 @@ impl Iterator for Lexer<'_> {
 						"xor"      => Type::Xor,
 						"xtrct"    => Type::Xtrct,
 
-						s => if ident.contains('/') {
-							todo!("handle Labels with slashes '/' in them")
+						_ => if ident.contains('/') {
+							todo!("handle Labels with slashes '/' in them: '{ident}'")
 						} else {
-							Type::Label(s.into())
+							Type::Label(ident.into())
 						}
 					});
 				}
@@ -221,7 +309,7 @@ impl Iterator for Lexer<'_> {
 					}
 
 					let n = &self.source[c_at..self.index];
-					break output(Type::Imm(n.into()));
+					break output(Type::Dec(n.into()));
 				}
 
 				w if w.is_whitespace() => {
@@ -319,8 +407,8 @@ mod tokenizes {
 	#[test]
 	fn numbers() -> miette::Result<()> {
 		lex_test("1 5_6 ", &[
-			Type::Imm("1".into()),
-			Type::Imm("5_6".into()),
+			Type::Dec("1".into()),
+			Type::Dec("5_6".into()),
 		])
 	}
 }

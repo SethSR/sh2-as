@@ -1,5 +1,5 @@
 
-#[derive(Debug, Clone, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Token {
 	/// Token type
 	pub tt: Type,
@@ -17,17 +17,6 @@ impl Token {
 	}
 }
 
-impl PartialEq for Token {
-	fn eq(&self, rhs: &Self) -> bool {
-		match (&self.tt, &rhs.tt) {
-			(Type::Label(a), Type::Label(b)) |
-			(Type::String(a), Type::String(b)) => a == b,
-			(Type::Imm(a), Type::Imm(b)) => a == b,
-			_ => self.tt == rhs.tt,
-		}
-	}
-}
-
 impl PartialEq<Type> for Token {
 	fn eq(&self, rhs: &Type) -> bool {
 		self.tt == *rhs
@@ -40,23 +29,34 @@ pub enum Type {
 
 	/* Literals */
 	String(Box<str>),
+	Char(char),
 	Label(Box<str>),
-	Imm(Box<str>),
+	Bin(Box<str>),
+	Dec(Box<str>),
+	Hex(Box<str>),
+	Reg(u8),
+	Pc,
+	Gbr,
+	Vbr,
+	Sr,
+	Macl,
+	Mach,
+	Pr,
 
 	/* Operators */
 	Plus,    // '+'
 	Dash,    // '-'
 	Star,    // '*'
 	Slash,   // '/'
-	Percent, // '%'
+	// Percent, // '%'
 	At,      // '@'
 	OParen,  // '('
 	CParen,  // ')'
-	Dollar,  // '$'
 	Colon,   // ':'
 	Dot,     // '.'
 	Comma,   // ','
 	Eq,      // '='
+	Hash,    // '#'
 
 	/* Sizes */
 	Byte,
@@ -71,6 +71,8 @@ pub enum Type {
 	Const,
 	Space,
 	LtOrg,
+	MacroStart,
+	MacroEnd,
 
 	/* Instructions */
 	ClrMac,

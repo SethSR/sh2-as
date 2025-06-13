@@ -5,7 +5,7 @@ mod asm;
 mod i4;
 mod output;
 mod parser;
-//mod p2;
+mod p2;
 
 mod lexer;
 mod tokens;
@@ -29,10 +29,9 @@ fn main() {
 	let ins = if use_parser2 {
 		let tokens = lexer::eval(&source)
 			.expect("unable to lex source (v2)");
-		println!("{tokens:?}");
-		vec![]
-		//p2::parser(&source)
-		//	.expect("unable to parse source (v2)")
+		let parser = p2::eval(&tokens)
+			.expect("unable to parse source (v2)");
+		parser.asm()
 	} else {
 		parser(&source)
 			.expect("unable to parse source")
