@@ -2,25 +2,29 @@
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
+use tracing::trace;
+
 use crate::asm::Asm;
 use crate::tokens::{Token, Type};
+
+type SectionMap = HashMap<u32, Vec<u8>>;
 
 #[derive(Default)]
 pub struct Parser {
 	index: usize,
 	file_path: PathBuf,
 
-	is_recording_macro: Option<Box<str>>,
-	macro_buffer: Vec<Option<Asm>>,
-	macros: HashMap<Box<str>, Vec<Option<Asm>>>,
-	undefined_macro_labels: HashMap<Box<str>, Vec<usize>>,
+	/// Flag for whether we are recording a macro
+	curr_macro: Option<Box<str>>,
+	/// Records the token stream, so it can be "played back" when invoked.
+	macros: HashMap<Box<str>, Vec<Token>>,
 
 	labels: HashMap<Box<str>, u32>,
 	values: HashMap<Box<str>, i64>,
-	undefined_ins_labels: HashMap<Box<str>, Vec<usize>>,
+	undefined_labels: HashMap<Box<str>, HashMap<u32, Vec<(u32, LabelUse)>>>,
 
-	address: u32,
-	asm: Vec<(u32, Option<Asm>)>,
+	curr_base_addr: u32,
+	sections: SectionMap,
 }
 
 pub fn eval(tokens: &[Token], file_path: PathBuf) -> Result<Parser, String> {
@@ -32,37 +36,33 @@ pub fn eval(tokens: &[Token], file_path: PathBuf) -> Result<Parser, String> {
 	Ok(parser)
 }
 
+enum LabelUse {
+	ConstLong,
+}
+
 impl Parser {
-	pub fn output(&self) -> Vec<Asm> {
-		let mut out = vec![];
-		for (_,asm) in &self.asm {
-			match asm {
-				Some(asm) => {
-					out.push(asm.clone());
-				}
-				None => {
-					let start = self.index.saturating_sub(5);
-					let end = self.index.saturating_add(5).min(self.asm.len());
-					let window = self.asm[start..=end].iter()
-						.map(|s| format!("{s:?}"))
-						.collect::<Vec<_>>()
-						.join("\n\t");
-					panic!("Unfinished instruction @ index {}\nwindow:\n\t{window}", self.index);
-				}
-			}
-		}
-		out
+	pub fn output(&self) -> SectionMap {
+		self.sections.clone()
 	}
 
 	fn push(&mut self, asm: Asm) {
-		if self.is_recording_macro.is_some() {
-			self.macro_buffer.push(Some(asm));
-		} else {
-			self.asm.push((self.address, Some(asm)));
-			self.address += 1;
-		}
+		let section = self.sections.entry(self.curr_base_addr)
+			.or_default();
+		asm.output(section);
 	}
 
+	fn save_label(&mut self, label: Box<str>, base_addr: u32, offset: u32, label_use: LabelUse) {
+		// Find the label
+		self.undefined_labels.entry(label)
+			.or_default()
+			// Find section waiting for label definition
+			.entry(base_addr)
+			.or_default()
+			// Save where this label is used and what it's used for
+			.push((offset, label_use));
+	}
+
+	/*
 	fn push_label(&mut self, label: Box<str>) {
 		if self.is_recording_macro.is_some() {
 			self.undefined_macro_labels.entry(label)
@@ -72,15 +72,37 @@ impl Parser {
 		} else {
 			self.undefined_ins_labels.entry(label)
 				.or_default()
-				.push(self.asm.len());
-			self.asm.push((self.address, None));
-			self.address += 1;
+				.push(self.output.len());
+			self.output.push((self.address, None));
+			// self.update_address(&self.output);
 		}
 	}
+	*/
 
 	fn parse(&mut self, tokens: &[Token]) {
 		while tokens[self.index].tt != Type::Eof {
 			let token = &tokens[self.index];
+
+			// Don't process tokens while recording a macro, we'll do that whenever we see it used
+			// somewhere.
+			if let Some(label) = &self.curr_macro {
+				match token.tt {
+					Type::MacroEnd => {
+						trace!("found macro end for '{label}'");
+						self.curr_macro.take();
+					}
+					Type::MacroStart => {
+						todo!("nested macros are currently unsupported");
+					}
+					_ => {
+						self.macros.entry(label.clone())
+							.or_default()
+							.push(token.clone());
+					}
+				}
+				self.index += 1;
+				continue;
+			}
 
 			match token.tt {
 				Type::Label(ref s) => {
@@ -90,17 +112,17 @@ impl Parser {
 							let msg = format!("found label '{s}' with value");
 							match self.next(tokens).tt {
 								Type::Bin(n) => {
-									println!("{msg} {}", dbg_bin(&n));
+									trace!("{msg} {}", dbg_bin(&n));
 									let n = i64::from_str_radix(&n, 2).unwrap();
 									self.values.insert(s, n);
 								}
 								Type::Dec(n) => {
-									println!("{msg} {}", dbg_dec(&n));
+									trace!("{msg} {}", dbg_dec(&n));
 									let n = i64::from_str_radix(&n, 10).unwrap();
 									self.values.insert(s, n);
 								}
 								Type::Hex(n) => {
-									println!("{msg} {}", dbg_hex(&n));
+									trace!("{msg} {}", dbg_hex(&n));
 									let n = i64::from_str_radix(&n, 16).unwrap();
 									self.values.insert(s, n);
 								}
@@ -110,32 +132,22 @@ impl Parser {
 							}
 						}
 						Type::Colon => {
-							println!("found label '{s}'");
-							if self.is_recording_macro.is_some() {
-								if let Some(indexes) = self.undefined_macro_labels.get(&s) {
-									for idx in indexes {
-										println!("undefined macro label: '{:?}'", self.asm[*idx]);
-									}
-								}
-							} else {
-								if let Some(indexes) = self.undefined_ins_labels.get(&s) {
-									for idx in indexes {
-										println!("undefined instruction label: '{:?}'", self.asm[*idx]);
-									}
-								}
-							}
-							self.labels.insert(s, self.address);
+							trace!("found label '{s}'");
+							let section_bytes = self.sections[&self.curr_base_addr].len() as u32;
+							let curr_addr = self.curr_base_addr + section_bytes;
+							eprintln!("TODO - Backfill label '{s}' in incomplete instructions");
+							self.labels.insert(s, curr_addr);
 						}
 						Type::MacroStart => {
-							println!("found macro start for '{s}' - {:?}", self.macros);
-							self.is_recording_macro = Some(s);
+							trace!("found macro start for '{s}'");
+							self.curr_macro = Some(s);
 						}
 						_ => {
 							self.index -= 1;
 							if self.macros.contains_key(&s) {
-								println!("found macro use for '{s}'");
+								trace!("found macro use for '{s}'");
 							} else {
-								println!("Label ERROR '{s}' {:?}", self.macros);
+								eprintln!("Label ERROR '{s}' {:?}", self.macros);
 								self.unexpected_next(tokens, token);
 							}
 						}
@@ -143,11 +155,7 @@ impl Parser {
 				}
 
 				Type::MacroEnd => {
-					if let Some(s) = self.is_recording_macro.take() {
-						println!("found macro end for '{s}' - {:?}", self.macros);
-						self.macros.insert(s, self.macro_buffer.clone());
-						self.macro_buffer.clear();
-					} else {
+					if self.curr_macro.is_none() {
 						todo!("found ENDM with no preceding MACRO directive")
 					}
 				}
@@ -157,16 +165,16 @@ impl Parser {
 					let msg = "setting current address";
 					match self.next(tokens).tt {
 						Type::Bin(n) => {
-							println!("{msg} {}", dbg_bin(&n));
-							self.address = u32::from_str_radix(&n, 2).unwrap();
+							trace!("{msg} {}", dbg_bin(&n));
+							self.curr_base_addr = u32::from_str_radix(&n, 2).unwrap();
 						}
 						Type::Dec(n) => {
-							println!("{msg} {}", dbg_dec(&n));
-							self.address = u32::from_str_radix(&n, 10).unwrap();
+							trace!("{msg} {}", dbg_dec(&n));
+							self.curr_base_addr = u32::from_str_radix(&n, 10).unwrap();
 						}
 						Type::Hex(n) => {
-							println!("{msg} {}", dbg_hex(&n));
-							self.address = u32::from_str_radix(&n, 16).unwrap();
+							trace!("{msg} {}", dbg_hex(&n));
+							self.curr_base_addr = u32::from_str_radix(&n, 16).unwrap();
 						}
 						_ => {
 							self.unexpected_next(tokens, token);
@@ -177,7 +185,7 @@ impl Parser {
 				Type::Include => {
 					if let Ok(s) = self.match_string(tokens) {
 						let s = Path::join(&self.file_path, &*s);
-						println!("include ASM file '{}'", s.display());
+						trace!("include ASM file '{}'", s.display());
 						let file = std::fs::read_to_string(&s)
 							.expect(&format!("unable to open file '{}'", s.display()));
 						let file_tokens = crate::lexer::eval(&file).unwrap();
@@ -194,14 +202,12 @@ impl Parser {
 				Type::BInclude => {
 					if let Ok(s) = self.match_string(tokens) {
 						let s = Path::join(&self.file_path, &*s);
-						println!("include BINARY file '{}'", s.display());
-						self.asm.extend(std::fs::read(&s)
-							.expect(&format!("unable to open file '{}'", s.display()))
-							.into_iter()
-							.map(|byte| {
-								self.address += 1;
-								(self.address - 1, Some(Asm::Byte(byte)))
-							}));
+						trace!("include BINARY file '{}'", s.display());
+						let bytes = std::fs::read(&s)
+							.expect(&format!("unable to open file '{}'", s.display()));
+						self.sections.entry(self.curr_base_addr)
+							.or_default()
+							.extend(bytes);
 					} else {
 						self.unexpected_next(tokens, token);
 					}
@@ -209,9 +215,13 @@ impl Parser {
 
 				Type::Align => {
 					let n = self.match_immediate(tokens).unwrap();
-					println!("aligning to the next {n}-byte boundary");
-					let n = n as u32;
-					self.address += n - (self.address % n);
+					trace!("aligning to the next {n}-byte boundary");
+					let n = n as usize;
+					let section = self.sections.entry(self.curr_base_addr)
+						.or_default();
+					for _ in 0..(n - (section.len() % n)) {
+						section.push(0x00);
+					}
 				}
 
 				Type::Const => {
@@ -219,7 +229,7 @@ impl Parser {
 						match self.next(tokens).tt {
 							Type::Byte => {
 								if let Ok(s) = self.match_string(tokens) {
-									println!("declaring byte-string '{s}'");
+									trace!("declaring byte-string '{s}'");
 
 									for c in s.bytes() {
 										self.push(Asm::Byte(c));
@@ -228,7 +238,7 @@ impl Parser {
 									while self.match_token(tokens, Type::Comma).is_ok() {
 										if let Ok(n) = self.match_immediate(tokens) {
 											assert!(u8_sized(n));
-											println!("- with extra byte {n}");
+											trace!("- with extra byte {n}");
 											self.push(Asm::Byte(n as u8));
 										}
 									}
@@ -241,21 +251,21 @@ impl Parser {
 									Type::Dash => {
 										let n = self.match_immediate(tokens).unwrap();
 										assert!(u16_sized(n));
-										println!("declaring constant negative {n}");
+										trace!("declaring constant negative {n}");
 										self.push(Asm::Word((-n) as u16));
 									}
 									Type::Bin(n) => {
-										println!("declaring constant {}", dbg_bin(&n));
+										trace!("declaring constant {}", dbg_bin(&n));
 										let n = u16::from_str_radix(&n, 2).unwrap();
 										self.push(Asm::Word(n));
 									}
 									Type::Dec(n) => {
-										println!("declaring constant {}", dbg_dec(&n));
+										trace!("declaring constant {}", dbg_dec(&n));
 										let n = u16::from_str_radix(&n, 10).unwrap();
 										self.push(Asm::Word(n));
 									}
 									Type::Hex(n) => {
-										println!("declaring constant {}", dbg_hex(&n));
+										trace!("declaring constant {}", dbg_hex(&n));
 										let n = u16::from_str_radix(&n, 16).unwrap();
 										self.push(Asm::Word(n));
 									}
@@ -267,26 +277,30 @@ impl Parser {
 							Type::Long => {
 								match self.next(tokens).tt {
 									Type::Label(s) => {
-										println!("declaring constant with address of label '{s}'");
+										trace!("declaring constant with address of label '{s}'");
 										if let Some(n) = self.labels.get(&s) {
 											self.push(Asm::Long(*n));
 										} else {
-											println!("found unknown label: '{s}'");
-											self.push_label(s);
+											trace!("found unknown label: '{s}'");
+											let section = self.sections.entry(self.curr_base_addr)
+												.or_default();
+											let section_len = section.len() as u32;
+											section.extend([0x00, 0x00, 0x00, 0x00]);
+											self.save_label(s, self.curr_base_addr, section_len, LabelUse::ConstLong);
 										}
 									}
 									Type::Bin(n) => {
-										println!("declaring constant {}", dbg_bin(&n));
+										trace!("declaring constant {}", dbg_bin(&n));
 										let n = u32::from_str_radix(&n, 2).unwrap();
 										self.push(Asm::Long(n));
 									}
 									Type::Dec(n) => {
-										println!("declaring constant {}", dbg_dec(&n));
+										trace!("declaring constant {}", dbg_dec(&n));
 										let n = u32::from_str_radix(&n, 10).unwrap();
 										self.push(Asm::Long(n));
 									}
 									Type::Hex(n) => {
-										println!("declaring constant {}", dbg_hex(&n));
+										trace!("declaring constant {}", dbg_hex(&n));
 										let n = u32::from_str_radix(&n, 16).unwrap();
 										self.push(Asm::Long(n));
 									}
@@ -307,7 +321,7 @@ impl Parser {
 				Type::Space => {}
 
 				Type::LtOrg => {
-					println!("emptying literal pool");
+					trace!("emptying literal pool");
 				}
 
 				/* Instructions */
@@ -322,7 +336,7 @@ impl Parser {
 
 				Type::Bf => {
 					let s = self.match_label(tokens).unwrap();
-					println!("branching on clear T-flag to label '{s}'");
+					trace!("branching on clear T-flag to label '{s}'");
 				}
 				Type::BfS => {}
 
@@ -330,7 +344,7 @@ impl Parser {
 					let next = self.next(tokens);
 					match next.tt {
 						Type::Label(s) => {
-							println!("branching to location @ '{s}'");
+							trace!("branching to location @ '{s}'");
 						}
 						_ => {
 							self.unexpected_next(tokens, token);
@@ -343,7 +357,7 @@ impl Parser {
 				Type::Bsr => {
 					match self.next(tokens).tt {
 						Type::Label(s) => {
-							println!("branching to subroutine '{s}'");
+							trace!("branching to subroutine '{s}'");
 						}
 						_ => {
 							self.unexpected_next(tokens, token);
@@ -354,12 +368,12 @@ impl Parser {
 				Type::BsrF => {}
 				Type::Bt => {
 					let s = self.match_label(tokens).unwrap();
-					println!("branching on set T-flag to label '{s}'");
+					trace!("branching on set T-flag to label '{s}'");
 				}
 				Type::BtS => {}
 				Type::Dt => {
 					let r = self.match_reg(tokens).unwrap();
-					println!("decrementing and testing {}", dbg_reg(r));
+					trace!("decrementing and testing {}", dbg_reg(r));
 					self.push(Asm::Dt(r));
 				}
 				Type::Jmp => {}
@@ -368,72 +382,72 @@ impl Parser {
 				Type::MovT => {}
 				Type::RotCL => {
 					let r = self.match_reg(tokens).unwrap();
-					println!("rotating {} left into C-flag", dbg_reg(r));
+					trace!("rotating {} left into C-flag", dbg_reg(r));
 					self.push(Asm::RotCL(r));
 				}
 				Type::RotCR => {
 					let r = self.match_reg(tokens).unwrap();
-					println!("rotating {} right into C-flag", dbg_reg(r));
+					trace!("rotating {} right into C-flag", dbg_reg(r));
 					self.push(Asm::RotCR(r));
 				}
 				Type::RotL => {
 					let r = self.match_reg(tokens).unwrap();
-					println!("rotating {} left", dbg_reg(r));
+					trace!("rotating {} left", dbg_reg(r));
 					self.push(Asm::RotL(r));
 				}
 				Type::RotR => {
 					let r = self.match_reg(tokens).unwrap();
-					println!("rotating {} right", dbg_reg(r));
+					trace!("rotating {} right", dbg_reg(r));
 					self.push(Asm::RotR(r));
 				}
 				Type::ShAL => {
 					let r = self.match_reg(tokens).unwrap();
-					println!("shifting {} arithmetically left", dbg_reg(r));
+					trace!("shifting {} arithmetically left", dbg_reg(r));
 					self.push(Asm::ShAL(r));
 				}
 				Type::ShAR => {
 					let r = self.match_reg(tokens).unwrap();
-					println!("shifting {} arithmetically right", dbg_reg(r));
+					trace!("shifting {} arithmetically right", dbg_reg(r));
 					self.push(Asm::ShAR(r));
 				}
 				Type::ShLL => {
 					let r = self.match_reg(tokens).unwrap();
-					println!("shifting {} left 1 bit", dbg_reg(r));
+					trace!("shifting {} left 1 bit", dbg_reg(r));
 					self.push(Asm::ShLL(r));
 				}
 				Type::ShLL2 => {
 					let r = self.match_reg(tokens).unwrap();
-					println!("shifting {} left 2 bits", dbg_reg(r));
+					trace!("shifting {} left 2 bits", dbg_reg(r));
 					self.push(Asm::ShLL2(r));
 				}
 				Type::ShLL8 => {
 					let r = self.match_reg(tokens).unwrap();
-					println!("shifting {} left 8 bits", dbg_reg(r));
+					trace!("shifting {} left 8 bits", dbg_reg(r));
 					self.push(Asm::ShLL8(r));
 				}
 				Type::ShLL16 => {
 					let r = self.match_reg(tokens).unwrap();
-					println!("shifting {} left 16 bits", dbg_reg(r));
+					trace!("shifting {} left 16 bits", dbg_reg(r));
 					self.push(Asm::ShLL16(r));
 				}
 				Type::ShLR => {
 					let r = self.match_reg(tokens).unwrap();
-					println!("shifting {} right 1 bit", dbg_reg(r));
+					trace!("shifting {} right 1 bit", dbg_reg(r));
 					self.push(Asm::ShLR(r));
 				}
 				Type::ShLR2 => {
 					let r = self.match_reg(tokens).unwrap();
-					println!("shifting {} right 2 bits", dbg_reg(r));
+					trace!("shifting {} right 2 bits", dbg_reg(r));
 					self.push(Asm::ShLR2(r));
 				}
 				Type::ShLR8 => {
 					let r = self.match_reg(tokens).unwrap();
-					println!("shifting {} right 8 bits", dbg_reg(r));
+					trace!("shifting {} right 8 bits", dbg_reg(r));
 					self.push(Asm::ShLR8(r));
 				}
 				Type::ShLR16 => {
 					let r = self.match_reg(tokens).unwrap();
-					println!("shifting {} right 16 bits", dbg_reg(r));
+					trace!("shifting {} right 16 bits", dbg_reg(r));
 					self.push(Asm::ShLR16(r));
 				}
 				Type::Tas => {}
@@ -454,7 +468,7 @@ impl Parser {
 					let rm = self.match_reg(tokens).unwrap();
 					self.match_token(tokens, Type::Comma).unwrap();
 					let rn = self.match_reg(tokens).unwrap();
-					println!("subtracting {} into {}", dbg_reg(rm), dbg_reg(rn));
+					trace!("subtracting {} into {}", dbg_reg(rm), dbg_reg(rn));
 					self.push(Asm::Sub(rm,rn));
 				}
 
@@ -462,7 +476,7 @@ impl Parser {
 					let rm = self.match_reg(tokens).unwrap();
 					self.match_token(tokens, Type::Comma).unwrap();
 					let rn = self.match_reg(tokens).unwrap();
-					println!("subtracting w/ carry {} into {}", dbg_reg(rm), dbg_reg(rn));
+					trace!("subtracting w/ carry {} into {}", dbg_reg(rm), dbg_reg(rn));
 					self.push(Asm::SubC(rm,rn));
 				}
 
@@ -470,7 +484,7 @@ impl Parser {
 					let rm = self.match_reg(tokens).unwrap();
 					self.match_token(tokens, Type::Comma).unwrap();
 					let rn = self.match_reg(tokens).unwrap();
-					println!("subtracting w/ overflow {} into {}", dbg_reg(rm), dbg_reg(rn));
+					trace!("subtracting w/ overflow {} into {}", dbg_reg(rm), dbg_reg(rn));
 					self.push(Asm::SubV(rm,rn));
 				}
 
@@ -481,14 +495,14 @@ impl Parser {
 								let rm = self.match_reg(tokens).unwrap();
 								self.match_token(tokens, Type::Comma).unwrap();
 								let rn = self.match_reg(tokens).unwrap();
-								println!("swapping {} into {}", dbg_reg(rm), dbg_reg(rn));
+								trace!("swapping {} into {}", dbg_reg(rm), dbg_reg(rn));
 								self.push(Asm::SwapByte(rm,rn));
 							}
 							Type::Word => {
 								let rm = self.match_reg(tokens).unwrap();
 								self.match_token(tokens, Type::Comma).unwrap();
 								let rn = self.match_reg(tokens).unwrap();
-								println!("swapping {} into {}", dbg_reg(rm), dbg_reg(rn));
+								trace!("swapping {} into {}", dbg_reg(rm), dbg_reg(rn));
 								self.push(Asm::SwapWord(rm,rn));
 							}
 							_ => {
@@ -499,7 +513,7 @@ impl Parser {
 						let rm = self.match_reg(tokens).unwrap();
 						self.match_token(tokens, Type::Comma).unwrap();
 						let rn = self.match_reg(tokens).unwrap();
-						println!("swapping {} into {}", dbg_reg(rm), dbg_reg(rn));
+						trace!("swapping {} into {}", dbg_reg(rm), dbg_reg(rn));
 						self.push(Asm::SwapWord(rm,rn));
 					}
 				}
@@ -508,7 +522,8 @@ impl Parser {
 					let rm = self.match_reg(tokens).unwrap();
 					self.match_token(tokens, Type::Comma).unwrap();
 					let rn = self.match_reg(tokens).unwrap();
-					println!("extracting {} into {}", dbg_reg(rm), dbg_reg(rn));
+					trace!("extracting {0} x {1} into {1}", dbg_reg(rm), dbg_reg(rn));
+					self.push(Asm::Xtrct(rm, rn));
 				}
 
 				Type::And => self.cmp(tokens, "anding", token),
@@ -520,49 +535,53 @@ impl Parser {
 					let rm = self.match_reg(tokens).unwrap();
 					self.match_token(tokens, Type::Comma).unwrap();
 					let rn = self.match_reg(tokens).unwrap();
-					println!("comparing {} into {}", dbg_reg(rm), dbg_reg(rn));
+					trace!("comparing {} == {}", dbg_reg(rm), dbg_reg(rn));
+					self.push(Asm::CmpEqReg(rm, rn));
 				}
 				Type::CmpGe => {
 					let rm = self.match_reg(tokens).unwrap();
 					self.match_token(tokens, Type::Comma).unwrap();
 					let rn = self.match_reg(tokens).unwrap();
-					println!("comparing {} into {}", dbg_reg(rm), dbg_reg(rn));
+					trace!("comparing {} >= {}", dbg_reg(rm), dbg_reg(rn));
+					self.push(Asm::CmpGE(rm, rn));
 				}
 				Type::CmpGt => {
 					let rm = self.match_reg(tokens).unwrap();
 					self.match_token(tokens, Type::Comma).unwrap();
 					let rn = self.match_reg(tokens).unwrap();
-					println!("comparing {} into {}", dbg_reg(rm), dbg_reg(rn));
+					trace!("comparing {} > {}", dbg_reg(rm), dbg_reg(rn));
+					self.push(Asm::CmpGT(rm, rn));
 				}
 				Type::CmpHi => {
 					let rm = self.match_reg(tokens).unwrap();
 					self.match_token(tokens, Type::Comma).unwrap();
 					let rn = self.match_reg(tokens).unwrap();
-					println!("comparing {} into {}", dbg_reg(rm), dbg_reg(rn));
+					trace!("comparing {} > {}", dbg_reg(rm), dbg_reg(rn));
+					self.push(Asm::CmpHI(rm, rn));
 				}
 				Type::CmpHs => {
 					let rm = self.match_reg(tokens).unwrap();
 					self.match_token(tokens, Type::Comma).unwrap();
 					let rn = self.match_reg(tokens).unwrap();
-					println!("comparing {} into {}", dbg_reg(rm), dbg_reg(rn));
+					trace!("comparing {} >= {}", dbg_reg(rm), dbg_reg(rn));
+					self.push(Asm::CmpHS(rm, rn));
 				}
 				Type::CmpStr => {
 					let rm = self.match_reg(tokens).unwrap();
 					self.match_token(tokens, Type::Comma).unwrap();
 					let rn = self.match_reg(tokens).unwrap();
-					println!("comparing {} into {}", dbg_reg(rm), dbg_reg(rn));
+					trace!("comparing {} str {}", dbg_reg(rm), dbg_reg(rn));
+					self.push(Asm::CmpSTR(rm, rn));
 				}
 				Type::CmpPl => {
-					let rm = self.match_reg(tokens).unwrap();
-					self.match_token(tokens, Type::Comma).unwrap();
 					let rn = self.match_reg(tokens).unwrap();
-					println!("comparing {} into {}", dbg_reg(rm), dbg_reg(rn));
+					trace!("comparing 0 < {}", dbg_reg(rn));
+					self.push(Asm::CmpPL(rn));
 				}
 				Type::CmpPz => {
-					let rm = self.match_reg(tokens).unwrap();
-					self.match_token(tokens, Type::Comma).unwrap();
 					let rn = self.match_reg(tokens).unwrap();
-					println!("comparing {} into {}", dbg_reg(rm), dbg_reg(rn));
+					trace!("comparing 0 <= {}", dbg_reg(rn));
+					self.push(Asm::CmpPZ(rn));
 				}
 
 				Type::Add => {
@@ -571,28 +590,34 @@ impl Parser {
 							self.imm(tokens, &format!("adding negative"), token);
 							self.match_token(tokens, Type::Comma).unwrap();
 							let rn = self.match_reg(tokens).unwrap();
-							println!("- into {}", dbg_reg(rn));
+							trace!("- into {}", dbg_reg(rn));
 						} else {
 							match self.next(tokens).tt {
 								Type::Bin(n) => {
 									self.match_token(tokens, Type::Comma).unwrap();
 									let rn = self.match_reg(tokens).unwrap();
-									println!("adding {} into {}", dbg_bin(&n), dbg_reg(rn));
+									trace!("adding {} into {}", dbg_bin(&n), dbg_reg(rn));
+									let n = i8::from_str_radix(&n, 2).unwrap();
+									self.push(Asm::AddImm(n, rn));
 								}
 								Type::Dec(n) => {
 									self.match_token(tokens, Type::Comma).unwrap();
 									let rn = self.match_reg(tokens).unwrap();
-									println!("adding {} into {}", dbg_dec(&n), dbg_reg(rn));
+									trace!("adding {} into {}", dbg_dec(&n), dbg_reg(rn));
+									let n = i8::from_str_radix(&n, 10).unwrap();
+									self.push(Asm::AddImm(n, rn));
 								}
 								Type::Hex(n) => {
 									self.match_token(tokens, Type::Comma).unwrap();
 									let rn = self.match_reg(tokens).unwrap();
-									println!("adding {} into {}", dbg_hex(&n), dbg_reg(rn));
+									trace!("adding {} into {}", dbg_hex(&n), dbg_reg(rn));
+									let n = i8::from_str_radix(&n, 16).unwrap();
+									self.push(Asm::AddImm(n, rn));
 								}
 								Type::Char(c) => {
 									self.match_token(tokens, Type::Comma).unwrap();
 									let rn = self.match_reg(tokens).unwrap();
-									println!("adding char '{c}' into {}", dbg_reg(rn));
+									trace!("adding char '{c}' into {}", dbg_reg(rn));
 								}
 								_ => {
 									self.unexpected_next(tokens, token);
@@ -603,7 +628,7 @@ impl Parser {
 						let rm = self.match_reg(tokens).unwrap();
 						self.match_token(tokens, Type::Comma).unwrap();
 						let rn = self.match_reg(tokens).unwrap();
-						println!("adding {} into {}", dbg_reg(rm), dbg_reg(rn));
+						trace!("adding {} into {}", dbg_reg(rm), dbg_reg(rn));
 					}
 				}
 
@@ -613,14 +638,14 @@ impl Parser {
 					let rm = self.match_reg(tokens).unwrap();
 					self.match_token(tokens, Type::Comma).unwrap();
 					let rn = self.match_reg(tokens).unwrap();
-					println!("multiplying {} into {}", dbg_reg(rm), dbg_reg(rn));
+					trace!("multiplying {} into {}", dbg_reg(rm), dbg_reg(rn));
 				}
 
 				Type::MulU => {
 					let rm = self.match_reg(tokens).unwrap();
 					self.match_token(tokens, Type::Comma).unwrap();
 					let rn = self.match_reg(tokens).unwrap();
-					println!("multiplying {} into {}", dbg_reg(rm), dbg_reg(rn));
+					trace!("multiplying {} into {}", dbg_reg(rm), dbg_reg(rn));
 				}
 
 				Type::LdC => {
@@ -631,7 +656,7 @@ impl Parser {
 					self.match_token(tokens, Type::Plus).unwrap();
 					self.match_token(tokens, Type::Comma).unwrap();
 					let cr = self.creg(tokens);
-					println!("loading value in {} into {}", dbg_addr_inc(r), dbg_creg(cr));
+					trace!("loading value in {} into {}", dbg_addr_inc(r), dbg_creg(cr));
 				}
 
 				Type::LdS => {
@@ -642,7 +667,7 @@ impl Parser {
 					self.match_token(tokens, Type::Plus).unwrap();
 					self.match_token(tokens, Type::Comma).unwrap();
 					let sr = self.sreg(tokens);
-					println!("loading value in {} into {}", dbg_addr_inc(r), dbg_sreg(sr));
+					trace!("loading value in {} into {}", dbg_addr_inc(r), dbg_sreg(sr));
 				}
 
 				Type::StC => {
@@ -653,12 +678,12 @@ impl Parser {
 						self.match_token(tokens, Type::At).unwrap();
 						self.match_token(tokens, Type::Dash).unwrap();
 						let r = self.match_reg(tokens).unwrap();
-						println!("storing {} into {}", dbg_creg(cr), dbg_addr_dec(r));
+						trace!("storing {} into {}", dbg_creg(cr), dbg_addr_dec(r));
 					} else {
 						let cr = self.creg(tokens);
 						self.match_token(tokens, Type::Comma).unwrap();
 						let r = self.match_reg(tokens).unwrap();
-						println!("storing {} into {}", dbg_creg(cr), dbg_reg(r));
+						trace!("storing {} into {}", dbg_creg(cr), dbg_reg(r));
 					}
 				}
 
@@ -670,12 +695,12 @@ impl Parser {
 						self.match_token(tokens, Type::At).unwrap();
 						self.match_token(tokens, Type::Dash).unwrap();
 						let rn = self.match_reg(tokens).unwrap();
-						println!("storing {} into {}", dbg_sreg(sr), dbg_addr_dec(rn));
+						trace!("storing {} into {}", dbg_sreg(sr), dbg_addr_dec(rn));
 					} else {
 						let sr = self.sreg(tokens);
 						self.match_token(tokens, Type::Comma).unwrap();
 						let rn = self.match_reg(tokens).unwrap();
-						println!("storing {} into {}", dbg_sreg(sr), dbg_reg(rn));
+						trace!("storing {} into {}", dbg_sreg(sr), dbg_reg(rn));
 					}
 				}
 
@@ -693,9 +718,9 @@ impl Parser {
 											let rn = self.match_reg(tokens).unwrap();
 											let n = i64::from_str_radix(&s, 2).unwrap();
 											if i8_sized(n) {
-												println!("moving {} into {}", dbg_bin(&s), dbg_reg(rn));
+												trace!("moving {} into {}", dbg_bin(&s), dbg_reg(rn));
 											} else {
-												println!("waiting for LTORG to place value {n} for MOV into {}",
+												trace!("waiting for LTORG to place value {n} for MOV into {}",
 													dbg_reg(rn));
 											}
 										}
@@ -704,9 +729,9 @@ impl Parser {
 											let rn = self.match_reg(tokens).unwrap();
 											let n = i64::from_str_radix(&s, 10).unwrap();
 											if i8_sized(n) {
-												println!("moving {} into {}", dbg_dec(&s), dbg_reg(rn));
+												trace!("moving {} into {}", dbg_dec(&s), dbg_reg(rn));
 											} else {
-												println!("waiting for LTORG to place value {n} for MOV into {}",
+												trace!("waiting for LTORG to place value {n} for MOV into {}",
 													dbg_reg(rn));
 											}
 										}
@@ -715,9 +740,9 @@ impl Parser {
 											let rn = self.match_reg(tokens).unwrap();
 											let n = i64::from_str_radix(&s, 16).unwrap();
 											if i8_sized(n) {
-												println!("moving {} into {}", dbg_hex(&s), dbg_reg(rn));
+												trace!("moving {} into {}", dbg_hex(&s), dbg_reg(rn));
 											} else {
-												println!("waiting for LTORG to place value {n} for MOV into {}",
+												trace!("waiting for LTORG to place value {n} for MOV into {}",
 													dbg_reg(rn));
 											}
 										}
@@ -731,9 +756,9 @@ impl Parser {
 									let rn = self.match_reg(tokens).unwrap();
 									let n = i64::from_str_radix(&s, 2).unwrap();
 									if i8_sized(n) {
-										println!("moving {} into {}", dbg_bin(&s), dbg_reg(rn));
+										trace!("moving {} into {}", dbg_bin(&s), dbg_reg(rn));
 									} else {
-										println!("waiting for LTORG to place value {n} for MOV into {}", dbg_reg(rn));
+										trace!("waiting for LTORG to place value {n} for MOV into {}", dbg_reg(rn));
 									}
 								}
 								Type::Dec(s) => {
@@ -741,9 +766,9 @@ impl Parser {
 									let rn = self.match_reg(tokens).unwrap();
 									let n = i64::from_str_radix(&s, 10).unwrap();
 									if i8_sized(n) {
-										println!("moving {} into {}", dbg_dec(&s), dbg_reg(rn));
+										trace!("moving {} into {}", dbg_dec(&s), dbg_reg(rn));
 									} else {
-										println!("waiting for LTORG to place value {n} for MOV into {}", dbg_reg(rn));
+										trace!("waiting for LTORG to place value {n} for MOV into {}", dbg_reg(rn));
 									}
 								}
 								Type::Hex(s) => {
@@ -751,20 +776,20 @@ impl Parser {
 									let rn = self.match_reg(tokens).unwrap();
 									let n = i64::from_str_radix(&s, 16).unwrap();
 									if i8_sized(n) {
-										println!("moving {} into {}", dbg_hex(&s), dbg_reg(rn));
+										trace!("moving {} into {}", dbg_hex(&s), dbg_reg(rn));
 									} else {
-										println!("waiting for LTORG to place value {n} for MOV into {}", dbg_reg(rn));
+										trace!("waiting for LTORG to place value {n} for MOV into {}", dbg_reg(rn));
 									}
 								}
 								Type::Label(s) => {
 									self.match_token(tokens, Type::Comma).unwrap();
 									let rn = self.match_reg(tokens).unwrap();
-									println!("moving address of label '{s}' into {}", dbg_reg(rn));
+									trace!("moving address of label '{s}' into {}", dbg_reg(rn));
 								}
 								Type::Char(c) => {
 									self.match_token(tokens, Type::Comma).unwrap();
 									let rn = self.match_reg(tokens).unwrap();
-									println!("moving char '{c}' into {}", dbg_reg(rn));
+									trace!("moving char '{c}' into {}", dbg_reg(rn));
 								}
 								_ => {
 									self.unexpected_next(tokens, token);
@@ -774,7 +799,7 @@ impl Parser {
 						Type::Reg(rm) => {
 							self.match_token(tokens, Type::Comma).unwrap();
 							let rn = self.match_reg(tokens).unwrap();
-							println!("moving {} into {}", dbg_reg(rm), dbg_reg(rn));
+							trace!("moving {} into {}", dbg_reg(rm), dbg_reg(rn));
 						}
 						Type::Dot => {
 							match self.next(tokens).tt {
@@ -785,13 +810,13 @@ impl Parser {
 											self.match_token(tokens, Type::Plus).unwrap();
 											self.match_token(tokens, Type::Comma).unwrap();
 											let rn = self.match_reg(tokens).unwrap();
-											println!("moving {} into {}", dbg_reg(rm), dbg_addr_inc(rn));
+											trace!("moving {} into {}", dbg_reg(rm), dbg_addr_inc(rn));
 										}
 										Type::Reg(rm) => {
 											self.match_token(tokens, Type::Comma).unwrap();
 											self.match_token(tokens, Type::At).unwrap();
 											let rn = self.match_reg(tokens).unwrap();
-											println!("moving {} into {}", dbg_reg(rm), dbg_addr(rn));
+											trace!("moving {} into {}", dbg_reg(rm), dbg_addr(rn));
 										}
 										_ => {
 											self.unexpected_next(tokens, token);
@@ -805,11 +830,11 @@ impl Parser {
 											if self.match_token(tokens, Type::Plus).is_ok() {
 												self.match_token(tokens, Type::Comma).unwrap();
 												let rn = self.match_reg(tokens).unwrap();
-												println!("moving {} into {}", dbg_reg(rm), dbg_addr_inc(rn));
+												trace!("moving {} into {}", dbg_reg(rm), dbg_addr_inc(rn));
 											} else {
 												self.match_token(tokens, Type::Comma).unwrap();
 												let rn = self.match_reg(tokens).unwrap();
-												println!("moving {} into {}", dbg_reg(rm), dbg_addr(rn));
+												trace!("moving {} into {}", dbg_reg(rm), dbg_addr(rn));
 											}
 										}
 										Type::Label(s) => {
@@ -817,14 +842,14 @@ impl Parser {
 											if self.match_token(tokens, Type::At).is_ok() {
 												if self.match_token(tokens, Type::Dash).is_ok() {
 													let rn = self.match_reg(tokens).unwrap();
-													println!("moving value at label '{s}' into {}", dbg_addr_dec(rn));
+													trace!("moving value at label '{s}' into {}", dbg_addr_dec(rn));
 												} else {
 													let rn = self.match_reg(tokens).unwrap();
-													println!("moving value at label '{s}' into {}", dbg_addr(rn));
+													trace!("moving value at label '{s}' into {}", dbg_addr(rn));
 												}
 											} else {
 												let rn = self.match_reg(tokens).unwrap();
-												println!("moving value at label '{s}' into {}", dbg_reg(rn));
+												trace!("moving value at label '{s}' into {}", dbg_reg(rn));
 											}
 										}
 										Type::Reg(rm) => {
@@ -832,10 +857,10 @@ impl Parser {
 											self.match_token(tokens, Type::At).unwrap();
 											if self.match_token(tokens, Type::Dash).is_ok() {
 												let rn = self.match_reg(tokens).unwrap();
-												println!("moving {} into {}", dbg_reg(rm), dbg_addr_dec(rn));
+												trace!("moving {} into {}", dbg_reg(rm), dbg_addr_dec(rn));
 											} else {
 												let rn = self.match_reg(tokens).unwrap();
-												println!("moving {} into {}", dbg_reg(rm), dbg_addr(rn));
+												trace!("moving {} into {}", dbg_reg(rm), dbg_addr(rn));
 											}
 										}
 										_ => {
@@ -849,12 +874,12 @@ impl Parser {
 											let s = self.match_label(tokens).unwrap();
 											self.match_token(tokens, Type::Comma).unwrap();
 											let r = self.match_reg(tokens).unwrap();
-											println!("moving address of label '{s}' into {}", dbg_reg(r));
+											trace!("moving address of label '{s}' into {}", dbg_reg(r));
 										}
 										Type::Label(s) => {
 											self.match_token(tokens, Type::Comma).unwrap();
 											let r = self.match_reg(tokens).unwrap();
-											println!("moving value at label '{s}' into {}", dbg_reg(r));
+											trace!("moving value at label '{s}' into {}", dbg_reg(r));
 										}
 										Type::At => {
 											match self.next(tokens).tt {
@@ -865,18 +890,18 @@ impl Parser {
 													self.match_token(tokens, Type::CParen).unwrap();
 													self.match_token(tokens, Type::Comma).unwrap();
 													let rn = self.match_reg(tokens).unwrap();
-													println!("moving value in {} with offset from label '{s}' into {}",
+													trace!("moving value in {} with offset from label '{s}' into {}",
 														dbg_addr(rm), dbg_reg(rn));
 												}
 												Type::Reg(rm) => {
 													if self.match_token(tokens, Type::Plus).is_ok() {
 														self.match_token(tokens, Type::Comma).unwrap();
 														let rn = self.match_reg(tokens).unwrap();
-														println!("moving value in {} into {}", dbg_addr_inc(rm), dbg_reg(rn));
+														trace!("moving value in {} into {}", dbg_addr_inc(rm), dbg_reg(rn));
 													} else {
 														self.match_token(tokens, Type::Comma).unwrap();
 														let rn = self.match_reg(tokens).unwrap();
-														println!("moving value in {} into {}", dbg_addr(rm), dbg_reg(rn));
+														trace!("moving value in {} into {}", dbg_addr(rm), dbg_reg(rn));
 													}
 												}
 												_ => {
@@ -890,14 +915,14 @@ impl Parser {
 											match self.next(tokens).tt {
 												Type::Dash => {
 													let rn = self.match_reg(tokens).unwrap();
-													println!("moving {} into {}", dbg_reg(rm), dbg_addr_dec(rn));
+													trace!("moving {} into {}", dbg_reg(rm), dbg_addr_dec(rn));
 												}
 												Type::OParen => {
 													let s = self.match_label(tokens).unwrap();
 													self.match_token(tokens, Type::Comma).unwrap();
 													let rn = self.match_reg(tokens).unwrap();
 													self.match_token(tokens, Type::CParen).unwrap();
-													println!("moving {} into {} with offset from label '{s}'",
+													trace!("moving {} into {} with offset from label '{s}'",
 														dbg_reg(rm), dbg_addr(rn));
 												}
 												_ => {
@@ -959,13 +984,13 @@ impl Parser {
 	fn imm(&mut self, tokens: &[Token], msg: &str, token: &Token) {
 		match self.next(tokens).tt {
 			Type::Bin(n) => {
-				println!("{msg} {}", dbg_bin(&n));
+				trace!("{msg} {}", dbg_bin(&n));
 			}
 			Type::Dec(n) => {
-				println!("{msg} {}", dbg_dec(&n));
+				trace!("{msg} {}", dbg_dec(&n));
 			}
 			Type::Hex(n) => {
-				println!("{msg} {}", dbg_hex(&n));
+				trace!("{msg} {}", dbg_hex(&n));
 			}
 			_ => {
 				self.unexpected_next(tokens, token);
@@ -978,7 +1003,7 @@ impl Parser {
 		self.imm(tokens, msg, token);
 		self.match_token(tokens, Type::Comma).unwrap();
 		let r = self.match_reg(tokens).unwrap();
-		println!("{msg} {}", dbg_reg(r));
+		trace!("{msg} {}", dbg_reg(r));
 	}
 }
 

@@ -11,7 +11,7 @@ mod lexer;
 mod tokens;
 
 use parser::parser;
-use output::output;
+use asm::output;
 
 fn main() {
 	let mut args = env::args();
@@ -29,18 +29,19 @@ fn main() {
 
 	let source = fs::read_to_string(file_name)
 		.expect("unable to read source file");
-	let ins = if use_parser2 {
+	if use_parser2 {
 		let tokens = lexer::eval(&source)
 			.expect("unable to lex source (v2)");
 		let parser = p2::eval(&tokens, file_path.to_path_buf())
 			.expect("unable to parse source (v2)");
-		parser.output()
+		let sections = parser.output();
+		println!("{sections:X?}");
 	} else {
-		parser(&source)
-			.expect("unable to parse source")
-	};
-	println!("{ins:#?}");
-	let out = output(&ins);
-	println!("{out:02X?}");
+		let ins = parser(&source)
+			.expect("unable to parse source");
+		println!("{ins:#?}");
+		let out = output(&ins);
+		println!("{out:02X?}");
+	}
 }
 

@@ -13,6 +13,13 @@ impl TryFrom<i8> for I4 {
 	}
 }
 
+impl std::ops::BitOr<I4> for u8 {
+	type Output = u8;
+	fn bitor(self, rhs: I4) -> Self::Output {
+		self | (rhs.0 & 0xF) as u8
+	}
+}
+
 impl std::ops::BitOr<I4> for u16 {
 	type Output = u16;
 	fn bitor(self, rhs: I4) -> Self::Output {

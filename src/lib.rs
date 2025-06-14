@@ -5,5 +5,5 @@ mod parser;
 mod output;
 
 pub use parser::parser;
-pub use output::output;
+pub use asm::output;
 
