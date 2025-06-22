@@ -12,6 +12,7 @@ pub fn eval(tokens: &[Token], _source_root: PathBuf) -> Vec<Asm> {
 		data: Parser::new(tokens),
 	}
 		.process();
+	//eprintln!("");
 	output
 		.output()
 }
@@ -33,6 +34,8 @@ impl<'a> Preprocessor<'a> {
 	fn process(mut self) -> Output<'a> {
 		let mut labels = HashMap::new();
 		let mut values = HashMap::new();
+		let mut waiting_words = 0;
+		let mut waiting_longs = 0;
 		let mut address = 0;
 
 		while let Some(token) = self.data.next() {
@@ -76,7 +79,10 @@ impl<'a> Preprocessor<'a> {
 				}
 
 				TT::LtOrg => {
-					debug!("found literal organize directive");
+					address += waiting_words * 2;
+					address += waiting_longs * 4;
+					waiting_words = 0;
+					waiting_longs = 0;
 				}
 
 				TT::Label(ref name) => {
@@ -109,11 +115,14 @@ impl<'a> Preprocessor<'a> {
 				TT::Const => {
 					self.data.token(TT::Dot).unwrap();
 					if self.data.token(TT::Byte).is_some() {
-						if let Some(_) = self.data.immediate() {
+						if self.data.immediate().is_some() {
 							address += 1;
 						} else if let Some(name) = self.data.string() {
 							address += name.len() as u32;
-							while let Some(_) = self.data.token(TT::Comma).and_then(|_| self.data.immediate()) {
+							while self.data.token(TT::Comma)
+								.and_then(|_| self.data.immediate())
+								.is_some()
+							{
 								address += 1;
 							}
 						} else {
@@ -125,9 +134,9 @@ impl<'a> Preprocessor<'a> {
 						self.data.immediate().unwrap();
 						address += 2;
 					} else if self.data.token(TT::Long).is_some() {
-						if let Some(_) = self.data.immediate() {
+						if self.data.immediate().is_some() {
 							address += 4;
-						} else if let Some(_) = self.data.label() {
+						} else if self.data.label().is_some() {
 							address += 4;
 						} else {
 							let token = &self.data.tokens[self.data.index];
@@ -139,8 +148,29 @@ impl<'a> Preprocessor<'a> {
 					}
 				}
 
+				TT::Mov |
+				TT::Add |
+				TT::CmpEq |
+				TT::And |
+				TT::Or |
+				TT::Tst |
+				TT::Xor => {
+					if self.data.token(TT::Hash).is_some() {
+						let imm = self.data.immediate().unwrap();
+						address += 2;
+						if i8_sized(imm) {
+							// regular instruction
+						} else if i16_sized(imm) {
+							waiting_words += 1;
+						} else if i32_sized(imm) {
+							waiting_longs += 1;
+						} else {
+							todo!("immediate value too large: found({imm}), limit({}..={})", i32::MIN, i32::MAX);
+						}
+					}
+				}
+
 				_ => {
-					trace!("{token:?}");
 					address += 2;
 				}
 			}
@@ -171,7 +201,7 @@ impl Output<'_> {
 				TT::Mov => {}
 
 				TT::MovA => {
-					let d = self.data.disp_pc().unwrap();
+					let d = self.data.disp_pc(&self.values).unwrap();
 					self.data.token(TT::Comma).unwrap();
 					self.data.r0().unwrap();
 					let imm = d / 4;
@@ -614,11 +644,15 @@ impl<'a> Parser<'a> {
 			})
 	}
 
-	fn disp_pc(&mut self) -> Option<u16> {
+	fn disp_pc(&mut self, values: &HashMap<Box<str>, i64>) -> Option<u16> {
 		let index = self.index;
 		self.token(TT::At)
 			.and_then(|_| self.token(TT::OParen))
 			.and_then(|_| self.immediate())
+			.or_else(|| {
+				let label = self.label()?;
+				values.get(&label).copied()
+			})
 			.filter(|_| self.token(TT::Comma).is_some())
 			.filter(|_| self.token(TT::Pc).is_some())
 			.filter(|_| self.token(TT::CParen).is_some())
@@ -651,5 +685,17 @@ impl<'a> Parser<'a> {
 			}
 		}
 	}
+}
+
+fn i8_sized(imm: i64) -> bool {
+	(i8::MIN as i64..=i8::MAX as i64).contains(&imm)
+}
+
+fn i16_sized(imm: i64) -> bool {
+	(i16::MIN as i64..=i16::MAX as i64).contains(&imm)
+}
+
+fn i32_sized(imm: i64) -> bool {
+	(i32::MIN as i64..=i32::MAX as i64).contains(&imm)
 }
 

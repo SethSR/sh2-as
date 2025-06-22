@@ -5,7 +5,9 @@ mod asm;
 mod i4;
 mod output;
 mod parser;
-mod p2;
+mod a2;
+//mod p2;
+mod p3;
 
 mod lexer;
 mod tokens;
@@ -14,6 +16,11 @@ use parser::parser;
 use asm::output;
 
 fn main() {
+	tracing_subscriber::fmt()
+		.compact()
+		.without_time()
+		.with_max_level(tracing::Level::TRACE)
+		.init();
 	let mut args = env::args();
 	args.next();
 
@@ -32,10 +39,10 @@ fn main() {
 	if use_parser2 {
 		let tokens = lexer::eval(&source)
 			.expect("unable to lex source (v2)");
-		let parser = p2::eval(&tokens, file_path.to_path_buf())
-			.expect("unable to parse source (v2)");
-		let sections = parser.output();
-		println!("{sections:X?}");
+		let out = p3::eval(&tokens, file_path.to_path_buf())
+			//.expect("unable to parse source (v2)")
+			;
+		todo!("{out:?}");
 	} else {
 		let ins = parser(&source)
 			.expect("unable to parse source");

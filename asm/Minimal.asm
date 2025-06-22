@@ -12,7 +12,7 @@
 	nop
 
 	mov #64,r2				;Bytecount
-	mov #AdrHelloWorld,r1	;SourceAddr
+	mov.l #AdrHelloWorld,r1	;SourceAddr
 
 	bsr Monitor				;Show Registers
 	nop
