@@ -1,6 +1,6 @@
 
 use std::collections::HashMap;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use tracing::{instrument, debug, error, trace};
 
@@ -51,7 +51,14 @@ impl<'a> Parser<'a> {
 				}
 
 				TT::Include => {
-					let name = self.data.string().unwrap();
+					let name = self.string().unwrap();
+					let path = Path::join(&self.source_root, name.to_string());
+					let file = std::fs::read_to_string(path).unwrap();
+					let tokens = crate::lexer::eval(&file).unwrap();
+					let mut parser = Parser::new(&tokens, self.source_root.clone());
+					parser.process();
+					self.labels.extend(parser.labels);
+					self.values.extend(parser.values);
 					debug!("found assembly include: '{name}'");
 				}
 
