@@ -64,6 +64,11 @@ impl<'a> Parser<'a> {
 
 				TT::BInclude => {
 					let name = self.string().unwrap();
+					let path = Path::join(&self.source_root, name.to_string());
+					// TODO - srenshaw - It's pretty wasteful to load the whole file just for the number of
+					// bytes. We should probably store this for the output stage, or something similar.
+					let file = std::fs::read(path).unwrap();
+					address += file.len() as u32;
 					debug!("found binary include: '{name}'");
 				}
 
