@@ -75,17 +75,12 @@ impl<'a> Parser<'a> {
 				TT::Align => {
 					let imm = self.immediate().unwrap();
 					if imm == 2 {
-						if address & 1 != 0 {
-							address += 1;
-						}
+						// If we're offset by 1, add 1 to realign.
+						address += address & 1;
 					} else if imm == 4 {
-						match address & 3 {
-							0 => {}
-							1 => address += 3,
-							2 => address += 2,
-							3 => address += 1,
-							_ => unreachable!(),
-						}
+						// If we're offset, use the inverted offset to realign, while ensuring we don't add
+						// anything if we're already aligned.
+						address += (4 - (address & 3)) & 3;
 					} else {
 						todo!("align must be followed by '2' or '4'");
 					}
