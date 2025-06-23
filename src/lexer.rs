@@ -49,6 +49,7 @@ impl Iterator for Lexer<'_> {
 				'/' => break output(Type::Slash),
 				'-' => break output(Type::Dash),
 				'#' => break output(Type::Hash),
+				'\n' => break output(Type::NewLine),
 
 				';' => { // Comment
 					let mut inner_chars = self.rest.char_indices();
@@ -372,7 +373,12 @@ mod tokenizes {
 
 	#[test]
 	fn white_spaces_as_empty_input() -> miette::Result<()> {
-		lex_test("  \n\t  ", &[])
+		lex_test("  \t  ", &[])
+	}
+
+	#[test]
+	fn white_space_with_newline_as_newline() -> miette::Result<()> {
+		lex_test("  \n\t  ", &[Type::NewLine])
 	}
 
 	#[test]
