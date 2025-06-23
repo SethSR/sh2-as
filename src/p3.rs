@@ -147,9 +147,39 @@ impl<'a> Parser<'a> {
 					}
 				}
 
+				TT::Space => {
+					self.token(TT::Dot).unwrap();
+					if self.token(TT::Byte).is_some() {
+						let imm = self.immediate().unwrap();
+						address += imm as u32;
+					} else if self.token(TT::Word).is_some() {
+						let imm = self.immediate().unwrap();
+						address += 2 * imm as u32;
+					} else if self.token(TT::Long).is_some() {
+						let imm = self.immediate().unwrap();
+						address += 4 * imm as u32;
+					}
+				}
+
 				TT::Mov |
 				TT::Add |
-				TT::CmpEq |
+				TT::CmpEq => {
+					if self.token(TT::Hash).is_some() {
+						address += 2;
+						if let Some(imm) = self.neg_immediate() {
+							if i8_sized(imm) {
+								// regular instruction
+							} else if i16_sized(imm) {
+								waiting_words += 1;
+							} else if i32_sized(imm) {
+								waiting_longs += 1;
+							} else {
+								todo!("immediate value too large: found({imm}), limit({}..={})", i32::MIN, i32::MAX);
+							}
+						}
+					}
+				}
+
 				TT::And |
 				TT::Or |
 				TT::Tst |
@@ -168,6 +198,18 @@ impl<'a> Parser<'a> {
 						}
 					}
 				}
+
+				TT::NewLine | TT::Eof |
+				TT::String(_) | TT::Char(_) |
+				TT::Bin(_) | TT::Dec(_) | TT::Hex(_) |
+				TT::Reg(_) | TT::Pc |
+				TT::Gbr | TT::Vbr | TT::Sr |
+				TT::Macl | TT::Mach | TT::Pr |
+				TT::Plus | TT::Dash | TT::Star | TT::Slash |
+				TT::At | TT::OParen | TT::CParen |
+				TT::Colon | TT::Dot | TT::Comma |
+				TT::Eq | TT::Hash |
+				TT::Byte | TT::Word | TT::Long => {}
 
 				_ => {
 					address += 2;
@@ -694,5 +736,32 @@ fn i16_sized(imm: i64) -> bool {
 
 fn i32_sized(imm: i64) -> bool {
 	(i32::MIN as i64..=i32::MAX as i64).contains(&imm)
+}
+
+#[test]
+fn no_output_from_empty_source() {
+	let input = "";
+	let tokens = crate::lexer::eval(input).unwrap();
+	let mut parser = Parser::new(&tokens, "".into());
+	parser.process();
+	parser.output();
+	assert!(parser.out.is_empty());
+}
+
+#[test]
+fn preprocessed_labels_have_the_correct_addresses() {
+	let input = "
+start:
+	mov #3,r0
+	cmp/eq #0,r0
+	bt start
+end:
+	add r0,r1
+	";
+	let tokens = crate::lexer::eval(input).unwrap();
+	let mut parser = Parser::new(&tokens, "".into());
+	parser.process();
+	assert_eq!(parser.labels["start"], 0, "'start' label should start at address 0");
+	assert_eq!(parser.labels["end"], 6, "'end' label should start at address 6");
 }
 
