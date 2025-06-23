@@ -7,41 +7,42 @@ use tracing::{instrument, debug, error, trace};
 use crate::tokens::{Token, Type as TT};
 use crate::a2::{Asm, Type as AT};
 
-pub fn eval(tokens: &[Token], _source_root: PathBuf) -> Vec<Asm> {
-	let output = Preprocessor {
-		data: Parser::new(tokens),
-	}
-		.process();
+pub fn eval(tokens: &[Token], source_root: PathBuf) -> Vec<Asm> {
+	let mut parser = Parser::new(tokens, source_root);
+	parser.process();
 	//eprintln!("");
-	output
-		.output()
+	parser.output();
+	parser.out
 }
 
 #[derive(Debug)]
 pub struct Parser<'a> {
+	source_root: PathBuf,
+
 	index: usize,
 	tokens: &'a [Token],
+
+	// Preprocessor
+	labels: HashMap<Box<str>, u32>,
+	values: HashMap<Box<str>, i64>,
+
+	// Output
+	out: Vec<Asm>,
 }
 
-struct Preprocessor<'a> {
-	data: Parser<'a>,
-}
-
-impl<'a> Preprocessor<'a> {
+impl<'a> Parser<'a> {
 	/// Record labels, record and expand macros, expand included ASM and binary files, and track
 	/// output addresses.
 	#[instrument(skip_all)]
-	fn process(mut self) -> Output<'a> {
-		let mut labels = HashMap::new();
-		let mut values = HashMap::new();
+	fn process(&mut self) {
 		let mut waiting_words = 0;
 		let mut waiting_longs = 0;
 		let mut address = 0;
 
-		while let Some(token) = self.data.next() {
+		while let Some(token) = self.next() {
 			match token.tt {
 				TT::Org => {
-					let imm = self.data.immediate().unwrap();
+					let imm = self.immediate().unwrap();
 					if imm > u32::MAX as i64 {
 						todo!("address value too large: found({imm}), limit(0..={})", u32::MAX)
 					}
@@ -55,12 +56,12 @@ impl<'a> Preprocessor<'a> {
 				}
 
 				TT::BInclude => {
-					let name = self.data.string().unwrap();
+					let name = self.string().unwrap();
 					debug!("found binary include: '{name}'");
 				}
 
 				TT::Align => {
-					let imm = self.data.immediate().unwrap();
+					let imm = self.immediate().unwrap();
 					if imm == 2 {
 						if address & 1 != 0 {
 							address += 1;
@@ -87,63 +88,61 @@ impl<'a> Preprocessor<'a> {
 
 				TT::Label(ref name) => {
 					let name = name.clone();
-					if self.data.token(TT::Colon).is_some() {
-						if labels.contains_key(&name) {
+					if self.token(TT::Colon).is_some() {
+						if self.labels.contains_key(&name) {
 							todo!("duplicate label: {name}");
 						} else {
 							trace!("found label: '{name}'");
-							labels.insert(name.clone(), address);
+							self.labels.insert(name.clone(), address);
 						}
-					} else if self.data.token(TT::Eq).is_some() {
-						let value = self.data.immediate().unwrap();
-						if values.contains_key(&name) {
+					} else if self.token(TT::Eq).is_some() {
+						let value = self.immediate().unwrap();
+						if self.values.contains_key(&name) {
 							todo!("duplicate value: {name} = {value}");
 						} else {
 							trace!("found value: {name} = {value}");
-							values.insert(name.clone(), value);
+							self.values.insert(name.clone(), value);
 						}
 					}
 				}
 
 				TT::MacroStart => {
-					debug!("found macro start: '{:?}'", self.data.next());
+					debug!("found macro start: '{:?}'", self.next());
 				}
 				TT::MacroEnd => {
 					debug!("found macro end");
 				}
 
 				TT::Const => {
-					self.data.token(TT::Dot).unwrap();
-					if self.data.token(TT::Byte).is_some() {
-						if self.data.immediate().is_some() {
+					self.token(TT::Dot).unwrap();
+					if self.token(TT::Byte).is_some() {
+						if self.neg_immediate().is_some() {
 							address += 1;
-						} else if let Some(name) = self.data.string() {
+						} else if let Some(name) = self.string() {
 							address += name.len() as u32;
-							while self.data.token(TT::Comma)
-								.and_then(|_| self.data.immediate())
+							while self.token(TT::Comma)
+								.and_then(|_| self.immediate())
 								.is_some()
 							{
 								address += 1;
 							}
 						} else {
-							let token = &self.data.tokens[self.data.index];
+							let token = &self.tokens[self.index];
 							todo!("unexpected token: {token:?}");
 						}
 						address += 1;
-					} else if self.data.token(TT::Word).is_some() {
-						self.data.immediate().unwrap();
+					} else if self.token(TT::Word).is_some() {
+						self.neg_immediate().unwrap();
 						address += 2;
-					} else if self.data.token(TT::Long).is_some() {
-						if self.data.immediate().is_some() {
-							address += 4;
-						} else if self.data.label().is_some() {
+					} else if self.token(TT::Long).is_some() {
+						if self.neg_immediate().is_some() || self.label().is_some() {
 							address += 4;
 						} else {
-							let token = &self.data.tokens[self.data.index];
+							let token = &self.tokens[self.index];
 							todo!("unexpected token: {token:?}");
 						}
 					} else {
-						let token = &self.data.tokens[self.data.index];
+						let token = &self.tokens[self.index];
 						todo!("unexpected token: {token:?}");
 					}
 				}
@@ -155,8 +154,8 @@ impl<'a> Preprocessor<'a> {
 				TT::Or |
 				TT::Tst |
 				TT::Xor => {
-					if self.data.token(TT::Hash).is_some() {
-						let imm = self.data.immediate().unwrap();
+					if self.token(TT::Hash).is_some() {
+						let imm = self.immediate().unwrap();
 						address += 2;
 						if i8_sized(imm) {
 							// regular instruction
@@ -175,134 +174,117 @@ impl<'a> Preprocessor<'a> {
 				}
 			}
 		}
-
-		Output {
-			data: Parser::new(self.data.tokens),
-			labels,
-			values,
-		}
 	}
-}
 
-#[derive(Debug)]
-struct Output<'a> {
-	data: Parser<'a>,
-	labels: HashMap<Box<str>, u32>,
-	values: HashMap<Box<str>, i64>,
-}
-
-impl Output<'_> {
 	#[instrument(skip_all)]
-	fn output(mut self) -> Vec<Asm> {
-		let mut out = vec![];
-
-		while let Some(token) = self.data.next() {
+	fn output(&mut self) {
+		while let Some(token) = self.next() {
 			match token.tt {
 				TT::Mov => {}
 
 				TT::MovA => {
-					let d = self.data.disp_pc(&self.values).unwrap();
-					self.data.token(TT::Comma).unwrap();
-					self.data.r0().unwrap();
+					let d = self.disp_pc().unwrap();
+					self.token(TT::Comma).unwrap();
+					self.r0().unwrap();
 					let imm = d / 4;
 					if !(u8::MIN as u16..=u8::MAX as u16).contains(&imm) {
 						todo!("displacement value too large: found({d}), limit(0..={})", u8::MAX as u16 * 4);
 					}
-					out.push(Asm::imm8(AT::MovA, imm as u8));
+					self.out.push(Asm::imm8(AT::MovA, imm as u8));
 				}
 
 				TT::MovT => {
-					let rn = self.data.reg().unwrap();
-					out.push(Asm::reg1(AT::MovT, rn));
+					let rn = self.reg().unwrap();
+					self.out.push(Asm::reg1(AT::MovT, rn));
 				}
 
 				TT::Swap => {}
 
 				TT::Xtrct => {
-					let (rm,rn) = self.data.reg2().unwrap();
-					out.push(Asm::reg2(AT::Xtrct, rn, rm));
+					let (rm,rn) = self.reg2().unwrap();
+					self.out.push(Asm::reg2(AT::Xtrct, rn, rm));
 				}
 
 				TT::Add => {}
 
 				TT::AddC => {
-					let (rm,rn) = self.data.reg2().unwrap();
-					out.push(Asm::reg2(AT::AddC, rn, rm));
+					let (rm,rn) = self.reg2().unwrap();
+					self.out.push(Asm::reg2(AT::AddC, rn, rm));
 				}
 
 				TT::AddV => {
-					let (rm,rn) = self.data.reg2().unwrap();
-					out.push(Asm::reg2(AT::AddV, rn, rm));
+					let (rm,rn) = self.reg2().unwrap();
+					self.out.push(Asm::reg2(AT::AddV, rn, rm));
 				}
 
 				TT::CmpEq => {}
 
 				TT::CmpHs => {
-					let (rm,rn) = self.data.reg2().unwrap();
-					out.push(Asm::reg2(AT::CmpHs, rn, rm));
+					let (rm,rn) = self.reg2().unwrap();
+					self.out.push(Asm::reg2(AT::CmpHs, rn, rm));
 				}
 
 				TT::CmpGe => {
-					let (rm,rn) = self.data.reg2().unwrap();
-					out.push(Asm::reg2(AT::CmpGe, rn, rm));
+					let (rm,rn) = self.reg2().unwrap();
+					self.out.push(Asm::reg2(AT::CmpGe, rn, rm));
 				}
 
 				TT::CmpHi => {
-					let (rm,rn) = self.data.reg2().unwrap();
-					out.push(Asm::reg2(AT::CmpHi, rn, rm));
+					let (rm,rn) = self.reg2().unwrap();
+					self.out.push(Asm::reg2(AT::CmpHi, rn, rm));
 				}
 
 				TT::CmpGt => {
-					let (rm,rn) = self.data.reg2().unwrap();
-					out.push(Asm::reg2(AT::CmpGt, rn, rm));
+					let (rm,rn) = self.reg2().unwrap();
+					self.out.push(Asm::reg2(AT::CmpGt, rn, rm));
 				}
 
 				TT::CmpPl => {
-					let (rm,rn) = self.data.reg2().unwrap();
-					out.push(Asm::reg2(AT::CmpPl, rn, rm));
+					let (rm,rn) = self.reg2().unwrap();
+					self.out.push(Asm::reg2(AT::CmpPl, rn, rm));
 				}
 
 				TT::CmpPz => {
-					let (rm,rn) = self.data.reg2().unwrap();
-					out.push(Asm::reg2(AT::CmpPz, rn, rm));
+					let (rm,rn) = self.reg2().unwrap();
+					self.out.push(Asm::reg2(AT::CmpPz, rn, rm));
 				}
 
 				TT::CmpStr => {
-					let (rm,rn) = self.data.reg2().unwrap();
-					out.push(Asm::reg2(AT::CmpStr, rn, rm));
+					let (rm,rn) = self.reg2().unwrap();
+					self.out.push(Asm::reg2(AT::CmpStr, rn, rm));
 				}
 
 				TT::Div1 => {
-					let (rm,rn) = self.data.reg2().unwrap();
-					out.push(Asm::reg2(AT::Div1, rn, rm));
+					let (rm,rn) = self.reg2().unwrap();
+					self.out.push(Asm::reg2(AT::Div1, rn, rm));
 				}
 
 				TT::Div0S => {
-					let (rm,rn) = self.data.reg2().unwrap();
-					out.push(Asm::reg2(AT::Div0S, rn, rm));
+					let (rm,rn) = self.reg2().unwrap();
+					self.out.push(Asm::reg2(AT::Div0S, rn, rm));
 				}
 
 				TT::Div0U => {
-					out.push(Asm::none(AT::Div0U));
+					self.out.push(Asm::none(AT::Div0U));
 				}
 
 				TT::DMulS => {
-					self.data.token(TT::Dot).unwrap();
-					self.data.token(TT::Long).unwrap();
-					let (rm,rn) = self.data.reg2().unwrap();
-					out.push(Asm::reg2(AT::DMulS, rn, rm));
+					self.token(TT::Dot).unwrap();
+					self.token(TT::Long).unwrap();
+					let (rm,rn) = self.reg2().unwrap();
+					self.out.push(Asm::reg2(AT::DMulS, rn, rm));
 				}
 
 				TT::DMulU => {
-					self.data.token(TT::Dot).unwrap();
-					self.data.token(TT::Long).unwrap();
-					let (rm,rn) = self.data.reg2().unwrap();
-					out.push(Asm::reg2(AT::DMulU, rn, rm));
+					self.token(TT::Dot).unwrap();
+					self.token(TT::Long).unwrap();
+					let (rm,rn) = self.reg2().unwrap();
+					self.out.push(Asm::reg2(AT::DMulU, rn, rm));
 				}
 
 				TT::Dt => {
-					let rn = self.data.reg().unwrap();
-					out.push(Asm::reg1(AT::Dt, rn));
+					let rn = self.reg().unwrap();
+					self.out.push(Asm::reg1(AT::Dt, rn));
 				}
 
 				TT::ExtS => {}
@@ -312,58 +294,58 @@ impl Output<'_> {
 				TT::Mac => {}
 
 				TT::Mul => {
-					let (rm,rn) = self.data.reg2().unwrap();
-					out.push(Asm::reg2(AT::Mul, rn, rm));
+					let (rm,rn) = self.reg2().unwrap();
+					self.out.push(Asm::reg2(AT::Mul, rn, rm));
 				}
 
 				TT::MulS => {
-					let (rm,rn) = self.data.reg2().unwrap();
-					out.push(Asm::reg2(AT::MulS, rn, rm));
+					let (rm,rn) = self.reg2().unwrap();
+					self.out.push(Asm::reg2(AT::MulS, rn, rm));
 				}
 
 				TT::MulU => {
-					let (rm,rn) = self.data.reg2().unwrap();
-					out.push(Asm::reg2(AT::MulU, rn, rm));
+					let (rm,rn) = self.reg2().unwrap();
+					self.out.push(Asm::reg2(AT::MulU, rn, rm));
 				}
 
 				TT::Neg => {
-					let (rm,rn) = self.data.reg2().unwrap();
-					out.push(Asm::reg2(AT::Neg, rn, rm));
+					let (rm,rn) = self.reg2().unwrap();
+					self.out.push(Asm::reg2(AT::Neg, rn, rm));
 				}
 
 				TT::NegC => {
-					let (rm,rn) = self.data.reg2().unwrap();
-					out.push(Asm::reg2(AT::NegC, rn, rm));
+					let (rm,rn) = self.reg2().unwrap();
+					self.out.push(Asm::reg2(AT::NegC, rn, rm));
 				}
 
 				TT::Sub => {
-					let (rm,rn) = self.data.reg2().unwrap();
-					out.push(Asm::reg2(AT::Sub, rn, rm));
+					let (rm,rn) = self.reg2().unwrap();
+					self.out.push(Asm::reg2(AT::Sub, rn, rm));
 				}
 
 				TT::SubC => {
-					let (rm,rn) = self.data.reg2().unwrap();
-					out.push(Asm::reg2(AT::SubC, rn, rm));
+					let (rm,rn) = self.reg2().unwrap();
+					self.out.push(Asm::reg2(AT::SubC, rn, rm));
 				}
 
 				TT::SubV => {
-					let (rm,rn) = self.data.reg2().unwrap();
-					out.push(Asm::reg2(AT::SubV, rn, rm));
+					let (rm,rn) = self.reg2().unwrap();
+					self.out.push(Asm::reg2(AT::SubV, rn, rm));
 				}
 
 				TT::And => {}
 
 				TT::Not => {
-					let (rm,rn) = self.data.reg2().unwrap();
-					out.push(Asm::reg2(AT::Not, rn, rm));
+					let (rm,rn) = self.reg2().unwrap();
+					self.out.push(Asm::reg2(AT::Not, rn, rm));
 				}
 
 				TT::Or => {}
 
 				TT::Tas => {
-					self.data.token(TT::At).unwrap();
-					let rn = self.data.reg().unwrap();
-					out.push(Asm::reg1(AT::Tas, rn));
+					self.token(TT::At).unwrap();
+					let rn = self.reg().unwrap();
+					self.out.push(Asm::reg1(AT::Tas, rn));
 				}
 
 				TT::Tst => {}
@@ -371,77 +353,77 @@ impl Output<'_> {
 				TT::Xor => {}
 
 				TT::RotL => {
-					let rn = self.data.reg().unwrap();
-					out.push(Asm::reg1(AT::RotL, rn));
+					let rn = self.reg().unwrap();
+					self.out.push(Asm::reg1(AT::RotL, rn));
 				}
 
 				TT::RotR => {
-					let rn = self.data.reg().unwrap();
-					out.push(Asm::reg1(AT::RotR, rn));
+					let rn = self.reg().unwrap();
+					self.out.push(Asm::reg1(AT::RotR, rn));
 				}
 
 				TT::RotCL => {
-					let rn = self.data.reg().unwrap();
-					out.push(Asm::reg1(AT::RotCL, rn));
+					let rn = self.reg().unwrap();
+					self.out.push(Asm::reg1(AT::RotCL, rn));
 				}
 
 				TT::RotCR => {
-					let rn = self.data.reg().unwrap();
-					out.push(Asm::reg1(AT::RotCR, rn));
+					let rn = self.reg().unwrap();
+					self.out.push(Asm::reg1(AT::RotCR, rn));
 				}
 
 				TT::ShAL => {
-					let rn = self.data.reg().unwrap();
-					out.push(Asm::reg1(AT::ShAL, rn));
+					let rn = self.reg().unwrap();
+					self.out.push(Asm::reg1(AT::ShAL, rn));
 				}
 
 				TT::ShAR => {
-					let rn = self.data.reg().unwrap();
-					out.push(Asm::reg1(AT::ShAR, rn));
+					let rn = self.reg().unwrap();
+					self.out.push(Asm::reg1(AT::ShAR, rn));
 				}
 
 				TT::ShLL => {
-					let rn = self.data.reg().unwrap();
-					out.push(Asm::reg1(AT::ShLL, rn));
+					let rn = self.reg().unwrap();
+					self.out.push(Asm::reg1(AT::ShLL, rn));
 				}
 
 				TT::ShLR => {
-					let rn = self.data.reg().unwrap();
-					out.push(Asm::reg1(AT::ShLR, rn));
+					let rn = self.reg().unwrap();
+					self.out.push(Asm::reg1(AT::ShLR, rn));
 				}
 
 				TT::ShLL2 => {
-					let rn = self.data.reg().unwrap();
-					out.push(Asm::reg1(AT::ShLL2, rn));
+					let rn = self.reg().unwrap();
+					self.out.push(Asm::reg1(AT::ShLL2, rn));
 				}
 
 				TT::ShLR2 => {
-					let rn = self.data.reg().unwrap();
-					out.push(Asm::reg1(AT::ShLR2, rn));
+					let rn = self.reg().unwrap();
+					self.out.push(Asm::reg1(AT::ShLR2, rn));
 				}
 
 				TT::ShLL8 => {
-					let rn = self.data.reg().unwrap();
-					out.push(Asm::reg1(AT::ShLL8, rn));
+					let rn = self.reg().unwrap();
+					self.out.push(Asm::reg1(AT::ShLL8, rn));
 				}
 
 				TT::ShLR8 => {
-					let rn = self.data.reg().unwrap();
-					out.push(Asm::reg1(AT::ShLR8, rn));
+					let rn = self.reg().unwrap();
+					self.out.push(Asm::reg1(AT::ShLR8, rn));
 				}
 
 				TT::ShLL16 => {
-					let rn = self.data.reg().unwrap();
-					out.push(Asm::reg1(AT::ShLL16, rn));
+					let rn = self.reg().unwrap();
+					self.out.push(Asm::reg1(AT::ShLL16, rn));
 				}
 
 				TT::ShLR16 => {
-					let rn = self.data.reg().unwrap();
-					out.push(Asm::reg1(AT::ShLR16, rn));
+					let rn = self.reg().unwrap();
+					self.out.push(Asm::reg1(AT::ShLR16, rn));
 				}
 
 				TT::Bf => {
-					let label = self.data.label().unwrap();
+					let label = self.label().unwrap();
 					if !self.labels.contains_key(&label) {
 						error!("unknown label: '{label}'");
 						continue;
@@ -450,7 +432,7 @@ impl Output<'_> {
 				}
 
 				TT::BfS => {
-					let label = self.data.label().unwrap();
+					let label = self.label().unwrap();
 					if !self.labels.contains_key(&label) {
 						error!("unknown label: '{label}'");
 						continue;
@@ -459,7 +441,7 @@ impl Output<'_> {
 				}
 
 				TT::Bt => {
-					let label = self.data.label().unwrap();
+					let label = self.label().unwrap();
 					if !self.labels.contains_key(&label) {
 						error!("unknown label: '{label}'");
 						continue;
@@ -468,7 +450,7 @@ impl Output<'_> {
 				}
 
 				TT::BtS => {
-					let label = self.data.label().unwrap();
+					let label = self.label().unwrap();
 					if !self.labels.contains_key(&label) {
 						error!("unknown label: '{label}'");
 						continue;
@@ -477,7 +459,7 @@ impl Output<'_> {
 				}
 
 				TT::Bra => {
-					let label = self.data.label().unwrap();
+					let label = self.label().unwrap();
 					if !self.labels.contains_key(&label) {
 						error!("unknown label: '{label}'");
 						continue;
@@ -486,12 +468,12 @@ impl Output<'_> {
 				}
 
 				TT::BraF => {
-					let rm = self.data.reg().unwrap();
-					out.push(Asm::reg1(AT::BraF, rm));
+					let rm = self.reg().unwrap();
+					self.out.push(Asm::reg1(AT::BraF, rm));
 				}
 
 				TT::Bsr => {
-					let label = self.data.label().unwrap();
+					let label = self.label().unwrap();
 					if !self.labels.contains_key(&label) {
 						error!("unknown label: '{label}'");
 						continue;
@@ -500,32 +482,32 @@ impl Output<'_> {
 				}
 
 				TT::BsrF => {
-					let rm = self.data.reg().unwrap();
-					out.push(Asm::reg1(AT::BsrF, rm));
+					let rm = self.reg().unwrap();
+					self.out.push(Asm::reg1(AT::BsrF, rm));
 				}
 
 				TT::Jmp => {
-					self.data.token(TT::At).unwrap();
-					let rm = self.data.reg().unwrap();
-					out.push(Asm::reg1(AT::Jmp, rm));
+					self.token(TT::At).unwrap();
+					let rm = self.reg().unwrap();
+					self.out.push(Asm::reg1(AT::Jmp, rm));
 				}
 
 				TT::Jsr => {
-					self.data.token(TT::At).unwrap();
-					let rm = self.data.reg().unwrap();
-					out.push(Asm::reg1(AT::Jsr, rm));
+					self.token(TT::At).unwrap();
+					let rm = self.reg().unwrap();
+					self.out.push(Asm::reg1(AT::Jsr, rm));
 				}
 
 				TT::Rts => {
-					out.push(Asm::none(AT::Rts));
+					self.out.push(Asm::none(AT::Rts));
 				}
 
 				TT::ClrT => {
-					out.push(Asm::none(AT::ClrT));
+					self.out.push(Asm::none(AT::ClrT));
 				}
 
 				TT::ClrMac => {
-					out.push(Asm::none(AT::ClrMac));
+					self.out.push(Asm::none(AT::ClrMac));
 				}
 
 				TT::LdC => {}
@@ -533,19 +515,19 @@ impl Output<'_> {
 				TT::LdS => {}
 
 				TT::Nop => {
-					out.push(Asm::none(AT::Nop));
+					self.out.push(Asm::none(AT::Nop));
 				}
 
 				TT::Rte => {
-					out.push(Asm::none(AT::Rte));
+					self.out.push(Asm::none(AT::Rte));
 				}
 
 				TT::SetT => {
-					out.push(Asm::none(AT::SetT));
+					self.out.push(Asm::none(AT::SetT));
 				}
 
 				TT::Sleep => {
-					out.push(Asm::none(AT::Sleep));
+					self.out.push(Asm::none(AT::Sleep));
 				}
 
 				TT::StC => {}
@@ -553,13 +535,13 @@ impl Output<'_> {
 				TT::StS => {}
 
 				TT::TrapA => {
-					self.data.token(TT::Hash).unwrap();
-					let imm = self.data.immediate().unwrap();
+					self.token(TT::Hash).unwrap();
+					let imm = self.immediate().unwrap();
 					let d = imm / 4;
 					if !(u8::MIN as i64..=u8::MAX as i64).contains(&d) {
 						todo!("trap offset too large: found({imm}), limit(0..={})", u8::MAX as i64 * 4);
 					}
-					out.push(Asm::imm8(AT::TrapA, d as u8));
+					self.out.push(Asm::imm8(AT::TrapA, d as u8));
 				}
 
 				_ => {
@@ -567,16 +549,21 @@ impl Output<'_> {
 				}
 			}
 		}
-
-		out
 	}
 }
 
 impl<'a> Parser<'a> {
-	fn new(tokens: &'a [Token]) -> Self {
+	fn new(tokens: &'a [Token], source_root: PathBuf) -> Self {
 		Self {
+			source_root,
+
 			index: 0,
 			tokens,
+
+			labels: HashMap::default(),
+			values: HashMap::default(),
+
+			out: Vec::default(),
 		}
 	}
 
@@ -644,14 +631,14 @@ impl<'a> Parser<'a> {
 			})
 	}
 
-	fn disp_pc(&mut self, values: &HashMap<Box<str>, i64>) -> Option<u16> {
+	fn disp_pc(&mut self) -> Option<u16> {
 		let index = self.index;
 		self.token(TT::At)
 			.and_then(|_| self.token(TT::OParen))
 			.and_then(|_| self.immediate())
 			.or_else(|| {
 				let label = self.label()?;
-				values.get(&label).copied()
+				self.values.get(&label).copied()
 			})
 			.filter(|_| self.token(TT::Comma).is_some())
 			.filter(|_| self.token(TT::Pc).is_some())
@@ -674,7 +661,7 @@ impl<'a> Parser<'a> {
 				i64::from_str_radix(n, 2).ok()
 			}
 			Some(Token { tt: TT::Dec(n), ..}) => {
-				i64::from_str_radix(n, 10).ok()
+				n.parse::<i64>().ok()
 			}
 			Some(Token { tt: TT::Hex(n), ..}) => {
 				i64::from_str_radix(n, 16).ok()
@@ -683,6 +670,16 @@ impl<'a> Parser<'a> {
 				self.index -= 1;
 				None
 			}
+		}
+	}
+
+	fn neg_immediate(&mut self) -> Option<i64> {
+		if let Some(Token { tt: TT::Dash, ..}) = self.next() {
+			self.immediate()
+				.map(|n| -n)
+		} else {
+			self.index -= 1;
+			self.immediate()
 		}
 	}
 }
