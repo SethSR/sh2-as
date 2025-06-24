@@ -1,4 +1,4 @@
-PushAll macro 
+	macro PushAll
 	mov.l r0,@-sp
 	mov.l r1,@-sp
 	mov.l r2,@-sp
@@ -17,7 +17,7 @@ PushAll macro
 	sts.l pr,@-sp	
 	endm
 
-PopAll macro 
+	macro PopAll
 	lds.l @sp+,pr
 	mov.l @sp+,r14
 	mov.l @sp+,r13
@@ -34,4 +34,4 @@ PopAll macro
 	mov.l @sp+,r2
 	mov.l @sp+,r1
 	mov.l @sp+,r0
-	endm	
+	endm

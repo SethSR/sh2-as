@@ -25,6 +25,7 @@ pub struct Parser<'a> {
 	// Preprocessor
 	labels: HashMap<Box<str>, u32>,
 	values: HashMap<Box<str>, i64>,
+	macros: HashMap<Box<str>, Vec<Token>>,
 
 	// Output
 	out: Vec<Asm>,
@@ -59,7 +60,8 @@ impl<'a> Parser<'a> {
 					parser.process();
 					self.labels.extend(parser.labels);
 					self.values.extend(parser.values);
-					debug!("found assembly include: '{name}'");
+					self.macros.extend(parser.macros);
+					trace!("found assembly include: '{name}'");
 				}
 
 				TT::BInclude => {
@@ -69,7 +71,7 @@ impl<'a> Parser<'a> {
 					// bytes. We should probably store this for the output stage, or something similar.
 					let file = std::fs::read(path).unwrap();
 					address += file.len() as u32;
-					debug!("found binary include: '{name}'");
+					trace!("found binary include: '{name}'");
 				}
 
 				TT::Align => {
@@ -114,10 +116,21 @@ impl<'a> Parser<'a> {
 				}
 
 				TT::MacroStart => {
-					debug!("found macro start: '{:?}'", self.next());
+					let name = self.label().unwrap();
+					let start = self.index;
+					let mut end = start;
+					while let Some(token) = self.next() {
+						if matches!(token, Token { tt: TT::MacroEnd, ..}) {
+							let tokens = self.tokens[start..end].to_vec();
+							self.macros.insert(name.clone(), tokens);
+							break;
+						}
+						end = self.index;
+					}
+					trace!("found macro start: '{name}'");
 				}
 				TT::MacroEnd => {
-					debug!("found macro end");
+					todo!("unexpected macro end");
 				}
 
 				TT::Const => {
@@ -611,6 +624,7 @@ impl<'a> Parser<'a> {
 
 			labels: HashMap::default(),
 			values: HashMap::default(),
+			macros: HashMap::default(),
 
 			out: Vec::default(),
 		}
