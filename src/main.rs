@@ -5,15 +5,8 @@ mod asm;
 mod i4;
 mod output;
 mod parser;
-mod a2;
-//mod p2;
-mod p3;
-
 mod lexer;
 mod tokens;
-
-use parser::parser;
-use asm::output;
 
 fn main() {
 	tracing_subscriber::fmt()
@@ -30,24 +23,12 @@ fn main() {
 	let file_path = file_path.parent()
 		.unwrap_or_else(|| panic!("unable to parse parent file-path for '{file_name}'"));
 
-	let use_parser2 = args.next()
-		.map(|arg| arg == "p2")
-		.unwrap_or(false);
-
 	let source = fs::read_to_string(file_name)
 		.expect("unable to read source file");
 
-	if use_parser2 {
-		let tokens = lexer::eval(&source)
-			.expect("unable to lex source (v2)");
-		let out = p3::eval(&tokens, file_path.to_path_buf());
-		println!("{out:02X?}");
-	} else {
-		let ins = parser(&source)
-			.expect("unable to parse source");
-		println!("{ins:#?}");
-		let out = output(&ins);
-		println!("{out:02X?}");
-	}
+	let tokens = lexer::eval(&source)
+		.expect("unable to lex source (v2)");
+	let out = parser::eval(&tokens, file_path.to_path_buf());
+	println!("{out:02X?}");
 }
 
