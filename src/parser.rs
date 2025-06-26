@@ -52,7 +52,8 @@ pub fn eval(tokens: &[Token], source_root: PathBuf) -> Vec<Asm> {
 	parser.process();
 	eprintln!("{:?}", parser.preprocessor);
 	parser.output();
-	parser.out
+	// parser.out
+	todo!("eval")
 }
 
 #[derive(Debug, Default)]
@@ -76,7 +77,7 @@ pub struct Parser<'a> {
 	preprocessor: Preprocessor,
 
 	// Output
-	out: Vec<Asm>,
+	// out: Vec<Asm>,
 }
 
 impl<'a> Parser<'a> {
@@ -482,91 +483,6 @@ impl<'a> Parser<'a> {
 					}
 				}
 
-				TT::Add |
-				TT::CmpEq => {
-					if self.token(TT::Hash).is_some() {
-						self.preprocessor.address += 2;
-						if let Some(imm) = self.neg_immediate() {
-							self.token(TT::Comma).unwrap();
-							if i8_sized(imm) {
-								// regular instruction
-							} else {
-								panic!("immediate value too large: found({imm}), limit({}..={})", i32::MIN, i32::MAX);
-							}
-						}
-					}
-				}
-
-				TT::And |
-				TT::Or |
-				TT::Tst |
-				TT::Xor => {
-					if self.token(TT::Hash).is_some() {
-						let imm = self.immediate().unwrap();
-						self.preprocessor.address += 2;
-						if i8_sized(imm) {
-							// regular instruction
-						} else {
-							panic!("immediate value too large: found({imm}), limit({}..={})", i32::MIN, i32::MAX);
-						}
-					}
-				}
-
-				TT::NewLine | TT::Eof |
-				TT::String(_) | TT::Char(_) |
-				TT::Bin(_) | TT::Dec(_) | TT::Hex(_) |
-				TT::Reg(_) | TT::Pc |
-				TT::Gbr | TT::Vbr | TT::Sr |
-				TT::Macl | TT::Mach | TT::Pr |
-				TT::Plus | TT::Dash | TT::Star | TT::Slash |
-				TT::At | TT::OParen | TT::CParen |
-				TT::Colon | TT::Dot | TT::Comma |
-				TT::Eq | TT::Hash |
-				TT::Byte | TT::Word | TT::Long => {}
-
-				_ => {
-					self.preprocessor.address += 2;
-				}
-			}
-		}
-	}
-
-	#[instrument(skip_all)]
-	fn output(&mut self) {
-		self.index = 0;
-
-		while let Some(token) = self.next().cloned() {
-			match token.tt {
-				TT::LtOrg | TT::NewLine | TT::Eof => {
-					continue;
-				}
-				TT::Include | TT::BInclude |
-				TT::Label(_) |
-				TT::Align => {
-					self.index += 1;
-					continue;
-				}
-				TT::Const => {
-					let index = self.index;
-					if self.token(TT::Dot).is_some() {
-						if self.token(TT::Word).is_some() || self.token(TT::Long).is_some() {
-							self.index += 1;
-							continue;
-						} else if self.token(TT::Byte).is_some() && self.string().is_some() {
-							while self.token(TT::Comma).is_some() && self.immediate().is_some() {}
-							continue;
-						}
-					}
-					self.index = index;
-				}
-				_ => {}
-			}
-
-			println!("{:08X} : {:?}", 2 * self.out.len(), token.tt);
-
-			match token.tt {
-				TT::Mov => {}
-
 				TT::MovA => {
 					let d = self.disp_pc().unwrap();
 					self.token(TT::Comma).unwrap();
@@ -575,19 +491,21 @@ impl<'a> Parser<'a> {
 					if !(u8::MIN as u16..=u8::MAX as u16).contains(&imm) {
 						panic!("displacement value too large: found({d}), limit(0..={})", u8::MAX as u16 * 4);
 					}
-					self.out.push(Asm::imm8(AT::MovA, imm as u8));
+					self.push(IR::Imm(AT::MovA, imm as u8));
 				}
 
 				TT::MovT => {
 					let rn = self.reg().unwrap();
-					self.out.push(Asm::reg1(AT::MovT, rn));
+					self.push(IR::One(AT::MovT, rn));
 				}
 
-				TT::Swap => {}
+				TT::Swap => {
+					todo!("SWAP");
+				}
 
 				TT::Xtrct => {
 					let (rm,rn) = self.reg2().unwrap();
-					self.out.push(Asm::reg2(AT::Xtrct, rn, rm));
+					self.push(IR::Two(AT::Xtrct, rn, rm));
 				}
 
 				TT::Add => {
@@ -596,104 +514,120 @@ impl<'a> Parser<'a> {
 						if i8_sized(imm) {
 							self.token(TT::Comma).unwrap();
 							let rn = self.reg().unwrap();
-							self.out.push(Asm::imm_reg(AT::AddImmReg, imm as u8, rn));
+							self.push(IR::NI(AT::AddImmReg, rn, imm as u8));
 						} else {
-							panic!("ADD output too large: found({imm}), limit({}..={})", i32::MIN, i32::MAX);
+							panic!("ADD input too large: found({imm}), limit({}..={})", i32::MIN, i32::MAX);
 						}
 					} else {
 						let (rm,rn) = self.reg2().unwrap();
-						self.out.push(Asm::reg2(AT::AddRegReg, rn ,rm));
+						self.push(IR::Two(AT::AddRegReg, rn ,rm));
 					}
 				}
 
 				TT::AddC => {
 					let (rm,rn) = self.reg2().unwrap();
-					self.out.push(Asm::reg2(AT::AddC, rn, rm));
+					self.push(IR::Two(AT::AddC, rn, rm));
 				}
 
 				TT::AddV => {
 					let (rm,rn) = self.reg2().unwrap();
-					self.out.push(Asm::reg2(AT::AddV, rn, rm));
+					self.push(IR::Two(AT::AddV, rn, rm));
 				}
 
-				TT::CmpEq => {}
+				TT::CmpEq => {
+					if self.token(TT::Hash).is_some() {
+						self.preprocessor.address += 2;
+						if let Some(imm) = self.neg_immediate() {
+							if i8_sized(imm) {
+								self.token(TT::Comma).unwrap();
+								let rn = self.reg().unwrap();
+								self.push(IR::NI(AT::CmpEqImm, rn, imm as u8));
+							} else {
+								panic!("CMP/EQ input too large: found({imm}), limit({}..={})", i32::MIN, i32::MAX);
+							}
+						}
+					} else {
+						let (rm,rn) = self.reg2().unwrap();
+						self.push(IR::Two(AT::CmpEqReg, rn ,rm));
+					}
+				}
 
 				TT::CmpHs => {
 					let (rm,rn) = self.reg2().unwrap();
-					self.out.push(Asm::reg2(AT::CmpHs, rn, rm));
+					self.push(IR::Two(AT::CmpHs, rn, rm));
 				}
 
 				TT::CmpGe => {
 					let (rm,rn) = self.reg2().unwrap();
-					self.out.push(Asm::reg2(AT::CmpGe, rn, rm));
+					self.push(IR::Two(AT::CmpGe, rn, rm));
 				}
 
 				TT::CmpHi => {
 					let (rm,rn) = self.reg2().unwrap();
-					self.out.push(Asm::reg2(AT::CmpHi, rn, rm));
+					self.push(IR::Two(AT::CmpHi, rn, rm));
 				}
 
 				TT::CmpGt => {
 					let (rm,rn) = self.reg2().unwrap();
-					self.out.push(Asm::reg2(AT::CmpGt, rn, rm));
+					self.push(IR::Two(AT::CmpGt, rn, rm));
 				}
 
 				TT::CmpPl => {
 					let (rm,rn) = self.reg2().unwrap();
-					self.out.push(Asm::reg2(AT::CmpPl, rn, rm));
+					self.push(IR::Two(AT::CmpPl, rn, rm));
 				}
 
 				TT::CmpPz => {
 					let (rm,rn) = self.reg2().unwrap();
-					self.out.push(Asm::reg2(AT::CmpPz, rn, rm));
+					self.push(IR::Two(AT::CmpPz, rn, rm));
 				}
 
 				TT::CmpStr => {
 					let (rm,rn) = self.reg2().unwrap();
-					self.out.push(Asm::reg2(AT::CmpStr, rn, rm));
+					self.push(IR::Two(AT::CmpStr, rn, rm));
 				}
 
 				TT::Div1 => {
 					let (rm,rn) = self.reg2().unwrap();
-					self.out.push(Asm::reg2(AT::Div1, rn, rm));
+					self.push(IR::Two(AT::Div1, rn, rm));
 				}
 
 				TT::Div0S => {
 					let (rm,rn) = self.reg2().unwrap();
-					self.out.push(Asm::reg2(AT::Div0S, rn, rm));
+					self.push(IR::Two(AT::Div0S, rn, rm));
 				}
 
 				TT::Div0U => {
-					self.out.push(Asm::none(AT::Div0U));
+					self.push(IR::Zero(AT::Div0U));
 				}
 
 				TT::DMulS => {
 					self.token(TT::Dot).unwrap();
 					self.token(TT::Long).unwrap();
 					let (rm,rn) = self.reg2().unwrap();
-					self.out.push(Asm::reg2(AT::DMulS, rn, rm));
+					self.push(IR::Two(AT::DMulS, rn, rm));
 				}
 
 				TT::DMulU => {
 					self.token(TT::Dot).unwrap();
 					self.token(TT::Long).unwrap();
 					let (rm,rn) = self.reg2().unwrap();
-					self.out.push(Asm::reg2(AT::DMulU, rn, rm));
+					self.push(IR::Two(AT::DMulU, rn, rm));
 				}
 
 				TT::Dt => {
 					let rn = self.reg().unwrap();
-					self.out.push(Asm::reg1(AT::Dt, rn));
+					self.push(IR::One(AT::Dt, rn));
 				}
 
 				TT::ExtS => {
 					self.token(TT::Dot).unwrap();
 					if self.token(TT::Byte).is_some() {
 						let (rm,rn) = self.reg2().unwrap();
-						self.out.push(Asm::reg2(AT::ExtSB, rn, rm));
+						self.push(IR::Two(AT::ExtSB, rn, rm));
 					} else if self.token(TT::Word).is_some() {
 						let (rm,rn) = self.reg2().unwrap();
-						self.out.push(Asm::reg2(AT::ExtSW, rn, rm));
+						self.push(IR::Two(AT::ExtSW, rn, rm));
 					} else {
 						panic!("unexpected token for EXTS: {:?}", self.tokens[self.index]);
 					}
@@ -703,10 +637,10 @@ impl<'a> Parser<'a> {
 					self.token(TT::Dot).unwrap();
 					if self.token(TT::Byte).is_some() {
 						let (rm,rn) = self.reg2().unwrap();
-						self.out.push(Asm::reg2(AT::ExtUB, rn, rm));
+						self.push(IR::Two(AT::ExtUB, rn, rm));
 					} else if self.token(TT::Word).is_some() {
 						let (rm,rn) = self.reg2().unwrap();
-						self.out.push(Asm::reg2(AT::ExtUW, rn, rm));
+						self.push(IR::Two(AT::ExtUW, rn, rm));
 					} else {
 						panic!("unexpected token for EXTU: {:?}", self.tokens[self.index]);
 					}
@@ -716,131 +650,243 @@ impl<'a> Parser<'a> {
 
 				TT::Mul => {
 					let (rm,rn) = self.reg2().unwrap();
-					self.out.push(Asm::reg2(AT::Mul, rn, rm));
+					self.push(IR::Two(AT::Mul, rn, rm));
 				}
 
 				TT::MulS => {
 					let (rm,rn) = self.reg2().unwrap();
-					self.out.push(Asm::reg2(AT::MulS, rn, rm));
+					self.push(IR::Two(AT::MulS, rn, rm));
 				}
 
 				TT::MulU => {
 					let (rm,rn) = self.reg2().unwrap();
-					self.out.push(Asm::reg2(AT::MulU, rn, rm));
+					self.push(IR::Two(AT::MulU, rn, rm));
 				}
 
 				TT::Neg => {
 					let (rm,rn) = self.reg2().unwrap();
-					self.out.push(Asm::reg2(AT::Neg, rn, rm));
+					self.push(IR::Two(AT::Neg, rn, rm));
 				}
 
 				TT::NegC => {
 					let (rm,rn) = self.reg2().unwrap();
-					self.out.push(Asm::reg2(AT::NegC, rn, rm));
+					self.push(IR::Two(AT::NegC, rn, rm));
 				}
 
 				TT::Sub => {
 					let (rm,rn) = self.reg2().unwrap();
-					self.out.push(Asm::reg2(AT::Sub, rn, rm));
+					self.push(IR::Two(AT::Sub, rn, rm));
 				}
 
 				TT::SubC => {
 					let (rm,rn) = self.reg2().unwrap();
-					self.out.push(Asm::reg2(AT::SubC, rn, rm));
+					self.push(IR::Two(AT::SubC, rn, rm));
 				}
 
 				TT::SubV => {
 					let (rm,rn) = self.reg2().unwrap();
-					self.out.push(Asm::reg2(AT::SubV, rn, rm));
+					self.push(IR::Two(AT::SubV, rn, rm));
 				}
 
-				TT::And => {}
+				TT::And => {
+					if self.token(TT::Hash).is_some() {
+						let imm = self.immediate().unwrap();
+						self.token(TT::Comma).unwrap();
+						self.r0().unwrap();
+						if i8_sized(imm) {
+							self.push(IR::Imm(AT::AndImmR0, imm as u8));
+						} else {
+							panic!("AND input too large: found({imm}), limit({}..={})", i32::MIN, i32::MAX);
+						}
+					} else if self.token(TT::Dot).is_some() {
+						self.token(TT::Byte).unwrap();
+						let imm = self.immediate().unwrap();
+						self.token(TT::At).unwrap();
+						self.token(TT::OParen).unwrap();
+						self.r0().unwrap();
+						self.token(TT::Comma).unwrap();
+						self.token(TT::Gbr).unwrap();
+						self.token(TT::CParen).unwrap();
+						if i8_sized(imm) {
+							self.push(IR::Imm(AT::AndImmGbr, imm as u8));
+						} else {
+							panic!("AND input too large: found({imm}), limit({}..={})", i32::MIN, i32::MAX);
+						}
+					} else {
+						let (rm,rn) = self.reg2().unwrap();
+						self.push(IR::Two(AT::AndRegReg, rn, rm));
+					}
+				}
 
 				TT::Not => {
 					let (rm,rn) = self.reg2().unwrap();
-					self.out.push(Asm::reg2(AT::Not, rn, rm));
+					self.push(IR::Two(AT::Not, rn, rm));
 				}
 
-				TT::Or => {}
+				TT::Or => {
+					if self.token(TT::Hash).is_some() {
+						let imm = self.immediate().unwrap();
+						self.token(TT::Comma).unwrap();
+						self.r0().unwrap();
+						if i8_sized(imm) {
+							self.push(IR::Imm(AT::OrImmR0, imm as u8));
+						} else {
+							panic!("OR input too large: found({imm}), limit({}..={})", i32::MIN, i32::MAX);
+						}
+					} else if self.token(TT::Dot).is_some() {
+						self.token(TT::Byte).unwrap();
+						let imm = self.immediate().unwrap();
+						self.token(TT::At).unwrap();
+						self.token(TT::OParen).unwrap();
+						self.r0().unwrap();
+						self.token(TT::Comma).unwrap();
+						self.token(TT::Gbr).unwrap();
+						self.token(TT::CParen).unwrap();
+						if i8_sized(imm) {
+							self.push(IR::Imm(AT::OrImmGbr, imm as u8));
+						} else {
+							panic!("OR input too large: found({imm}), limit({}..={})", i32::MIN, i32::MAX);
+						}
+					} else {
+						let (rm,rn) = self.reg2().unwrap();
+						self.push(IR::Two(AT::OrRegReg, rn, rm));
+					}
+				}
 
 				TT::Tas => {
 					self.token(TT::At).unwrap();
 					let rn = self.reg().unwrap();
-					self.out.push(Asm::reg1(AT::Tas, rn));
+					self.push(IR::One(AT::Tas, rn));
 				}
 
-				TT::Tst => {}
+				TT::Tst => {
+					if self.token(TT::Hash).is_some() {
+						let imm = self.immediate().unwrap();
+						self.token(TT::Comma).unwrap();
+						self.r0().unwrap();
+						if i8_sized(imm) {
+							self.push(IR::Imm(AT::TstImmR0, imm as u8));
+						} else {
+							panic!("TST input too large: found({imm}), limit({}..={})", i32::MIN, i32::MAX);
+						}
+					} else if self.token(TT::Dot).is_some() {
+						self.token(TT::Byte).unwrap();
+						let imm = self.immediate().unwrap();
+						self.token(TT::At).unwrap();
+						self.token(TT::OParen).unwrap();
+						self.r0().unwrap();
+						self.token(TT::Comma).unwrap();
+						self.token(TT::Gbr).unwrap();
+						self.token(TT::CParen).unwrap();
+						if i8_sized(imm) {
+							self.push(IR::Imm(AT::TstImmGbr, imm as u8));
+						} else {
+							panic!("TST input too large: found({imm}), limit({}..={})", i32::MIN, i32::MAX);
+						}
+					} else {
+						let (rm,rn) = self.reg2().unwrap();
+						self.push(IR::Two(AT::TstRegReg, rn, rm));
+					}
+				}
 
-				TT::Xor => {}
+				TT::Xor => {
+					if self.token(TT::Hash).is_some() {
+						let imm = self.immediate().unwrap();
+						self.token(TT::Comma).unwrap();
+						self.r0().unwrap();
+						if i8_sized(imm) {
+							self.push(IR::Imm(AT::XorImmR0, imm as u8));
+						} else {
+							panic!("XOR input too large: found({imm}), limit({}..={})", i32::MIN, i32::MAX);
+						}
+					} else if self.token(TT::Dot).is_some() {
+						self.token(TT::Byte).unwrap();
+						let imm = self.immediate().unwrap();
+						self.token(TT::At).unwrap();
+						self.token(TT::OParen).unwrap();
+						self.r0().unwrap();
+						self.token(TT::Comma).unwrap();
+						self.token(TT::Gbr).unwrap();
+						self.token(TT::CParen).unwrap();
+						if i8_sized(imm) {
+							self.push(IR::Imm(AT::XorImmGbr, imm as u8));
+						} else {
+							panic!("XOR input too large: found({imm}), limit({}..={})", i32::MIN, i32::MAX);
+						}
+					} else {
+						let (rm,rn) = self.reg2().unwrap();
+						self.push(IR::Two(AT::XorRegReg, rn, rm));
+					}
+				}
 
 				TT::RotL => {
 					let rn = self.reg().unwrap();
-					self.out.push(Asm::reg1(AT::RotL, rn));
+					self.push(IR::One(AT::RotL, rn));
 				}
 
 				TT::RotR => {
 					let rn = self.reg().unwrap();
-					self.out.push(Asm::reg1(AT::RotR, rn));
+					self.push(IR::One(AT::RotR, rn));
 				}
 
 				TT::RotCL => {
 					let rn = self.reg().unwrap();
-					self.out.push(Asm::reg1(AT::RotCL, rn));
+					self.push(IR::One(AT::RotCL, rn));
 				}
 
 				TT::RotCR => {
 					let rn = self.reg().unwrap();
-					self.out.push(Asm::reg1(AT::RotCR, rn));
+					self.push(IR::One(AT::RotCR, rn));
 				}
 
 				TT::ShAL => {
 					let rn = self.reg().unwrap();
-					self.out.push(Asm::reg1(AT::ShAL, rn));
+					self.push(IR::One(AT::ShAL, rn));
 				}
 
 				TT::ShAR => {
 					let rn = self.reg().unwrap();
-					self.out.push(Asm::reg1(AT::ShAR, rn));
+					self.push(IR::One(AT::ShAR, rn));
 				}
 
 				TT::ShLL => {
 					let rn = self.reg().unwrap();
-					self.out.push(Asm::reg1(AT::ShLL, rn));
+					self.push(IR::One(AT::ShLL, rn));
 				}
 
 				TT::ShLR => {
 					let rn = self.reg().unwrap();
-					self.out.push(Asm::reg1(AT::ShLR, rn));
+					self.push(IR::One(AT::ShLR, rn));
 				}
 
 				TT::ShLL2 => {
 					let rn = self.reg().unwrap();
-					self.out.push(Asm::reg1(AT::ShLL2, rn));
+					self.push(IR::One(AT::ShLL2, rn));
 				}
 
 				TT::ShLR2 => {
 					let rn = self.reg().unwrap();
-					self.out.push(Asm::reg1(AT::ShLR2, rn));
+					self.push(IR::One(AT::ShLR2, rn));
 				}
 
 				TT::ShLL8 => {
 					let rn = self.reg().unwrap();
-					self.out.push(Asm::reg1(AT::ShLL8, rn));
+					self.push(IR::One(AT::ShLL8, rn));
 				}
 
 				TT::ShLR8 => {
 					let rn = self.reg().unwrap();
-					self.out.push(Asm::reg1(AT::ShLR8, rn));
+					self.push(IR::One(AT::ShLR8, rn));
 				}
 
 				TT::ShLL16 => {
 					let rn = self.reg().unwrap();
-					self.out.push(Asm::reg1(AT::ShLL16, rn));
+					self.push(IR::One(AT::ShLL16, rn));
 				}
 
 				TT::ShLR16 => {
 					let rn = self.reg().unwrap();
-					self.out.push(Asm::reg1(AT::ShLR16, rn));
+					self.push(IR::One(AT::ShLR16, rn));
 				}
 
 				TT::Bf => {
@@ -890,7 +936,7 @@ impl<'a> Parser<'a> {
 
 				TT::BraF => {
 					let rm = self.reg().unwrap();
-					self.out.push(Asm::reg1(AT::BraF, rm));
+					self.push(IR::One(AT::BraF, rm));
 				}
 
 				TT::Bsr => {
@@ -904,31 +950,31 @@ impl<'a> Parser<'a> {
 
 				TT::BsrF => {
 					let rm = self.reg().unwrap();
-					self.out.push(Asm::reg1(AT::BsrF, rm));
+					self.push(IR::One(AT::BsrF, rm));
 				}
 
 				TT::Jmp => {
 					self.token(TT::At).unwrap();
 					let rm = self.reg().unwrap();
-					self.out.push(Asm::reg1(AT::Jmp, rm));
+					self.push(IR::One(AT::Jmp, rm));
 				}
 
 				TT::Jsr => {
 					self.token(TT::At).unwrap();
 					let rm = self.reg().unwrap();
-					self.out.push(Asm::reg1(AT::Jsr, rm));
+					self.push(IR::One(AT::Jsr, rm));
 				}
 
 				TT::Rts => {
-					self.out.push(Asm::none(AT::Rts));
+					self.push(IR::Zero(AT::Rts));
 				}
 
 				TT::ClrT => {
-					self.out.push(Asm::none(AT::ClrT));
+					self.push(IR::Zero(AT::ClrT));
 				}
 
 				TT::ClrMac => {
-					self.out.push(Asm::none(AT::ClrMac));
+					self.push(IR::Zero(AT::ClrMac));
 				}
 
 				TT::LdC => {}
@@ -936,19 +982,19 @@ impl<'a> Parser<'a> {
 				TT::LdS => {}
 
 				TT::Nop => {
-					self.out.push(Asm::none(AT::Nop));
+					self.push(IR::Zero(AT::Nop));
 				}
 
 				TT::Rte => {
-					self.out.push(Asm::none(AT::Rte));
+					self.push(IR::Zero(AT::Rte));
 				}
 
 				TT::SetT => {
-					self.out.push(Asm::none(AT::SetT));
+					self.push(IR::Zero(AT::SetT));
 				}
 
 				TT::Sleep => {
-					self.out.push(Asm::none(AT::Sleep));
+					self.push(IR::Zero(AT::Sleep));
 				}
 
 				TT::StC => {}
@@ -962,14 +1008,31 @@ impl<'a> Parser<'a> {
 					if !(u8::MIN as i64..=u8::MAX as i64).contains(&d) {
 						panic!("trap offset too large: found({imm}), limit(0..={})", u8::MAX as i64 * 4);
 					}
-					self.out.push(Asm::imm8(AT::TrapA, d as u8));
+					self.push(IR::Imm(AT::TrapA, d as u8));
 				}
 
-				_ => {
-					trace!("unexpected Token: {token:?}");
+				// Skip empty lines
+				TT::NewLine => {}
+
+				TT::String(_) | TT::Char(_) |
+				TT::Bin(_) | TT::Dec(_) | TT::Hex(_) |
+				TT::Reg(_) | TT::Pc |
+				TT::Gbr | TT::Vbr | TT::Sr |
+				TT::Macl | TT::Mach | TT::Pr |
+				TT::Plus | TT::Dash | TT::Star | TT::Slash |
+				TT::At | TT::OParen | TT::CParen |
+				TT::Colon | TT::Dot | TT::Comma |
+				TT::Eq | TT::Hash |
+				TT::Byte | TT::Word | TT::Long => {
+					self.unexpected(line!());
 				}
 			}
 		}
+	}
+
+	#[instrument(skip_all)]
+	fn output(&mut self) {
+		self.index = 0;
 	}
 }
 
@@ -1007,7 +1070,7 @@ impl<'a> Parser<'a> {
 
 			preprocessor: Preprocessor::default(),
 
-			out: Vec::default(),
+			// out: Vec::default(),
 		}
 	}
 
@@ -1020,7 +1083,11 @@ impl<'a> Parser<'a> {
 			(Some(start), None) => eprintln!("{:?}", &self.tokens[start..]),
 			(None, None) => eprintln!("{:?}", self.tokens),
 		}
-		panic!("[{line:03}]: unexpected token: {:?}", self.tokens[self.index]);
+		if let Some(token) = self.tokens.get(self.index) {
+			panic!("[{line:03}]: unexpected token: {token:?}");
+		} else {
+			panic!("[{line:03}]: unexpected EOF");
+		}
 	}
 
 	fn push(&mut self, ir: IR) {
@@ -1288,7 +1355,7 @@ fn no_output_from_empty_source() {
 	let mut parser = Parser::new(&tokens, "".into());
 	parser.process();
 	parser.output();
-	assert!(parser.out.is_empty());
+	// assert!(parser.out.is_empty());
 }
 
 #[test]

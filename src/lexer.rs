@@ -343,10 +343,7 @@ impl Iterator for Lexer<'_> {
 pub(crate) fn eval(
 	input: &str,
 ) -> miette::Result<Vec<Token>> {
-	use std::iter::once;
-
 	Lexer::new(input)
-		.chain(once(Ok(Token::new(Type::Eof, input.len()))))
 		.collect()
 }
 
@@ -358,11 +355,8 @@ mod tokenizes {
 		input: &str,
 		check: &[Type],
 	) -> miette::Result<()> {
-		let mut check = check.to_vec();
-		check.push(Type::Eof);
-
 		let tokens = crate::lexer::eval(input)?;
-		assert_eq!(tokens, check);
+		assert_eq!(tokens, check.to_vec());
 		Ok(())
 	}
 
