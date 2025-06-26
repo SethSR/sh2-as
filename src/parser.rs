@@ -922,47 +922,52 @@ impl<'a> Parser<'a> {
 
 				TT::Bf => {
 					let label = self.label().unwrap();
-					if !self.preprocessor.labels.contains_key(&label) {
-						error!("unknown label: '{label}'");
-						continue;
+					if let Some(addr) = self.preprocessor.labels.get(&label) {
+						debug!("check jump distance");
+						self.push(IR::Imm(AT::Bf, (addr >> 1) as u8));
+					} else {
+						self.push_placeholder(AT::Bf, PH::Label(label));
 					}
-					debug!("handle label outputs");
 				}
 
 				TT::BfS => {
 					let label = self.label().unwrap();
-					if !self.preprocessor.labels.contains_key(&label) {
-						error!("unknown label: '{label}'");
-						continue;
+					if let Some(addr) = self.preprocessor.labels.get(&label) {
+						debug!("check jump distance");
+						self.push(IR::Imm(AT::BfS, (addr >> 1) as u8));
+					} else {
+						self.push_placeholder(AT::BfS, PH::Label(label));
 					}
-					debug!("handle label outputs");
 				}
 
 				TT::Bt => {
 					let label = self.label().unwrap();
-					if !self.preprocessor.labels.contains_key(&label) {
-						error!("unknown label: '{label}'");
-						continue;
+					if let Some(addr) = self.preprocessor.labels.get(&label) {
+						debug!("check jump distance");
+						self.push(IR::Imm(AT::Bt, (addr >> 1) as u8));
+					} else {
+						self.push_placeholder(AT::Bt, PH::Label(label));
 					}
-					debug!("handle label outputs");
 				}
 
 				TT::BtS => {
 					let label = self.label().unwrap();
-					if !self.preprocessor.labels.contains_key(&label) {
-						error!("unknown label: '{label}'");
-						continue;
+					if let Some(addr) = self.preprocessor.labels.get(&label) {
+						debug!("check jump distance");
+						self.push(IR::Imm(AT::BtS, (addr >> 1) as u8));
+					} else {
+						self.push_placeholder(AT::BtS, PH::Label(label));
 					}
-					debug!("handle label outputs");
 				}
 
 				TT::Bra => {
 					let label = self.label().unwrap();
-					if !self.preprocessor.labels.contains_key(&label) {
-						error!("unknown label: '{label}'");
-						continue;
+					if let Some(addr) = self.preprocessor.labels.get(&label) {
+						debug!("check jump distance");
+						self.push(IR::Imm12(AT::Bra, (addr >> 1) as u16));
+					} else {
+						self.push_placeholder(AT::Bra, PH::Label(label));
 					}
-					debug!("handle label outputs");
 				}
 
 				TT::BraF => {
@@ -972,11 +977,12 @@ impl<'a> Parser<'a> {
 
 				TT::Bsr => {
 					let label = self.label().unwrap();
-					if !self.preprocessor.labels.contains_key(&label) {
-						error!("unknown label: '{label}'");
-						continue;
+					if let Some(addr) = self.preprocessor.labels.get(&label) {
+						debug!("check jump distance");
+						self.push(IR::Imm12(AT::Bsr, (addr >> 1) as u16));
+					} else {
+						self.push_placeholder(AT::Bsr, PH::Label(label));
 					}
-					debug!("handle label outputs");
 				}
 
 				TT::BsrF => {
@@ -985,14 +991,12 @@ impl<'a> Parser<'a> {
 				}
 
 				TT::Jmp => {
-					self.token(TT::At).unwrap();
-					let rm = self.reg().unwrap();
+					let rm = self.adr().unwrap();
 					self.push(IR::One(AT::Jmp, rm));
 				}
 
 				TT::Jsr => {
-					self.token(TT::At).unwrap();
-					let rm = self.reg().unwrap();
+					let rm = self.adr().unwrap();
 					self.push(IR::One(AT::Jsr, rm));
 				}
 
