@@ -26,8 +26,12 @@ impl Asm {
 		}
 	}
 
-	pub fn imm_reg(atype: Type, n: u8, d: u8) -> Self {
+	pub fn reg1_imm(atype: Type, n: u8, d: u8) -> Self {
 		Self { atype, n, m: 0, d }
+	}
+
+	pub fn reg2_imm(atype: Type, n: u8, m: u8, d: u8) -> Self {
+		Self { atype, n, m, d }
 	}
 
 	pub fn reg1(atype: Type, n: u8) -> Self {
