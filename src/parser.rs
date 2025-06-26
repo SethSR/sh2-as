@@ -1012,9 +1012,67 @@ impl<'a> Parser<'a> {
 					self.push(IR::Zero(AT::ClrMac));
 				}
 
-				TT::LdC => {}
+				TT::LdC => {
+					if let Some(rm) = self.reg() {
+						self.token(TT::Comma).unwrap();
+						if self.token(TT::Sr).is_some() {
+							self.push(IR::One(AT::LdcRegSr, rm));
+						} else if self.token(TT::Gbr).is_some() {
+							self.push(IR::One(AT::LdcRegGbr, rm));
+						} else if self.token(TT::Vbr).is_some() {
+							self.push(IR::One(AT::LdcRegVbr, rm));
+						} else {
+							self.unexpected(line!());
+						}
+					} else if let Some(rm) = self.token(TT::Dot)
+						.and_then(|_| self.token(TT::Long))
+						.and_then(|_| self.inc())
+					{
+						self.token(TT::Comma).unwrap();
+						if self.token(TT::Sr).is_some() {
+							self.push(IR::One(AT::LdcIncSr, rm));
+						} else if self.token(TT::Gbr).is_some() {
+							self.push(IR::One(AT::LdcIncGbr, rm));
+						} else if self.token(TT::Vbr).is_some() {
+							self.push(IR::One(AT::LdcIncVbr, rm));
+						} else {
+							self.unexpected(line!());
+						}
+					} else {
+						self.unexpected(line!());
+					}
+				}
 
-				TT::LdS => {}
+				TT::LdS => {
+					if let Some(rm) = self.reg() {
+						self.token(TT::Comma).unwrap();
+						if self.token(TT::Mach).is_some() {
+							self.push(IR::One(AT::LdsRegMach, rm));
+						} else if self.token(TT::Macl).is_some() {
+							self.push(IR::One(AT::LdsRegMacl, rm));
+						} else if self.token(TT::Pr).is_some() {
+							self.push(IR::One(AT::LdsRegPr, rm));
+						} else {
+							self.unexpected(line!());
+						}
+					} else if let Some(rm) = self.token(TT::Dot)
+						.and_then(|_| self.token(TT::Long))
+						.and_then(|_| self.inc())
+					{
+						self.token(TT::Comma).unwrap();
+						if self.token(TT::Mach).is_some() {
+							self.push(IR::One(AT::LdsIncMach, rm));
+						} else if self.token(TT::Macl).is_some() {
+							self.push(IR::One(AT::LdsIncMacl, rm));
+						} else if self.token(TT::Pr).is_some() {
+							self.push(IR::One(AT::LdsIncPr, rm));
+						} else {
+							self.unexpected(line!());
+						}
+					} else {
+						self.unexpected(line!());
+					}
+				}
 
 				TT::Nop => {
 					self.push(IR::Zero(AT::Nop));
@@ -1032,9 +1090,75 @@ impl<'a> Parser<'a> {
 					self.push(IR::Zero(AT::Sleep));
 				}
 
-				TT::StC => {}
+				TT::StC => {
+					if self.token(TT::Sr).is_some() {
+						self.token(TT::Comma).unwrap();
+						let rn = self.reg().unwrap();
+						self.push(IR::One(AT::StcSrReg, rn));
+					} else if self.token(TT::Gbr).is_some() {
+						self.token(TT::Comma).unwrap();
+						let rn = self.reg().unwrap();
+						self.push(IR::One(AT::StcGbrReg, rn));
+					} else if self.token(TT::Vbr).is_some() {
+						self.token(TT::Comma).unwrap();
+						let rn = self.reg().unwrap();
+						self.push(IR::One(AT::StcVbrReg, rn));
+					} else if self.token(TT::Dot).is_some() {
+						self.token(TT::Long).unwrap();
+						if self.token(TT::Sr).is_some() {
+							self.token(TT::Comma).unwrap();
+							let rn = self.dec().unwrap();
+							self.push(IR::One(AT::StcSrDec, rn));
+						} else if self.token(TT::Gbr).is_some() {
+							self.token(TT::Comma).unwrap();
+							let rn = self.dec().unwrap();
+							self.push(IR::One(AT::StcGbrDec, rn));
+						} else if self.token(TT::Vbr).is_some() {
+							self.token(TT::Comma).unwrap();
+							let rn = self.dec().unwrap();
+							self.push(IR::One(AT::StcVbrDec, rn));
+						} else {
+							self.unexpected(line!());
+						}
+					} else {
+						self.unexpected(line!());
+					}
+				}
 
-				TT::StS => {}
+				TT::StS => {
+					if self.token(TT::Mach).is_some() {
+						self.token(TT::Comma).unwrap();
+						let rn = self.reg().unwrap();
+						self.push(IR::One(AT::StsMachReg, rn));
+					} else if self.token(TT::Macl).is_some() {
+						self.token(TT::Comma).unwrap();
+						let rn = self.reg().unwrap();
+						self.push(IR::One(AT::StsMaclReg, rn));
+					} else if self.token(TT::Pr).is_some() {
+						self.token(TT::Comma).unwrap();
+						let rn = self.reg().unwrap();
+						self.push(IR::One(AT::StsPrReg, rn));
+					} else if self.token(TT::Dot).is_some() {
+						self.token(TT::Long).unwrap();
+						if self.token(TT::Mach).is_some() {
+							self.token(TT::Comma).unwrap();
+							let rn = self.dec().unwrap();
+							self.push(IR::One(AT::StsMachDec, rn));
+						} else if self.token(TT::Macl).is_some() {
+							self.token(TT::Comma).unwrap();
+							let rn = self.dec().unwrap();
+							self.push(IR::One(AT::StsMaclDec, rn));
+						} else if self.token(TT::Pr).is_some() {
+							self.token(TT::Comma).unwrap();
+							let rn = self.dec().unwrap();
+							self.push(IR::One(AT::StsPrDec, rn));
+						} else {
+							self.unexpected(line!());
+						}
+					} else {
+						self.unexpected(line!());
+					}
+				}
 
 				TT::TrapA => {
 					self.token(TT::Hash).unwrap();
