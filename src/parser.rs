@@ -255,15 +255,26 @@ impl<'a> Parser<'a> {
 
 				TT::Mov => {
 					if self.token(TT::Hash).is_some() {
-						let imm = self.neg_immediate().unwrap();
-						self.token(TT::Comma).unwrap();
-						let rn = self.reg().unwrap();
-						if i8_sized(imm) {
-							self.push(IR::NI(AT::MovImm, rn, imm as u8));
-						} else if i16_sized(imm) {
-							self.push_placeholder(AT::MovPcRegW, rn);
-						} else if i32_sized(imm) {
-							self.push_placeholder(AT::MovPcRegL, rn);
+						if let Some(imm) = self.neg_immediate() {
+							self.token(TT::Comma).unwrap();
+							let rn = self.reg().unwrap();
+							if i8_sized(imm) {
+								self.push(IR::NI(AT::MovImm, rn, imm as u8));
+							} else if i16_sized(imm) {
+								self.push_placeholder(AT::MovPcRegW, PH::Reg(rn));
+							} else if i32_sized(imm) {
+								self.push_placeholder(AT::MovPcRegL, PH::Reg(rn));
+							} else {
+								self.unexpected(line!());
+							}
+						} else if let Some(label) = self.label() {
+								self.token(TT::Comma).unwrap();
+								let rn = self.reg().unwrap();
+								self.push_placeholder(AT::MovPcRegW, PH::HLbl(label,rn));
+						} else if let Some(c) = self.char() {
+							self.token(TT::Comma).unwrap();
+							let rn = self.reg().unwrap();
+							self.push(IR::NI(AT::MovImm, rn, c as u8));
 						} else {
 							self.unexpected(line!());
 						}
@@ -298,47 +309,171 @@ impl<'a> Parser<'a> {
 								let rn = self.reg().unwrap();
 								// MOV.B @Rm,Rn
 								self.push(IR::Two(AT::MovAdrRegB, rn, rm));
-							} else if let Some(0) = self.reg() {
+							} else if let Some(rm) = self.reg() {
 								self.token(TT::Comma).unwrap();
-								if let Some(d) = self.disp_gbr() {
-									// MOV.B R0,@(disp,GBR)
-									self.push(IR::Imm(AT::MovR0GbrB, d));
-								} else if let Some((d,rn)) = self.disp_reg() {
-									// MOV.B R0,@(disp,Rn)
-									self.push(IR::Dsp4(AT::MovR0DspB, rn, d));
-								} else if let Some(rn) = self.idx() {
-									// MOV.B R0,@(R0,Rn)
+								if rm == 0 {
+									if let Some(d) = self.disp_gbr() {
+										// MOV.B R0,@(disp,GBR)
+										self.push(IR::Imm(AT::MovR0GbrB, d));
+										continue;
+									} else if let Some((d,rn)) = self.disp_reg() {
+										// MOV.B R0,@(disp,Rn)
+										self.push(IR::Dsp4(AT::MovR0DspB, rn, d));
+										continue;
+									}
+								}
+
+								if let Some(rn) = self.idx() {
+									// MOV.B Rm,@(R0,Rn)
 									self.push(IR::Two(AT::MovRegR0B, rn, 0));
 								} else if let Some(rn) = self.dec() {
-									// MOV.B R0,@-Rn
+									// MOV.B Rm,@-Rn
 									self.push(IR::Two(AT::MovRegDecB, rn, 0));
 								} else if let Some(rn) = self.adr() {
-									// MOV.B R0,@Rn
+									// MOV.B Rm,@Rn
 									self.push(IR::Two(AT::MovRegAdrB, rn, 0));
 								} else {
 									self.unexpected(line!());
-								}
-							} else if let Some(rm) = self.reg() {
-								self.token(TT::Comma).unwrap();
-								if let Some(rn) = self.idx() {
-									// MOV.B Rm,@(R0,Rn)
-									self.push(IR::Two(AT::MovRegR0B, rn, rm));
-								} else if let Some(rn) = self.dec() {
-									// MOV.B Rm,@-Rn
-									self.push(IR::Two(AT::MovRegDecB, rn, rm));
-								} else if let Some(rn) = self.adr() {
-									// MOV.B Rm,@Rn
-									self.push(IR::Two(AT::MovRegAdrB, rn, rm));
-								} else {
-									panic!("unexpected token: {:?}", self.tokens[self.index]);
 								}
 							} else {
 								self.unexpected(line!());
 							}
 						} else if self.token(TT::Word).is_some() {
-							todo!("handle MOV.W instructions");
+							if let Some(label) = self.label() {
+								self.token(TT::Comma).unwrap();
+								let rn = self.reg().unwrap();
+								self.push_placeholder(AT::MovPcRegW, PH::Lbl(label,rn));
+							} else if let Some(rm) = self.idx() {
+								self.token(TT::Comma).unwrap();
+								let rn = self.reg().unwrap();
+								// MOV.W @(R0,Rm),Rn
+								self.push(IR::Two(AT::MovR0RegW, rn, rm));
+							} else if let Some(d) = self.disp_gbr() {
+								self.token(TT::Comma).unwrap();
+								assert_eq!(Some(0), self.reg());
+								// MOV.W @(disp,GBR),R0
+								self.push(IR::Imm(AT::MovGbrR0W, d));
+							} else if let Some(d) = self.disp_pc() {
+								self.token(TT::Comma).unwrap();
+								let rn = self.reg().unwrap();
+								// MOV.W @(disp,PC),Rn
+								self.push(IR::NI(AT::MovPcRegW, rn, d as u8));
+							} else if let Some((d,rm)) = self.disp_reg() {
+								self.token(TT::Comma).unwrap();
+								assert_eq!(Some(0), self.reg());
+								// MOV.W @(disp,Rm),R0
+								self.push(IR::Dsp4(AT::MovDspR0W, rm, d));
+							} else if let Some(rm) = self.inc() {
+								self.token(TT::Comma).unwrap();
+								let rn = self.reg().unwrap();
+								// MOV.W @Rm+,Rn
+								self.push(IR::Two(AT::MovIncRegW, rn, rm));
+							} else if let Some(rm) = self.adr() {
+								self.token(TT::Comma).unwrap();
+								let rn = self.reg().unwrap();
+								// MOV.W @Rm,Rn
+								self.push(IR::Two(AT::MovAdrRegW, rn, rm));
+							} else if let Some(rm) = self.reg() {
+								self.token(TT::Comma).unwrap();
+								if rm == 0 {
+									if let Some(d) = self.disp_gbr() {
+										// MOV.W R0,@(disp,GBR)
+										self.push(IR::Imm(AT::MovR0GbrW, d));
+										continue;
+									} else if let Some((d,rn)) = self.disp_reg() {
+										// MOV.W R0,@(disp,Rn)
+										self.push(IR::Dsp4(AT::MovR0DspW, rn, d));
+										continue;
+									}
+								}
+
+								if let Some(rn) = self.idx() {
+									// MOV.W Rm,@(R0,Rn)
+									self.push(IR::Two(AT::MovRegR0W, rn, 0));
+								} else if let Some(rn) = self.dec() {
+									// MOV.W R0,@-Rn
+									self.push(IR::Two(AT::MovRegDecW, rn, 0));
+								} else if let Some(rn) = self.adr() {
+									// MOV.W R0,@Rn
+									self.push(IR::Two(AT::MovRegAdrW, rn, 0));
+								}
+							} else {
+								self.unexpected(line!());
+							}
 						} else if self.token(TT::Long).is_some() {
-							todo!("handle MOV.L instructions");
+							if self.token(TT::Hash).is_some() {
+								let label = self.label().unwrap();
+								self.token(TT::Comma).unwrap();
+								let rn = self.reg().unwrap();
+								self.push_placeholder(AT::MovPcRegL, PH::HLbl(label,rn));
+							} else if let Some(label) = self.label() {
+								self.token(TT::Comma).unwrap();
+								let rn = self.reg().unwrap();
+								self.push_placeholder(AT::MovPcRegL, PH::Lbl(label,rn));
+							} else if let Some(rm) = self.idx() {
+								self.token(TT::Comma).unwrap();
+								let rn = self.reg().unwrap();
+								// MOV.L @(R0,Rm),Rn
+								self.push(IR::Two(AT::MovR0RegL, rn, rm));
+							} else if let Some(d) = self.disp_gbr() {
+								self.token(TT::Comma).unwrap();
+								assert_eq!(Some(0), self.reg());
+								// MOV.L @(disp,GBR),R0
+								self.push(IR::Imm(AT::MovGbrR0L, d));
+							} else if let Some(d) = self.disp_pc() {
+								self.token(TT::Comma).unwrap();
+								let rn = self.reg().unwrap();
+								// MOV.L @(disp,PC),Rn
+								self.push(IR::NI(AT::MovPcRegL, rn, d as u8));
+							} else if let Some((d,rm)) = self.disp_reg() {
+								self.token(TT::Comma).unwrap();
+								let rn = self.reg().unwrap();
+								// MOV.L @(disp,Rm),Rn
+								self.push(IR::NM4(AT::MovDspRegL, rn, rm, d));
+							} else if let Some((label,rm)) = self.label_reg() {
+								self.token(TT::Comma).unwrap();
+								let rn = self.reg().unwrap();
+								self.push_placeholder(AT::MovDspRegL, PH::Dsp(label,rm,rn));
+							} else if let Some(rm) = self.inc() {
+								self.token(TT::Comma).unwrap();
+								let rn = self.reg().unwrap();
+								// MOV.L @Rm+,Rn
+								self.push(IR::Two(AT::MovIncRegL, rn, rm));
+							} else if let Some(rm) = self.adr() {
+								self.token(TT::Comma).unwrap();
+								let rn = self.reg().unwrap();
+								// MOV.L @Rm,Rn
+								self.push(IR::Two(AT::MovAdrRegL, rn, rm));
+							} else if let Some(rm) = self.reg() {
+								self.token(TT::Comma).unwrap();
+								if rm == 0 {
+									if let Some(d) = self.disp_gbr() {
+										// MOV.L R0,@(disp,GBR)
+										self.push(IR::Imm(AT::MovR0GbrL, d));
+										continue;
+									}
+								}
+
+								if let Some((d,rn)) = self.disp_reg() {
+									// MOV.L Rm,@(disp,Rn)
+									self.push(IR::NM4(AT::MovRegDspL, rn, rm, d));
+								} else if let Some((label,rn)) = self.label_reg() {
+									self.push_placeholder(AT::MovRegDspL, PH::Dsp(label,rm,rn));
+								} else if let Some(rn) = self.idx() {
+									// MOV.L Rm,@(R0,Rn)
+									self.push(IR::Two(AT::MovRegR0L, rn, rm));
+								} else if let Some(rn) = self.dec() {
+									// MOV.L Rm,@-Rn
+									self.push(IR::Two(AT::MovRegDecL, rn, rm));
+								} else if let Some(rn) = self.adr() {
+									// MOV.L Rm,@Rn
+									self.push(IR::Two(AT::MovRegAdrL, rn, rm));
+								} else {
+									self.unexpected(line!());
+								}
+							} else {
+								self.unexpected(line!());
+							}
 						} else {
 							self.unexpected(line!());
 						}
