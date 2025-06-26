@@ -1,5 +1,5 @@
 
-use std::collections::HashMap;
+use std::collections::{HashMap, VecDeque};
 use std::path::{Path, PathBuf};
 
 use tracing::{instrument, debug, error, trace};
@@ -26,6 +26,7 @@ enum IR {
 	/// xxxx nnnn iiii iiii
 	NI(AT, u8, u8),
 
+	// TODO - srenshaw - We can probably replace uses of PH::Label with this.
 	Jmp(AT, Box<str>),
 
 	Byte(u8),
@@ -34,6 +35,12 @@ enum IR {
 
 	Placeholder,
 	Placeholder4,
+}
+
+#[derive(Debug, Clone, Copy)]
+enum Sz {
+	Word(i64),
+	Long(i64),
 }
 
 #[derive(Debug, Clone)]
@@ -52,8 +59,6 @@ enum PH {
 pub fn eval(tokens: &[Token], source_root: PathBuf) -> Vec<Asm> {
 	let mut parser = Parser::new(tokens, source_root);
 	parser.process();
-	println!("Waiting: {:#?}", parser.preprocessor.waiting);
-	println!("Intermediates: {:#?}", parser.preprocessor.intermediates);
 	parser.output();
 	parser.out
 }
@@ -63,6 +68,8 @@ struct Preprocessor {
 	labels: HashMap<Box<str>, u32>,
 	values: HashMap<Box<str>, i64>,
 	macros: HashMap<Box<str>, Vec<Token>>,
+	constants: VecDeque<(u32,i64)>,
+	waiting_constants: Vec<Sz>,
 	waiting: Vec<(u32, AT, PH)>,
 
 	address: u32,
@@ -85,9 +92,6 @@ pub struct Parser<'a> {
 impl<'a> Parser<'a> {
 	#[instrument(skip_all)]
 	fn process(&mut self) {
-		let mut waiting_words = 0;
-		let mut waiting_longs = 0;
-
 		while let Some(token) = self.next() {
 			match token.tt {
 				TT::Org => {
@@ -140,10 +144,19 @@ impl<'a> Parser<'a> {
 				}
 
 				TT::LtOrg => {
-					self.preprocessor.address += waiting_words * 2;
-					self.preprocessor.address += waiting_longs * 4;
-					waiting_words = 0;
-					waiting_longs = 0;
+					let waiting_constants: Vec<Sz> = self.preprocessor.waiting_constants.drain(..).collect();
+					for item in waiting_constants {
+						match item {
+							Sz::Word(imm) => {
+								self.preprocessor.constants.push_back((self.preprocessor.address, imm));
+								self.push(IR::Word(imm as u16));
+							}
+							Sz::Long(imm) => {
+								self.preprocessor.constants.push_back((self.preprocessor.address, imm));
+								self.push(IR::Long(imm as u32));
+							}
+						}
+					}
 				}
 
 				TT::Label(ref name) => {
@@ -263,8 +276,10 @@ impl<'a> Parser<'a> {
 							if i8_sized(imm) {
 								self.push(IR::NI(AT::MovImm, rn, imm as u8));
 							} else if i16_sized(imm) {
+								self.preprocessor.waiting_constants.push(Sz::Word(imm));
 								self.push_placeholder(AT::MovPcRegW, PH::Reg(rn));
 							} else if i32_sized(imm) {
+								self.preprocessor.waiting_constants.push(Sz::Long(imm));
 								self.push_placeholder(AT::MovPcRegL, PH::Reg(rn));
 							} else {
 								self.unexpected(line!());
@@ -1191,7 +1206,88 @@ impl<'a> Parser<'a> {
 
 	#[instrument(skip_all)]
 	fn output(&mut self) {
-		self.index = 0;
+		for (addr, at, ph) in self.preprocessor.waiting.drain(..) {
+			let index = self.preprocessor.intermediates.iter().position(|(ir_addr,_)| *ir_addr == addr).unwrap();
+			match at {
+				AT::MovPcRegW => match ph {
+					PH::Reg(rn) => {
+						let (caddr,_) = self.preprocessor.constants.pop_front().unwrap();
+						let offset = (caddr - addr) >> 1;
+						debug!("check displacement distance");
+						self.preprocessor.intermediates[index] = (addr, IR::NI(at, rn, offset as u8));
+					}
+					PH::LabelReg(label,rn) | PH::ImmLabelReg(label,rn) => {
+						let laddr = self.preprocessor.labels[&label];
+						let offset = (laddr - addr) >> 1;
+						debug!("check displacement distance");
+						self.preprocessor.intermediates[index] = (addr, IR::NI(at, rn, offset as u8));
+					}
+					_ => todo!("{at:?} - {ph:?}"),
+				}
+				AT::MovPcRegL => match ph {
+					PH::Reg(rn) => {
+						let (caddr,_) = self.preprocessor.constants.pop_front().unwrap();
+						let offset = (caddr - addr) >> 2;
+						debug!("check displacement distance");
+						self.preprocessor.intermediates[index] = (addr, IR::NI(at, rn, offset as u8));
+					}
+					PH::LabelReg(label,rn) | PH::ImmLabelReg(label,rn) => {
+						let laddr = self.preprocessor.labels[&label];
+						let offset = (laddr - addr) >> 2;
+						debug!("check displacement distance");
+						self.preprocessor.intermediates[index] = (addr, IR::NI(at, rn, offset as u8));
+					}
+					_ => todo!("{at:?} - {ph:?}"),
+				}
+				AT::MovDspRegL | AT::MovRegDspL => match ph {
+					PH::Dsp(label,rm,rn) => {
+						let d = self.preprocessor.values[&label];
+						self.preprocessor.intermediates[index] = (addr, IR::NM4(at, rn, rm, d as u8));
+					}
+					_ => todo!("{at:?} - {ph:?}"),
+				}
+				AT::Bra | AT::Bsr => match ph {
+					PH::Label(label) => {
+						let laddr = self.preprocessor.labels[&label];
+						let offset = (laddr - addr) >> 1;
+						debug!("check jump distance");
+						self.preprocessor.intermediates[index] = (addr, IR::Imm12(at, offset as u16));
+					}
+					_ => todo!("{at:?} - {ph:?}"),
+				}
+				AT::Bf | AT::BfS | AT::Bt | AT::BtS => match ph {
+					PH::Label(label) => {
+						let laddr = self.preprocessor.labels[&label];
+						let offset = (laddr - addr) >> 1;
+						debug!("check jump distance");
+						self.preprocessor.intermediates[index] = (addr, IR::Imm(at, offset as u8));
+					}
+					_ => todo!("{at:?} - {ph:?}"),
+				}
+				_ => {
+					panic!("Unexpected instruction type found for delayed output: '{at:?}'");
+				}
+			}
+		}
+
+		for (addr,ir) in self.preprocessor.intermediates.drain(..) {
+			eprintln!("[{addr:08X}] {ir:?}");
+			match ir {
+				IR::Zero(at) => self.out.push(Asm::none(at)),
+				IR::One(at,r) => self.out.push(Asm::reg1(at, r)),
+				IR::Two(at,rn,rm) => self.out.push(Asm::reg2(at, rn, rm)),
+				IR::Dsp4(at,r,d) => self.out.push(Asm::reg1_imm(at, r, d)),
+				IR::NM4(at,n,m,d) => self.out.push(Asm::reg2_imm(at, n, m, d)),
+				IR::Imm(at,d) => self.out.push(Asm::imm8(at, d)),
+				IR::Imm12(at,d) => self.out.push(Asm::imm12(at, d)),
+				IR::NI(at,r,d) => self.out.push(Asm::reg1_imm(at, r, d)),
+				IR::Jmp(at,label) => todo!("JMP IR: {at:?} - {label}"),
+				IR::Byte(_value) => {}
+				IR::Word(_value) => {}
+				IR::Long(_value) => {}
+				IR::Placeholder | IR::Placeholder4 => unreachable!("found placeholder during output"),
+			}
+		}
 	}
 }
 
