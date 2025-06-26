@@ -7,7 +7,7 @@ use tracing::{instrument, debug, error, trace};
 use crate::tokens::{Token, Type as TT};
 use crate::asm::{Asm, Type as AT};
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 enum IR {
 	/// xxxx xxxx xxxx xxxx
 	Zero(AT),
@@ -36,27 +36,29 @@ enum IR {
 	Placeholder4,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 enum PH {
 	Reg(u8),
-	// #Label,Rn
-	HLbl(Box<str>,u8),
+	Label(Box<str>),
 	// Label,Rn
-	Lbl(Box<str>,u8),
+	LabelReg(Box<str>,u8),
+	// #Label,Rn
+	ImmLabelReg(Box<str>,u8),
 	// @(Label,Rm),Rn
+	// Rm,@(Label,Rn)
 	Dsp(Box<str>,u8,u8),
 }
 
 pub fn eval(tokens: &[Token], source_root: PathBuf) -> Vec<Asm> {
 	let mut parser = Parser::new(tokens, source_root);
 	parser.process();
-	eprintln!("{:?}", parser.preprocessor);
+	println!("Waiting: {:#?}", parser.preprocessor.waiting);
+	println!("Intermediates: {:#?}", parser.preprocessor.intermediates);
 	parser.output();
-	// parser.out
-	todo!("eval")
+	parser.out
 }
 
-#[derive(Debug, Default)]
+#[derive(Debug, Default, Clone)]
 struct Preprocessor {
 	labels: HashMap<Box<str>, u32>,
 	values: HashMap<Box<str>, i64>,
@@ -77,7 +79,7 @@ pub struct Parser<'a> {
 	preprocessor: Preprocessor,
 
 	// Output
-	// out: Vec<Asm>,
+	out: Vec<Asm>,
 }
 
 impl<'a> Parser<'a> {
@@ -103,10 +105,9 @@ impl<'a> Parser<'a> {
 					let file = std::fs::read_to_string(path).unwrap();
 					let tokens = crate::lexer::eval(&file).unwrap();
 					let mut parser = Parser::new(&tokens, self.source_root.clone());
+					parser.preprocessor= self.preprocessor.clone();
 					parser.process();
-					self.preprocessor.labels.extend(parser.preprocessor.labels);
-					self.preprocessor.values.extend(parser.preprocessor.values);
-					self.preprocessor.macros.extend(parser.preprocessor.macros);
+					self.preprocessor = parser.preprocessor.clone();
 					trace!("found assembly include: '{name}'");
 				}
 
@@ -271,7 +272,7 @@ impl<'a> Parser<'a> {
 						} else if let Some(label) = self.label() {
 								self.token(TT::Comma).unwrap();
 								let rn = self.reg().unwrap();
-								self.push_placeholder(AT::MovPcRegW, PH::HLbl(label,rn));
+								self.push_placeholder(AT::MovPcRegW, PH::ImmLabelReg(label,rn));
 						} else if let Some(c) = self.char() {
 							self.token(TT::Comma).unwrap();
 							let rn = self.reg().unwrap();
@@ -343,7 +344,7 @@ impl<'a> Parser<'a> {
 							if let Some(label) = self.label() {
 								self.token(TT::Comma).unwrap();
 								let rn = self.reg().unwrap();
-								self.push_placeholder(AT::MovPcRegW, PH::Lbl(label,rn));
+								self.push_placeholder(AT::MovPcRegW, PH::LabelReg(label,rn));
 							} else if let Some(rm) = self.idx() {
 								self.token(TT::Comma).unwrap();
 								let rn = self.reg().unwrap();
@@ -406,11 +407,11 @@ impl<'a> Parser<'a> {
 								let label = self.label().unwrap();
 								self.token(TT::Comma).unwrap();
 								let rn = self.reg().unwrap();
-								self.push_placeholder(AT::MovPcRegL, PH::HLbl(label,rn));
+								self.push_placeholder(AT::MovPcRegL, PH::ImmLabelReg(label,rn));
 							} else if let Some(label) = self.label() {
 								self.token(TT::Comma).unwrap();
 								let rn = self.reg().unwrap();
-								self.push_placeholder(AT::MovPcRegL, PH::Lbl(label,rn));
+								self.push_placeholder(AT::MovPcRegL, PH::LabelReg(label,rn));
 							} else if let Some(rm) = self.idx() {
 								self.token(TT::Comma).unwrap();
 								let rn = self.reg().unwrap();
@@ -479,7 +480,7 @@ impl<'a> Parser<'a> {
 							self.unexpected(line!());
 						}
 					} else {
-						panic!("unexpected token for MOV: {:?}", self.tokens[self.index]);
+						self.unexpected(line!());
 					}
 				}
 
@@ -488,7 +489,7 @@ impl<'a> Parser<'a> {
 					self.token(TT::Comma).unwrap();
 					self.r0().unwrap();
 					let imm = d / 4;
-					if !(u8::MIN as u16..=u8::MAX as u16).contains(&imm) {
+					if !u8_sized(imm as i64) {
 						panic!("displacement value too large: found({d}), limit(0..={})", u8::MAX as u16 * 4);
 					}
 					self.push(IR::Imm(AT::MovA, imm as u8));
@@ -516,7 +517,7 @@ impl<'a> Parser<'a> {
 							let rn = self.reg().unwrap();
 							self.push(IR::NI(AT::AddImmReg, rn, imm as u8));
 						} else {
-							panic!("ADD input too large: found({imm}), limit({}..={})", i32::MIN, i32::MAX);
+							self.unexpected(line!());
 						}
 					} else {
 						let (rm,rn) = self.reg2().unwrap();
@@ -536,7 +537,6 @@ impl<'a> Parser<'a> {
 
 				TT::CmpEq => {
 					if self.token(TT::Hash).is_some() {
-						self.preprocessor.address += 2;
 						if let Some(imm) = self.neg_immediate() {
 							if i8_sized(imm) {
 								self.token(TT::Comma).unwrap();
@@ -629,7 +629,7 @@ impl<'a> Parser<'a> {
 						let (rm,rn) = self.reg2().unwrap();
 						self.push(IR::Two(AT::ExtSW, rn, rm));
 					} else {
-						panic!("unexpected token for EXTS: {:?}", self.tokens[self.index]);
+						self.unexpected(line!());
 					}
 				}
 
@@ -642,7 +642,7 @@ impl<'a> Parser<'a> {
 						let (rm,rn) = self.reg2().unwrap();
 						self.push(IR::Two(AT::ExtUW, rn, rm));
 					} else {
-						panic!("unexpected token for EXTU: {:?}", self.tokens[self.index]);
+						self.unexpected(line!());
 					}
 				}
 
@@ -1070,7 +1070,7 @@ impl<'a> Parser<'a> {
 
 			preprocessor: Preprocessor::default(),
 
-			// out: Vec::default(),
+			out: Vec::default(),
 		}
 	}
 
@@ -1355,7 +1355,7 @@ fn no_output_from_empty_source() {
 	let mut parser = Parser::new(&tokens, "".into());
 	parser.process();
 	parser.output();
-	// assert!(parser.out.is_empty());
+	assert!(parser.out.is_empty());
 }
 
 #[test]
@@ -1371,7 +1371,7 @@ end:
 	let tokens = crate::lexer::eval(input).unwrap();
 	let mut parser = Parser::new(&tokens, "".into());
 	parser.process();
-	assert_eq!(parser.preprocessor.labels["start"], 0, "'start' label should start at address 0");
-	assert_eq!(parser.preprocessor.labels["end"], 6, "'end' label should start at address 6");
+	assert_eq!(parser.preprocessor.labels["start"], 0, "'start' label should start at address 0\nWaiting{:?}\nIntermediates{:?}", parser.preprocessor.waiting, parser.preprocessor.intermediates);
+	assert_eq!(parser.preprocessor.labels["end"], 6, "'end' label should start at address 6\nWaiting{:?}\nIntermediates{:?}", parser.preprocessor.waiting, parser.preprocessor.intermediates);
 }
 
