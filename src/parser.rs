@@ -501,7 +501,16 @@ impl<'a> Parser<'a> {
 				}
 
 				TT::Swap => {
-					todo!("SWAP");
+					self.token(TT::Dot).unwrap();
+					if self.token(TT::Byte).is_some() {
+						let (rm,rn) = self.reg2().unwrap();
+						self.push(IR::Two(AT::SwapB, rn, rm));
+					} else if self.token(TT::Word).is_some() {
+						let (rm,rn) = self.reg2().unwrap();
+						self.push(IR::Two(AT::SwapW, rn, rm));
+					} else {
+						self.unexpected(line!());
+					}
 				}
 
 				TT::Xtrct => {
