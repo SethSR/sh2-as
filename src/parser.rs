@@ -36,12 +36,34 @@ enum IR {
 	Placeholder4,
 }
 
+#[derive(Debug)]
+enum PH {
+	Reg(u8),
+	// #Label,Rn
+	HLbl(Box<str>,u8),
+	// Label,Rn
+	Lbl(Box<str>,u8),
+	// @(Label,Rm),Rn
+	Dsp(Box<str>,u8,u8),
+}
+
 pub fn eval(tokens: &[Token], source_root: PathBuf) -> Vec<Asm> {
 	let mut parser = Parser::new(tokens, source_root);
 	parser.process();
-	//eprintln!("");
+	eprintln!("{:?}", parser.preprocessor);
 	parser.output();
 	parser.out
+}
+
+#[derive(Debug, Default)]
+struct Preprocessor {
+	labels: HashMap<Box<str>, u32>,
+	values: HashMap<Box<str>, i64>,
+	macros: HashMap<Box<str>, Vec<Token>>,
+	waiting: Vec<(u32, AT, PH)>,
+
+	address: u32,
+	intermediates: Vec<(u32, IR)>,
 }
 
 #[derive(Debug)]
@@ -51,14 +73,7 @@ pub struct Parser<'a> {
 	index: usize,
 	tokens: &'a [Token],
 
-	// Preprocessor
-	labels: HashMap<Box<str>, u32>,
-	values: HashMap<Box<str>, i64>,
-	macros: HashMap<Box<str>, Vec<Token>>,
-	waiting: Vec<(u32, AT, u8)>,
-
-	address: u32,
-	intermediates: Vec<(u32, IR)>,
+	preprocessor: Preprocessor,
 
 	// Output
 	out: Vec<Asm>,
@@ -77,8 +92,8 @@ impl<'a> Parser<'a> {
 					if imm > u32::MAX as i64 {
 						panic!("address value too large: found({imm}), limit(0..={})", u32::MAX)
 					}
-					self.address = imm as u32;
-					trace!("new section at address = {:08X}", self.address);
+					self.preprocessor.address = imm as u32;
+					trace!("new section at address = {:08X}", self.preprocessor.address);
 				}
 
 				TT::Include => {
@@ -88,9 +103,9 @@ impl<'a> Parser<'a> {
 					let tokens = crate::lexer::eval(&file).unwrap();
 					let mut parser = Parser::new(&tokens, self.source_root.clone());
 					parser.process();
-					self.labels.extend(parser.labels);
-					self.values.extend(parser.values);
-					self.macros.extend(parser.macros);
+					self.preprocessor.labels.extend(parser.preprocessor.labels);
+					self.preprocessor.values.extend(parser.preprocessor.values);
+					self.preprocessor.macros.extend(parser.preprocessor.macros);
 					trace!("found assembly include: '{name}'");
 				}
 
@@ -108,13 +123,13 @@ impl<'a> Parser<'a> {
 					let imm = self.immediate().unwrap();
 					if imm == 2 {
 						// If we're offset by 1, add 1 to realign.
-						if self.address & 1 != 0 {
+						if self.preprocessor.address & 1 != 0 {
 							self.push(IR::Byte(0));
 						}
 					} else if imm == 4 {
 						// If we're offset, use the inverted offset to realign, while ensuring we don't add
 						// anything if we're already aligned.
-						for _ in 0..(4 - (self.address & 3)) & 3 {
+						for _ in 0..(4 - (self.preprocessor.address & 3)) & 3 {
 							self.push(IR::Byte(0));
 						}
 					} else {
@@ -123,8 +138,8 @@ impl<'a> Parser<'a> {
 				}
 
 				TT::LtOrg => {
-					self.address += waiting_words * 2;
-					self.address += waiting_longs * 4;
+					self.preprocessor.address += waiting_words * 2;
+					self.preprocessor.address += waiting_longs * 4;
 					waiting_words = 0;
 					waiting_longs = 0;
 				}
@@ -132,19 +147,19 @@ impl<'a> Parser<'a> {
 				TT::Label(ref name) => {
 					let name = name.clone();
 					if self.token(TT::Colon).is_some() {
-						if self.labels.contains_key(&name) {
+						if self.preprocessor.labels.contains_key(&name) {
 							panic!("duplicate label: {name}");
 						} else {
 							trace!("found label: '{name}'");
-							self.labels.insert(name.clone(), self.address);
+							self.preprocessor.labels.insert(name.clone(), self.preprocessor.address);
 						}
 					} else if self.token(TT::Eq).is_some() {
 						let value = self.immediate().unwrap();
-						if self.values.contains_key(&name) {
+						if self.preprocessor.values.contains_key(&name) {
 							panic!("duplicate value: {name} = {value}");
 						} else {
 							trace!("found value: {name} = {value}");
-							self.values.insert(name.clone(), value);
+							self.preprocessor.values.insert(name.clone(), value);
 						}
 					}
 				}
@@ -156,7 +171,7 @@ impl<'a> Parser<'a> {
 					while let Some(token) = self.next() {
 						if matches!(token, Token { tt: TT::MacroEnd, ..}) {
 							let tokens = self.tokens[start..end].to_vec();
-							self.macros.insert(name.clone(), tokens);
+							self.preprocessor.macros.insert(name.clone(), tokens);
 							break;
 						}
 						end = self.index;
@@ -189,8 +204,7 @@ impl<'a> Parser<'a> {
 								}
 							}
 						} else {
-							let token = &self.tokens[self.index];
-							panic!("unexpected token: {token:?}");
+							self.unexpected(line!());
 						}
 					} else if self.token(TT::Word).is_some() {
 						let imm = self.neg_immediate().unwrap();
@@ -210,12 +224,10 @@ impl<'a> Parser<'a> {
 							self.push(IR::Placeholder4);
 							error!("handle long-constant labels: {label}");
 						} else {
-							let token = &self.tokens[self.index];
-							panic!("unexpected token: {token:?}");
+							self.unexpected(line!());
 						}
 					} else {
-						let token = &self.tokens[self.index];
-						panic!("unexpected token: {token:?}");
+						self.unexpected(line!());
 					}
 				}
 
@@ -237,7 +249,7 @@ impl<'a> Parser<'a> {
 							self.push(IR::Long(0));
 						}
 					} else {
-						panic!("unexpected token: {:?}", self.tokens[self.index]);
+						self.unexpected(line!());
 					}
 				}
 
@@ -253,7 +265,7 @@ impl<'a> Parser<'a> {
 						} else if i32_sized(imm) {
 							self.push_placeholder(AT::MovPcRegL, rn);
 						} else {
-							panic!("unexpected token: {:?}", self.tokens[self.index]);
+							self.unexpected(line!());
 						}
 					} else if let Some(rm) = self.reg() {
 						self.token(TT::Comma).unwrap();
@@ -304,7 +316,7 @@ impl<'a> Parser<'a> {
 									// MOV.B R0,@Rn
 									self.push(IR::Two(AT::MovRegAdrB, rn, 0));
 								} else {
-									panic!("unexpected token: {:?}", self.tokens[self.index]);
+									self.unexpected(line!());
 								}
 							} else if let Some(rm) = self.reg() {
 								self.token(TT::Comma).unwrap();
@@ -321,24 +333,24 @@ impl<'a> Parser<'a> {
 									panic!("unexpected token: {:?}", self.tokens[self.index]);
 								}
 							} else {
-								panic!("unexpected token: {:?}", self.tokens[self.index]);
+								self.unexpected(line!());
 							}
 						} else if self.token(TT::Word).is_some() {
 							todo!("handle MOV.W instructions");
 						} else if self.token(TT::Long).is_some() {
 							todo!("handle MOV.L instructions");
 						} else {
-							panic!("unexpected token: {:?}", self.tokens[self.index]);
+							self.unexpected(line!());
 						}
+					} else {
+						panic!("unexpected token for MOV: {:?}", self.tokens[self.index]);
 					}
-
-					panic!("unexpected token for MOV: {:?}", self.tokens[self.index]);
 				}
 
 				TT::Add |
 				TT::CmpEq => {
 					if self.token(TT::Hash).is_some() {
-						self.address += 2;
+						self.preprocessor.address += 2;
 						if let Some(imm) = self.neg_immediate() {
 							self.token(TT::Comma).unwrap();
 							if i8_sized(imm) {
@@ -356,7 +368,7 @@ impl<'a> Parser<'a> {
 				TT::Xor => {
 					if self.token(TT::Hash).is_some() {
 						let imm = self.immediate().unwrap();
-						self.address += 2;
+						self.preprocessor.address += 2;
 						if i8_sized(imm) {
 							// regular instruction
 						} else {
@@ -378,7 +390,7 @@ impl<'a> Parser<'a> {
 				TT::Byte | TT::Word | TT::Long => {}
 
 				_ => {
-					self.address += 2;
+					self.preprocessor.address += 2;
 				}
 			}
 		}
@@ -698,7 +710,7 @@ impl<'a> Parser<'a> {
 
 				TT::Bf => {
 					let label = self.label().unwrap();
-					if !self.labels.contains_key(&label) {
+					if !self.preprocessor.labels.contains_key(&label) {
 						error!("unknown label: '{label}'");
 						continue;
 					}
@@ -707,7 +719,7 @@ impl<'a> Parser<'a> {
 
 				TT::BfS => {
 					let label = self.label().unwrap();
-					if !self.labels.contains_key(&label) {
+					if !self.preprocessor.labels.contains_key(&label) {
 						error!("unknown label: '{label}'");
 						continue;
 					}
@@ -716,7 +728,7 @@ impl<'a> Parser<'a> {
 
 				TT::Bt => {
 					let label = self.label().unwrap();
-					if !self.labels.contains_key(&label) {
+					if !self.preprocessor.labels.contains_key(&label) {
 						error!("unknown label: '{label}'");
 						continue;
 					}
@@ -725,7 +737,7 @@ impl<'a> Parser<'a> {
 
 				TT::BtS => {
 					let label = self.label().unwrap();
-					if !self.labels.contains_key(&label) {
+					if !self.preprocessor.labels.contains_key(&label) {
 						error!("unknown label: '{label}'");
 						continue;
 					}
@@ -734,7 +746,7 @@ impl<'a> Parser<'a> {
 
 				TT::Bra => {
 					let label = self.label().unwrap();
-					if !self.labels.contains_key(&label) {
+					if !self.preprocessor.labels.contains_key(&label) {
 						error!("unknown label: '{label}'");
 						continue;
 					}
@@ -748,7 +760,7 @@ impl<'a> Parser<'a> {
 
 				TT::Bsr => {
 					let label = self.label().unwrap();
-					if !self.labels.contains_key(&label) {
+					if !self.preprocessor.labels.contains_key(&label) {
 						error!("unknown label: '{label}'");
 						continue;
 					}
@@ -826,25 +838,7 @@ impl<'a> Parser<'a> {
 	}
 }
 
-impl<'a> Parser<'a> {
-	fn new(tokens: &'a [Token], source_root: PathBuf) -> Self {
-		Self {
-			source_root,
-
-			index: 0,
-			tokens,
-
-			labels: HashMap::default(),
-			values: HashMap::default(),
-			macros: HashMap::default(),
-			waiting: Vec::default(),
-			intermediates: Vec::default(),
-			address: 0,
-
-			out: Vec::default(),
-		}
-	}
-
+impl Preprocessor {
 	fn push(&mut self, ir: IR) {
 		match ir {
 			IR::Byte(_) => {
@@ -862,9 +856,44 @@ impl<'a> Parser<'a> {
 		}
 	}
 
-	fn push_placeholder(&mut self, at: AT, rn: u8) {
-		self.waiting.push((self.address, at, rn));
+	fn push_placeholder(&mut self, at: AT, ph: PH) {
+		self.waiting.push((self.address, at, ph));
 		self.push(IR::Placeholder);
+	}
+}
+
+impl<'a> Parser<'a> {
+	fn new(tokens: &'a [Token], source_root: PathBuf) -> Self {
+		Self {
+			source_root,
+
+			index: 0,
+			tokens,
+
+			preprocessor: Preprocessor::default(),
+
+			out: Vec::default(),
+		}
+	}
+
+	fn unexpected(&self, line: u32) {
+		let start = self.tokens[..self.index].iter().rposition(|t| t.tt == TT::NewLine);
+		let end = self.tokens[self.index..].iter().position(|t| t.tt == TT::NewLine);
+		match (start, end) {
+			(Some(start), Some(end)) => eprintln!("{:?}", &self.tokens[start..self.index+end]),
+			(None, Some(end)) => eprintln!("{:?}", &self.tokens[..self.index+end]),
+			(Some(start), None) => eprintln!("{:?}", &self.tokens[start..]),
+			(None, None) => eprintln!("{:?}", self.tokens),
+		}
+		panic!("[{line:03}]: unexpected token: {:?}", self.tokens[self.index]);
+	}
+
+	fn push(&mut self, ir: IR) {
+		self.preprocessor.push(ir);
+	}
+
+	fn push_placeholder(&mut self, at: AT, ph: PH) {
+		self.preprocessor.push_placeholder(at, ph);
 	}
 
 	fn next(&mut self) -> Option<&Token> {
@@ -879,6 +908,15 @@ impl<'a> Parser<'a> {
 			.is_some()
 		{
 			Some(())
+		} else {
+			self.index = self.index.saturating_sub(1);
+			None
+		}
+	}
+
+	fn char(&mut self) -> Option<char> {
+		if let Some(Token { tt: TT::Char(c), ..}) = self.next() {
+			Some(*c)
 		} else {
 			self.index = self.index.saturating_sub(1);
 			None
@@ -938,7 +976,7 @@ impl<'a> Parser<'a> {
 			.and_then(|_| self.immediate())
 			.or_else(|| {
 				let label = self.label()?;
-				self.values.get(&label).copied()
+				self.preprocessor.values.get(&label).copied()
 			})
 			.filter(|_| self.token(TT::Comma).is_some())
 			.filter(|_| self.token(TT::Pc).is_some())
@@ -995,11 +1033,25 @@ impl<'a> Parser<'a> {
 			})
 	}
 
+	fn label_reg(&mut self) -> Option<(Box<str>,u8)> {
+		let index = self.index;
+		self.token(TT::At)
+			.filter(|_| self.token(TT::OParen).is_some())
+			.and_then(|_| self.label())
+			.filter(|_| self.token(TT::Comma).is_some())
+			.zip(self.reg())
+			.filter(|_| self.token(TT::CParen).is_some())
+			.or_else(|| {
+				self.index = index;
+				None
+			})
+	}
+
 	fn idx(&mut self) -> Option<u8> {
 		let index = self.index;
 		self.token(TT::At)
 			.filter(|_| self.token(TT::OParen).is_some())
-			.filter(|_| self.reg() == Some(0))
+			.filter(|_| self.r0().is_some())
 			.filter(|_| self.token(TT::Comma).is_some())
 			.and_then(|_| self.reg())
 			.filter(|_| self.token(TT::CParen).is_some())
@@ -1117,7 +1169,7 @@ end:
 	let tokens = crate::lexer::eval(input).unwrap();
 	let mut parser = Parser::new(&tokens, "".into());
 	parser.process();
-	assert_eq!(parser.labels["start"], 0, "'start' label should start at address 0");
-	assert_eq!(parser.labels["end"], 6, "'end' label should start at address 6");
+	assert_eq!(parser.preprocessor.labels["start"], 0, "'start' label should start at address 0");
+	assert_eq!(parser.preprocessor.labels["end"], 6, "'end' label should start at address 6");
 }
 
