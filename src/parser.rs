@@ -662,7 +662,22 @@ impl<'a> Parser<'a> {
 					}
 				}
 
-				TT::Mac => {}
+				TT::Mac => {
+					self.token(TT::Dot).unwrap();
+					if self.token(TT::Word).is_some() {
+						let rm = self.inc().unwrap();
+						self.token(TT::Comma).unwrap();
+						let rn = self.inc().unwrap();
+						self.push(IR::Two(AT::MacW, rn, rm));
+					} else if self.token(TT::Long).is_some() {
+						let rm = self.inc().unwrap();
+						self.token(TT::Comma).unwrap();
+						let rn = self.inc().unwrap();
+						self.push(IR::Two(AT::MacL, rn, rm));
+					} else {
+						self.unexpected(line!());
+					}
+				}
 
 				TT::Mul => {
 					let (rm,rn) = self.reg2().unwrap();
