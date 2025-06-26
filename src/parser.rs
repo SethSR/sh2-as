@@ -520,11 +520,18 @@ impl<'a> Parser<'a> {
 
 				TT::Add => {
 					if self.token(TT::Hash).is_some() {
-						let imm = self.neg_immediate().unwrap();
-						if i8_sized(imm) {
+						if let Some(imm) = self.neg_immediate() {
+							if i8_sized(imm) {
+								self.token(TT::Comma).unwrap();
+								let rn = self.reg().unwrap();
+								self.push(IR::NI(AT::AddImmReg, rn, imm as u8));
+							} else {
+								panic!("ADD input too large: found({imm}), limit({}..={})", i32::MIN, i32::MAX);
+							}
+						} else if let Some(c) = self.char() {
 							self.token(TT::Comma).unwrap();
 							let rn = self.reg().unwrap();
-							self.push(IR::NI(AT::AddImmReg, rn, imm as u8));
+							self.push(IR::NI(AT::AddImmReg, rn, c as u8));
 						} else {
 							self.unexpected(line!());
 						}
