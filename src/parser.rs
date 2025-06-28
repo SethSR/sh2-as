@@ -21,10 +21,10 @@ enum IR {
 	NM4(AT, u8, u8, u8),
 	/// xxxx xxxx iiii iiii
 	Imm(AT, u8),
+	/// xxxx iiii iiii iiii
+	Imm12(AT, u16),
 	/// xxxx nnnn iiii iiii
 	NI(AT, u8, u8),
-
-	Jmp(AT, Box<str>),
 
 	Byte(u8),
 	Word(u16),
@@ -279,6 +279,7 @@ impl<'a> Parser<'a> {
 								self.unexpected(line!());
 							}
 						} else if let Some((label,rn)) = self.label_reg() {
+							// MOV #label,Rn
 							self.push_placeholder(AT::MovPcRegW, PH::ImmLabelReg(label,rn));
 						} else if let Some((c,rn)) = self.char_reg() {
 							self.push(IR::NI(AT::MovImm, rn, c as u8));
@@ -324,6 +325,7 @@ impl<'a> Parser<'a> {
 							}
 						} else if self.token(TT::Word).is_some() {
 							if let Some((label,rn)) = self.label_reg() {
+								// MOV.W label,Rn
 								self.push_placeholder(AT::MovPcRegW, PH::LabelReg(label,rn));
 							} else if let Some((rm,rn)) = self.idx_reg() {
 								// MOV.W @(R0,Rm),Rn
@@ -367,7 +369,7 @@ impl<'a> Parser<'a> {
 						} else if self.token(TT::Long).is_some() {
 							if let Some((label,rn)) = self.pair(|p| p.token(TT::Hash).and_then(|_| p.label()), |p| p.reg()) {
 								self.push_placeholder(AT::MovPcRegL, PH::ImmLabelReg(label,rn));
-							} else if let Some((label,rn)) = self.pair(|p| p.label(), |p| p.reg()) {
+							} else if let Some((label,rn)) = self.label_reg() {
 								self.push_placeholder(AT::MovPcRegL, PH::LabelReg(label,rn));
 							} else if let Some((rm,rn)) = self.idx_reg() {
 								// MOV.L @(R0,Rm),Rn
@@ -384,7 +386,8 @@ impl<'a> Parser<'a> {
 							} else if let Some(((d,rm),rn)) = self.dspreg_reg() {
 								// MOV.L @(disp,Rm),Rn
 								self.push(IR::NM4(AT::MovDspRegL, rn, rm, d));
-							} else if let Some(((label,rm),rn)) = self.pair(|p| p.label_reg(), |p| p.reg()) {
+							} else if let Some(((label,rm),rn)) = self.pair(|p| p.at_label_reg(), |p| p.reg()) {
+								// MOV.L @(label,Rm),Rn
 								self.push_placeholder(AT::MovDspRegL, PH::Dsp(label,rm,rn));
 							} else if let Some((rm,rn)) = self.inc_reg() {
 								// MOV.L @Rm+,Rn
@@ -398,7 +401,8 @@ impl<'a> Parser<'a> {
 							} else if let Some((rm,(d,rn))) = self.reg_dspreg() {
 								// MOV.L Rm,@(disp,Rn)
 								self.push(IR::NM4(AT::MovRegDspL, rn, rm, d));
-							} else if let Some((rm,(label,rn))) = self.pair(|p| p.reg(), |p| p.label_reg()) {
+							} else if let Some((rm,(label,rn))) = self.pair(|p| p.reg(), |p| p.at_label_reg()) {
+								// MOV.L Rm,@(label,Rn)
 								self.push_placeholder(AT::MovRegDspL, PH::Dsp(label,rm,rn));
 							} else if let Some((rm,rn)) = self.reg_idx() {
 								// MOV.L Rm,@(R0,Rn)
@@ -742,27 +746,27 @@ impl<'a> Parser<'a> {
 
 				TT::Bf => {
 					let label = self.label().unwrap();
-					self.push(IR::Jmp(AT::Bf, label));
+					self.push_placeholder(AT::Bf, PH::Label(label));
 				}
 
 				TT::BfS => {
 					let label = self.label().unwrap();
-					self.push(IR::Jmp(AT::BfS, label));
+					self.push_placeholder(AT::BfS, PH::Label(label));
 				}
 
 				TT::Bt => {
 					let label = self.label().unwrap();
-					self.push(IR::Jmp(AT::Bt, label));
+					self.push_placeholder(AT::Bt, PH::Label(label));
 				}
 
 				TT::BtS => {
 					let label = self.label().unwrap();
-					self.push(IR::Jmp(AT::BtS, label));
+					self.push_placeholder(AT::BtS, PH::Label(label));
 				}
 
 				TT::Bra => {
 					let label = self.label().unwrap();
-					self.push(IR::Jmp(AT::Bra, label));
+					self.push_placeholder(AT::Bra, PH::Label(label));
 				}
 
 				TT::BraF => {
@@ -772,7 +776,7 @@ impl<'a> Parser<'a> {
 
 				TT::Bsr => {
 					let label = self.label().unwrap();
-					self.push(IR::Jmp(AT::Bsr, label));
+					self.push_placeholder(AT::Bsr, PH::Label(label));
 				}
 
 				TT::BsrF => {
@@ -937,73 +941,7 @@ impl<'a> Parser<'a> {
 
 	#[instrument(skip_all)]
 	fn output(&mut self) {
-		for (addr, at, ph) in self.preprocessor.waiting.drain(..) {
-			let index = self.preprocessor.intermediates.iter().position(|(ir_addr,_)| *ir_addr == addr).unwrap();
-			if let Some(at) = at {
-				match at {
-					AT::MovPcRegW => match ph {
-						PH::Reg(rn) => {
-							let (caddr,_) = self.preprocessor.constants.pop_front().unwrap();
-							let offset = (caddr - addr) >> 1;
-							if !u8_sized(offset as i64) {
-								error!("{at:?} offset too large: found({offset}), limit(0..={})", u8::MAX);
-								continue;
-							}
-							self.preprocessor.intermediates[index] = (addr, IR::NI(at, rn, offset as u8));
-						}
-						PH::LabelReg(label,rn) | PH::ImmLabelReg(label,rn) => {
-							let laddr = self.preprocessor.labels[&label];
-							let offset = (laddr - addr) >> 1;
-							if !u8_sized(offset as i64) {
-								error!("{at:?} offset too large: found({offset}), limit(0..={})", u8::MAX);
-								continue;
-							}
-							self.preprocessor.intermediates[index] = (addr, IR::NI(at, rn, offset as u8));
-						}
-						_ => todo!("{at:?} - {ph:?}"),
-					}
-					AT::MovPcRegL => match ph {
-						PH::Reg(rn) => {
-							let (caddr,_) = self.preprocessor.constants.pop_front().unwrap();
-							let offset = (caddr - addr) >> 2;
-							if !u8_sized(offset as i64) {
-								error!("{at:?} offset too large: found({offset}), limit(0..={})", u8::MAX);
-								continue;
-							}
-							self.preprocessor.intermediates[index] = (addr, IR::NI(at, rn, offset as u8));
-						}
-						PH::LabelReg(label,rn) | PH::ImmLabelReg(label,rn) => {
-							let laddr = self.preprocessor.labels[&label];
-							let offset = (laddr - addr) >> 2;
-							if !u8_sized(offset as i64) {
-								error!("{at:?} offset too large: found({offset}), limit(0..={})", u8::MAX);
-								continue;
-							}
-							self.preprocessor.intermediates[index] = (addr, IR::NI(at, rn, offset as u8));
-						}
-						_ => todo!("{at:?} - {ph:?}"),
-					}
-					AT::MovDspRegL | AT::MovRegDspL => match ph {
-						PH::Dsp(label,rm,rn) => {
-							let d = self.preprocessor.values[&label];
-							self.preprocessor.intermediates[index] = (addr, IR::NM4(at, rn, rm, d as u8));
-						}
-						_ => todo!("{at:?} - {ph:?}"),
-					}
-					_ => {
-						panic!("Unexpected instruction type found for delayed output: '{at:?}'");
-					}
-				}
-			} else {
-				match ph {
-					PH::Label(label) => {
-						let laddr = self.preprocessor.labels[&label];
-						self.preprocessor.intermediates[index] = (addr, IR::Long(laddr));
-					}
-					_ => todo!("{at:?} - {ph:?}"),
-				}
-			}
-		}
+		self.preprocessor.finish();
 
 		for (addr,ir) in self.preprocessor.intermediates.drain(..) {
 			eprintln!("[{addr:08X}] {ir:X?}");
@@ -1014,32 +952,8 @@ impl<'a> Parser<'a> {
 				IR::Dsp4(at,r,d) => self.out.push(Asm::reg1_imm(at, r, d)),
 				IR::NM4(at,n,m,d) => self.out.push(Asm::reg2_imm(at, n, m, d)),
 				IR::Imm(at,d) => self.out.push(Asm::imm8(at, d)),
+				IR::Imm12(at,d) => self.out.push(Asm::imm12(at, d)),
 				IR::NI(at,r,d) => self.out.push(Asm::reg1_imm(at, r, d)),
-				IR::Jmp(at,label) => {
-					match at {
-						AT::Bf | AT::BfS | AT::Bt | AT::BtS => {
-							let laddr = self.preprocessor.labels[&label];
-							let offset = (laddr - addr) >> 1;
-							if !u8_sized(offset as i64) {
-								error!("{at:?} offset too large: found({offset}), limit(0..={})", u8::MAX);
-								continue;
-							}
-							self.out.push(Asm::imm8(at, offset as u8));
-						}
-						AT::Bra | AT::Bsr => {
-							let laddr = self.preprocessor.labels[&label];
-							let offset = (laddr - addr) >> 1;
-							if !u16_sized(offset as i64) {
-								error!("{at:?} offset too large: found({offset}), limit(0..={})", u16::MAX);
-								continue;
-							}
-							self.out.push(Asm::imm12(at, offset as u16));
-						}
-						_ => {
-							panic!("unexpected AsmType for Jump IR during output: {at:?}")
-						}
-					}
-				}
 				IR::Byte(_value) => {}
 				IR::Word(_value) => {}
 				IR::Long(_value) => {}
@@ -1075,6 +989,100 @@ impl Preprocessor {
 	fn push_const_placeholder(&mut self, label: Box<str>) {
 		self.waiting.push((self.address, None, PH::Label(label)));
 		self.push(IR::Placeholder4);
+	}
+
+	fn finish(&mut self) {
+		for (addr, at, ph) in self.waiting.drain(..) {
+			let index = self.intermediates.iter().position(|(ir_addr,_)| *ir_addr == addr).unwrap();
+			if let Some(at) = at {
+				match at {
+					AT::MovPcRegW => match ph {
+						PH::Reg(rn) => {
+							let (caddr,_) = self.constants.pop_front().unwrap();
+							let offset = (caddr - addr) >> 1;
+							if !u8_sized(offset as i64) {
+								error!("{at:?} offset too large: found({offset}), limit(0..={})", u8::MAX);
+								continue;
+							}
+							self.intermediates[index] = (addr, IR::NI(at, rn, offset as u8));
+						}
+						PH::LabelReg(label,rn) | PH::ImmLabelReg(label,rn) => {
+							let laddr = self.labels[&label];
+							let offset = (laddr - addr) >> 1;
+							if !u8_sized(offset as i64) {
+								error!("{at:?} offset too large: found({offset}), limit(0..={})", u8::MAX);
+								continue;
+							}
+							self.intermediates[index] = (addr, IR::NI(at, rn, offset as u8));
+						}
+						_ => todo!("{at:?} - {ph:?}"),
+					}
+					AT::MovPcRegL => match ph {
+						PH::Reg(rn) => {
+							let (caddr,_) = self.constants.pop_front().unwrap();
+							let offset = (caddr - addr) >> 2;
+							if !u8_sized(offset as i64) {
+								error!("{at:?} offset too large: found({offset}), limit(0..={})", u8::MAX);
+								continue;
+							}
+							self.intermediates[index] = (addr, IR::NI(at, rn, offset as u8));
+						}
+						PH::LabelReg(label,rn) | PH::ImmLabelReg(label,rn) => {
+							let laddr = self.labels[&label];
+							let offset = (laddr - addr) >> 2;
+							if !u8_sized(offset as i64) {
+								error!("{at:?} offset too large: found({offset}), limit(0..={})", u8::MAX);
+								continue;
+							}
+							self.intermediates[index] = (addr, IR::NI(at, rn, offset as u8));
+						}
+						_ => todo!("{at:?} - {ph:?}"),
+					}
+					AT::MovDspRegL | AT::MovRegDspL => match ph {
+						PH::Dsp(label,rm,rn) => {
+							let d = self.values[&label];
+							self.intermediates[index] = (addr, IR::NM4(at, rn, rm, d as u8));
+						}
+						_ => todo!("{at:?} - {ph:?}"),
+					}
+					AT::Bf | AT::BfS | AT::Bt | AT::BtS => match ph {
+						PH::Label(label) => {
+							let laddr = self.labels[&label];
+							let offset = (laddr as i64 - addr as i64) >> 1;
+							if !i8_sized(offset) {
+								error!("{at:?} offset too large: found({offset}), limit(0..={})", u8::MAX);
+								continue;
+							}
+							self.intermediates[index] = (addr, IR::Imm(at, offset as u8));
+						}
+						_ => todo!("{at:?} - {ph:?}"),
+					}
+					AT::Bra | AT::Bsr => match ph {
+						PH::Label(label) => {
+							let laddr = self.labels[&label];
+							let offset = (laddr as i64 - addr as i64) >> 1;
+							if !i16_sized(offset) {
+								error!("{at:?} offset too large: found({offset}), limit(0..={})", u16::MAX);
+								continue;
+							}
+							self.intermediates[index] = (addr, IR::Imm12(at, offset as u16));
+						}
+						_ => todo!("{at:?} - {ph:?}"),
+					}
+					_ => {
+						panic!("Unexpected instruction type found for delayed output: '{at:?}'");
+					}
+				}
+			} else {
+				match ph {
+					PH::Label(label) => {
+						let laddr = self.labels[&label];
+						self.intermediates[index] = (addr, IR::Long(laddr));
+					}
+					_ => todo!("{at:?} - {ph:?}"),
+				}
+			}
+		}
 	}
 }
 
@@ -1277,8 +1285,14 @@ impl<'a> Parser<'a> {
 		)
 	}
 
-	fn label_reg(&mut self) -> Option<(Box<str>,u8)> {
+	/// @(label,reg)
+	fn at_label_reg(&mut self) -> Option<(Box<str>,u8)> {
 		self.at_pair(|p| p.label(), |p| p.reg())
+	}
+
+	/// label,reg
+	fn label_reg(&mut self) -> Option<(Box<str>,u8)> {
+		self.pair(|p| p.label(), |p| p.reg())
 	}
 
 	fn idx(&mut self) -> Option<u8> {
