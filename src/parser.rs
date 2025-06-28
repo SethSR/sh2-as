@@ -2,7 +2,7 @@
 use std::collections::{HashMap, VecDeque};
 use std::path::{Path, PathBuf};
 
-use tracing::{instrument, debug, error, trace};
+use tracing::{instrument, error, trace};
 
 use crate::tokens::{Token, Type as TT};
 use crate::asm::{Asm, Type as AT};
@@ -21,12 +21,9 @@ enum IR {
 	NM4(AT, u8, u8, u8),
 	/// xxxx xxxx iiii iiii
 	Imm(AT, u8),
-	/// xxxx dddd dddd dddd
-	Imm12(AT, u16),
 	/// xxxx nnnn iiii iiii
 	NI(AT, u8, u8),
 
-	// TODO - srenshaw - We can probably replace uses of PH::Label with this.
 	Jmp(AT, Box<str>),
 
 	Byte(u8),
@@ -70,7 +67,7 @@ struct Preprocessor {
 	macros: HashMap<Box<str>, Vec<Token>>,
 	constants: VecDeque<(u32,i64)>,
 	waiting_constants: Vec<Sz>,
-	waiting: Vec<(u32, AT, PH)>,
+	waiting: Vec<(u32, Option<AT>, PH)>,
 
 	address: u32,
 	intermediates: Vec<(u32, IR)>,
@@ -105,24 +102,24 @@ impl<'a> Parser<'a> {
 
 				TT::Include => {
 					let name = self.string().unwrap();
+					trace!("found assembly include: '{name}'");
 					let path = Path::join(&self.source_root, name.to_string());
 					let file = std::fs::read_to_string(path).unwrap();
 					let tokens = crate::lexer::eval(&file).unwrap();
 					let mut parser = Parser::new(&tokens, self.source_root.clone());
-					parser.preprocessor= self.preprocessor.clone();
+					parser.preprocessor = self.preprocessor.clone();
 					parser.process();
 					self.preprocessor = parser.preprocessor.clone();
-					trace!("found assembly include: '{name}'");
 				}
 
 				TT::BInclude => {
 					let name = self.string().unwrap();
+					trace!("found binary include: '{name}'");
 					let path = Path::join(&self.source_root, name.to_string());
 					let file = std::fs::read(path).unwrap();
 					for byte in file {
 						self.push(IR::Byte(byte));
 					}
-					trace!("found binary include: '{name}'");
 				}
 
 				TT::Align => {
@@ -236,8 +233,7 @@ impl<'a> Parser<'a> {
 								panic!("too large {imm}");
 							}
 						} else if let Some(label) = self.label() {
-							self.push(IR::Placeholder4);
-							error!("handle long-constant labels: {label}");
+							self.push_const_placeholder(label);
 						} else {
 							self.unexpected(line!());
 						}
@@ -270,9 +266,7 @@ impl<'a> Parser<'a> {
 
 				TT::Mov => {
 					if self.token(TT::Hash).is_some() {
-						if let Some(imm) = self.neg_immediate() {
-							self.token(TT::Comma).unwrap();
-							let rn = self.reg().unwrap();
+						if let Some((imm,rn)) = self.pair(|p| p.neg_immediate(), |p| p.reg()) {
 							if i8_sized(imm) {
 								self.push(IR::NI(AT::MovImm, rn, imm as u8));
 							} else if i16_sized(imm) {
@@ -284,210 +278,137 @@ impl<'a> Parser<'a> {
 							} else {
 								self.unexpected(line!());
 							}
-						} else if let Some(label) = self.label() {
-								self.token(TT::Comma).unwrap();
-								let rn = self.reg().unwrap();
-								self.push_placeholder(AT::MovPcRegW, PH::ImmLabelReg(label,rn));
-						} else if let Some(c) = self.char() {
-							self.token(TT::Comma).unwrap();
-							let rn = self.reg().unwrap();
+						} else if let Some((label,rn)) = self.label_reg() {
+							self.push_placeholder(AT::MovPcRegW, PH::ImmLabelReg(label,rn));
+						} else if let Some((c,rn)) = self.char_reg() {
 							self.push(IR::NI(AT::MovImm, rn, c as u8));
 						} else {
 							self.unexpected(line!());
 						}
-					} else if let Some(rm) = self.reg() {
-						self.token(TT::Comma).unwrap();
-						let rn = self.reg().unwrap();
+					} else if let Some((rm,rn)) = self.reg2() {
 						self.push(IR::Two(AT::MovRegReg, rn, rm));
 					} else if self.token(TT::Dot).is_some() {
 						if self.token(TT::Byte).is_some() {
-							if let Some(rm) = self.idx() {
-								self.token(TT::Comma).unwrap();
-								let rn = self.reg().unwrap();
+							if let Some((rm,rn)) = self.idx_reg() {
 								// MOV.B @(R0,Rm),Rn
 								self.push(IR::Two(AT::MovR0RegB, rn, rm));
-							} else if let Some(d) = self.disp_gbr() {
-								self.token(TT::Comma).unwrap();
-								assert_eq!(Some(0), self.reg());
+							} else if let Some((d,0)) = self.dspgbr_reg() {
 								// MOV.B @(disp,GBR),R0
 								self.push(IR::Imm(AT::MovGbrR0B, d));
-							} else if let Some((d,rm)) = self.disp_reg() {
-								self.token(TT::Comma).unwrap();
-								assert_eq!(Some(0), self.reg());
+							} else if let Some(((d,rm),0)) = self.dspreg_reg() {
 								// MOV.B @(disp,Rm),R0
 								self.push(IR::Dsp4(AT::MovDspR0B, rm, d));
-							} else if let Some(rm) = self.inc() {
-								self.token(TT::Comma).unwrap();
-								let rn = self.reg().unwrap();
+							} else if let Some((rm,rn)) = self.inc_reg() {
 								// MOV.B @Rm+,Rn
 								self.push(IR::Two(AT::MovIncRegB, rn, rm));
-							} else if let Some(rm) = self.adr() {
-								self.token(TT::Comma).unwrap();
-								let rn = self.reg().unwrap();
+							} else if let Some((rm,rn)) = self.adr_reg() {
 								// MOV.B @Rm,Rn
 								self.push(IR::Two(AT::MovAdrRegB, rn, rm));
-							} else if let Some(rm) = self.reg() {
-								self.token(TT::Comma).unwrap();
-								if rm == 0 {
-									if let Some(d) = self.disp_gbr() {
-										// MOV.B R0,@(disp,GBR)
-										self.push(IR::Imm(AT::MovR0GbrB, d));
-										continue;
-									} else if let Some((d,rn)) = self.disp_reg() {
-										// MOV.B R0,@(disp,Rn)
-										self.push(IR::Dsp4(AT::MovR0DspB, rn, d));
-										continue;
-									}
-								}
-
-								if let Some(rn) = self.idx() {
-									// MOV.B Rm,@(R0,Rn)
-									self.push(IR::Two(AT::MovRegR0B, rn, 0));
-								} else if let Some(rn) = self.dec() {
-									// MOV.B Rm,@-Rn
-									self.push(IR::Two(AT::MovRegDecB, rn, 0));
-								} else if let Some(rn) = self.adr() {
-									// MOV.B Rm,@Rn
-									self.push(IR::Two(AT::MovRegAdrB, rn, 0));
-								} else {
-									self.unexpected(line!());
-								}
+							} else if let Some((0,d)) = self.reg_dspgbr() {
+								// MOV.B R0,@(disp,GBR)
+								self.push(IR::Imm(AT::MovR0GbrB, d));
+							} else if let Some((0,(d,rn))) = self.reg_dspreg() {
+								// MOV.B R0,@(disp,Rn)
+								self.push(IR::Dsp4(AT::MovR0DspB, rn, d));
+							} else if let Some((rm,rn)) = self.reg_idx() {
+								// MOV.B Rm,@(R0,Rn)
+								self.push(IR::Two(AT::MovRegR0B, rn, rm));
+							} else if let Some((rm,rn)) = self.reg_dec() {
+								// MOV.B Rm,@-Rn
+								self.push(IR::Two(AT::MovRegDecB, rn, rm));
+							} else if let Some((rm,rn)) = self.reg_adr() {
+								// MOV.B Rm,@Rn
+								self.push(IR::Two(AT::MovRegAdrB, rn, rm));
 							} else {
 								self.unexpected(line!());
 							}
 						} else if self.token(TT::Word).is_some() {
-							if let Some(label) = self.label() {
-								self.token(TT::Comma).unwrap();
-								let rn = self.reg().unwrap();
+							if let Some((label,rn)) = self.label_reg() {
 								self.push_placeholder(AT::MovPcRegW, PH::LabelReg(label,rn));
-							} else if let Some(rm) = self.idx() {
-								self.token(TT::Comma).unwrap();
-								let rn = self.reg().unwrap();
+							} else if let Some((rm,rn)) = self.idx_reg() {
 								// MOV.W @(R0,Rm),Rn
 								self.push(IR::Two(AT::MovR0RegW, rn, rm));
-							} else if let Some(d) = self.disp_gbr() {
-								self.token(TT::Comma).unwrap();
-								assert_eq!(Some(0), self.reg());
+							} else if let Some((d,0)) = self.dspgbr_reg() {
 								// MOV.W @(disp,GBR),R0
 								self.push(IR::Imm(AT::MovGbrR0W, d));
-							} else if let Some(d) = self.disp_pc() {
-								self.token(TT::Comma).unwrap();
-								let rn = self.reg().unwrap();
+							} else if let Some((d,rn)) = self.pair(|p| p.disp_pc(), |p| p.reg()) {
 								// MOV.W @(disp,PC),Rn
 								self.push(IR::NI(AT::MovPcRegW, rn, d as u8));
-							} else if let Some((d,rm)) = self.disp_reg() {
-								self.token(TT::Comma).unwrap();
-								assert_eq!(Some(0), self.reg());
+							} else if let Some((d,rn)) = self.pair(|p| p.label_pc(), |p| p.reg()) {
+								// MOV.W @(label,PC),Rn
+								self.push(IR::NI(AT::MovPcRegW, rn, d as u8));
+							} else if let Some(((d,rm),0)) = self.dspreg_reg() {
 								// MOV.W @(disp,Rm),R0
 								self.push(IR::Dsp4(AT::MovDspR0W, rm, d));
-							} else if let Some(rm) = self.inc() {
-								self.token(TT::Comma).unwrap();
-								let rn = self.reg().unwrap();
+							} else if let Some((rm,rn)) = self.inc_reg() {
 								// MOV.W @Rm+,Rn
 								self.push(IR::Two(AT::MovIncRegW, rn, rm));
-							} else if let Some(rm) = self.adr() {
-								self.token(TT::Comma).unwrap();
-								let rn = self.reg().unwrap();
+							} else if let Some((rm,rn)) = self.adr_reg() {
 								// MOV.W @Rm,Rn
 								self.push(IR::Two(AT::MovAdrRegW, rn, rm));
-							} else if let Some(rm) = self.reg() {
-								self.token(TT::Comma).unwrap();
-								if rm == 0 {
-									if let Some(d) = self.disp_gbr() {
-										// MOV.W R0,@(disp,GBR)
-										self.push(IR::Imm(AT::MovR0GbrW, d));
-										continue;
-									} else if let Some((d,rn)) = self.disp_reg() {
-										// MOV.W R0,@(disp,Rn)
-										self.push(IR::Dsp4(AT::MovR0DspW, rn, d));
-										continue;
-									}
-								}
-
-								if let Some(rn) = self.idx() {
-									// MOV.W Rm,@(R0,Rn)
-									self.push(IR::Two(AT::MovRegR0W, rn, 0));
-								} else if let Some(rn) = self.dec() {
-									// MOV.W R0,@-Rn
-									self.push(IR::Two(AT::MovRegDecW, rn, 0));
-								} else if let Some(rn) = self.adr() {
-									// MOV.W R0,@Rn
-									self.push(IR::Two(AT::MovRegAdrW, rn, 0));
-								}
+							} else if let Some((0,d)) = self.reg_dspgbr() {
+								// MOV.W R0,@(disp,GBR)
+								self.push(IR::Imm(AT::MovR0GbrW, d));
+							} else if let Some((0,(d,rn))) = self.reg_dspreg() {
+								// MOV.W R0,@(disp,Rn)
+								self.push(IR::Dsp4(AT::MovR0DspW, rn, d));
+							} else if let Some((rm,rn)) = self.reg_idx() {
+								// MOV.W Rm,@(R0,Rn)
+								self.push(IR::Two(AT::MovRegR0W, rn, rm));
+							} else if let Some((rm,rn)) = self.reg_dec() {
+								// MOV.W R0,@-Rn
+								self.push(IR::Two(AT::MovRegDecW, rn, rm));
+							} else if let Some((rm,rn)) = self.reg_adr() {
+								// MOV.W R0,@Rn
+								self.push(IR::Two(AT::MovRegAdrW, rn, rm));
 							} else {
 								self.unexpected(line!());
 							}
 						} else if self.token(TT::Long).is_some() {
-							if self.token(TT::Hash).is_some() {
-								let label = self.label().unwrap();
-								self.token(TT::Comma).unwrap();
-								let rn = self.reg().unwrap();
+							if let Some((label,rn)) = self.pair(|p| p.token(TT::Hash).and_then(|_| p.label()), |p| p.reg()) {
 								self.push_placeholder(AT::MovPcRegL, PH::ImmLabelReg(label,rn));
-							} else if let Some(label) = self.label() {
-								self.token(TT::Comma).unwrap();
-								let rn = self.reg().unwrap();
+							} else if let Some((label,rn)) = self.pair(|p| p.label(), |p| p.reg()) {
 								self.push_placeholder(AT::MovPcRegL, PH::LabelReg(label,rn));
-							} else if let Some(rm) = self.idx() {
-								self.token(TT::Comma).unwrap();
-								let rn = self.reg().unwrap();
+							} else if let Some((rm,rn)) = self.idx_reg() {
 								// MOV.L @(R0,Rm),Rn
 								self.push(IR::Two(AT::MovR0RegL, rn, rm));
-							} else if let Some(d) = self.disp_gbr() {
-								self.token(TT::Comma).unwrap();
-								assert_eq!(Some(0), self.reg());
+							} else if let Some((d,0)) = self.dspgbr_reg() {
 								// MOV.L @(disp,GBR),R0
 								self.push(IR::Imm(AT::MovGbrR0L, d));
-							} else if let Some(d) = self.disp_pc() {
-								self.token(TT::Comma).unwrap();
-								let rn = self.reg().unwrap();
+							} else if let Some((d,rn)) = self.pair(|p| p.disp_pc(), |p| p.reg()) {
 								// MOV.L @(disp,PC),Rn
 								self.push(IR::NI(AT::MovPcRegL, rn, d as u8));
-							} else if let Some((d,rm)) = self.disp_reg() {
-								self.token(TT::Comma).unwrap();
-								let rn = self.reg().unwrap();
+							} else if let Some((d,rn)) = self.pair(|p| p.label_pc(), |p| p.reg()) {
+								// MOV.L @(label,PC),Rn
+								self.push(IR::NI(AT::MovPcRegL, rn, d as u8));
+							} else if let Some(((d,rm),rn)) = self.dspreg_reg() {
 								// MOV.L @(disp,Rm),Rn
 								self.push(IR::NM4(AT::MovDspRegL, rn, rm, d));
-							} else if let Some((label,rm)) = self.label_reg() {
-								self.token(TT::Comma).unwrap();
-								let rn = self.reg().unwrap();
+							} else if let Some(((label,rm),rn)) = self.pair(|p| p.label_reg(), |p| p.reg()) {
 								self.push_placeholder(AT::MovDspRegL, PH::Dsp(label,rm,rn));
-							} else if let Some(rm) = self.inc() {
-								self.token(TT::Comma).unwrap();
-								let rn = self.reg().unwrap();
+							} else if let Some((rm,rn)) = self.inc_reg() {
 								// MOV.L @Rm+,Rn
 								self.push(IR::Two(AT::MovIncRegL, rn, rm));
-							} else if let Some(rm) = self.adr() {
-								self.token(TT::Comma).unwrap();
-								let rn = self.reg().unwrap();
+							} else if let Some((rm,rn)) = self.adr_reg() {
 								// MOV.L @Rm,Rn
 								self.push(IR::Two(AT::MovAdrRegL, rn, rm));
-							} else if let Some(rm) = self.reg() {
-								self.token(TT::Comma).unwrap();
-								if rm == 0 {
-									if let Some(d) = self.disp_gbr() {
-										// MOV.L R0,@(disp,GBR)
-										self.push(IR::Imm(AT::MovR0GbrL, d));
-										continue;
-									}
-								}
-
-								if let Some((d,rn)) = self.disp_reg() {
-									// MOV.L Rm,@(disp,Rn)
-									self.push(IR::NM4(AT::MovRegDspL, rn, rm, d));
-								} else if let Some((label,rn)) = self.label_reg() {
-									self.push_placeholder(AT::MovRegDspL, PH::Dsp(label,rm,rn));
-								} else if let Some(rn) = self.idx() {
-									// MOV.L Rm,@(R0,Rn)
-									self.push(IR::Two(AT::MovRegR0L, rn, rm));
-								} else if let Some(rn) = self.dec() {
-									// MOV.L Rm,@-Rn
-									self.push(IR::Two(AT::MovRegDecL, rn, rm));
-								} else if let Some(rn) = self.adr() {
-									// MOV.L Rm,@Rn
-									self.push(IR::Two(AT::MovRegAdrL, rn, rm));
-								} else {
-									self.unexpected(line!());
-								}
+							} else if let Some((0,d)) = self.reg_dspgbr() {
+								// MOV.L R0,@(disp,GBR)
+								self.push(IR::Imm(AT::MovR0GbrL, d));
+							} else if let Some((rm,(d,rn))) = self.reg_dspreg() {
+								// MOV.L Rm,@(disp,Rn)
+								self.push(IR::NM4(AT::MovRegDspL, rn, rm, d));
+							} else if let Some((rm,(label,rn))) = self.pair(|p| p.reg(), |p| p.label_reg()) {
+								self.push_placeholder(AT::MovRegDspL, PH::Dsp(label,rm,rn));
+							} else if let Some((rm,rn)) = self.reg_idx() {
+								// MOV.L Rm,@(R0,Rn)
+								self.push(IR::Two(AT::MovRegR0L, rn, rm));
+							} else if let Some((rm,rn)) = self.reg_dec() {
+								// MOV.L Rm,@-Rn
+								self.push(IR::Two(AT::MovRegDecL, rn, rm));
+							} else if let Some((rm,rn)) = self.reg_adr() {
+								// MOV.L Rm,@Rn
+								self.push(IR::Two(AT::MovRegAdrL, rn, rm));
 							} else {
 								self.unexpected(line!());
 							}
@@ -500,9 +421,7 @@ impl<'a> Parser<'a> {
 				}
 
 				TT::MovA => {
-					let d = self.disp_pc().unwrap();
-					self.token(TT::Comma).unwrap();
-					self.r0().unwrap();
+					let (d,_) = self.pair(|p| p.disp_pc(), |p| p.token(TT::Reg(0))).unwrap();
 					let imm = d / 4;
 					if !u8_sized(imm as i64) {
 						panic!("displacement value too large: found({d}), limit(0..={})", u8::MAX as u16 * 4);
@@ -516,11 +435,10 @@ impl<'a> Parser<'a> {
 				}
 
 				TT::Swap => {
-					self.token(TT::Dot).unwrap();
-					if self.token(TT::Byte).is_some() {
+					if self.token_list(&[TT::Dot, TT::Byte]).is_some() {
 						let (rm,rn) = self.reg2().unwrap();
 						self.push(IR::Two(AT::SwapB, rn, rm));
-					} else if self.token(TT::Word).is_some() {
+					} else if self.token_list(&[TT::Dot, TT::Word]).is_some() {
 						let (rm,rn) = self.reg2().unwrap();
 						self.push(IR::Two(AT::SwapW, rn, rm));
 					} else {
@@ -535,24 +453,21 @@ impl<'a> Parser<'a> {
 
 				TT::Add => {
 					if self.token(TT::Hash).is_some() {
-						if let Some(imm) = self.neg_immediate() {
+						if let Some((imm,rn)) = self.pair(|p| p.neg_immediate(), |p| p.reg()) {
 							if i8_sized(imm) {
-								self.token(TT::Comma).unwrap();
-								let rn = self.reg().unwrap();
 								self.push(IR::NI(AT::AddImmReg, rn, imm as u8));
 							} else {
 								panic!("ADD input too large: found({imm}), limit({}..={})", i32::MIN, i32::MAX);
 							}
-						} else if let Some(c) = self.char() {
-							self.token(TT::Comma).unwrap();
-							let rn = self.reg().unwrap();
+						} else if let Some((c,rn)) = self.char_reg() {
 							self.push(IR::NI(AT::AddImmReg, rn, c as u8));
 						} else {
 							self.unexpected(line!());
 						}
-					} else {
-						let (rm,rn) = self.reg2().unwrap();
+					} else if let Some((rm,rn)) = self.reg2() {
 						self.push(IR::Two(AT::AddRegReg, rn ,rm));
+					} else {
+						self.unexpected(line!());
 					}
 				}
 
@@ -568,18 +483,19 @@ impl<'a> Parser<'a> {
 
 				TT::CmpEq => {
 					if self.token(TT::Hash).is_some() {
-						if let Some(imm) = self.neg_immediate() {
+						if let Some((imm,rn)) = self.pair(|p| p.neg_immediate(), |p| p.reg()) {
 							if i8_sized(imm) {
-								self.token(TT::Comma).unwrap();
-								let rn = self.reg().unwrap();
 								self.push(IR::NI(AT::CmpEqImm, rn, imm as u8));
 							} else {
 								panic!("CMP/EQ input too large: found({imm}), limit({}..={})", i32::MIN, i32::MAX);
 							}
+						} else {
+							self.unexpected(line!());
 						}
-					} else {
-						let (rm,rn) = self.reg2().unwrap();
+					} else if let Some((rm,rn)) = self.reg2() {
 						self.push(IR::Two(AT::CmpEqReg, rn ,rm));
+					} else {
+						self.unexpected(line!());
 					}
 				}
 
@@ -652,11 +568,10 @@ impl<'a> Parser<'a> {
 				}
 
 				TT::ExtS => {
-					self.token(TT::Dot).unwrap();
-					if self.token(TT::Byte).is_some() {
+					if self.token_list(&[TT::Dot, TT::Byte]).is_some() {
 						let (rm,rn) = self.reg2().unwrap();
 						self.push(IR::Two(AT::ExtSB, rn, rm));
-					} else if self.token(TT::Word).is_some() {
+					} else if self.token_list(&[TT::Dot, TT::Word]).is_some() {
 						let (rm,rn) = self.reg2().unwrap();
 						self.push(IR::Two(AT::ExtSW, rn, rm));
 					} else {
@@ -665,11 +580,10 @@ impl<'a> Parser<'a> {
 				}
 
 				TT::ExtU => {
-					self.token(TT::Dot).unwrap();
-					if self.token(TT::Byte).is_some() {
+					if self.token_list(&[TT::Dot, TT::Byte]).is_some() {
 						let (rm,rn) = self.reg2().unwrap();
 						self.push(IR::Two(AT::ExtUB, rn, rm));
-					} else if self.token(TT::Word).is_some() {
+					} else if self.token_list(&[TT::Dot, TT::Word]).is_some() {
 						let (rm,rn) = self.reg2().unwrap();
 						self.push(IR::Two(AT::ExtUW, rn, rm));
 					} else {
@@ -680,14 +594,10 @@ impl<'a> Parser<'a> {
 				TT::Mac => {
 					self.token(TT::Dot).unwrap();
 					if self.token(TT::Word).is_some() {
-						let rm = self.inc().unwrap();
-						self.token(TT::Comma).unwrap();
-						let rn = self.inc().unwrap();
+						let (rm,rn) = self.pair(|p| p.inc(), |p| p.inc()).unwrap();
 						self.push(IR::Two(AT::MacW, rn, rm));
 					} else if self.token(TT::Long).is_some() {
-						let rm = self.inc().unwrap();
-						self.token(TT::Comma).unwrap();
-						let rn = self.inc().unwrap();
+						let (rm,rn) = self.pair(|p| p.inc(), |p| p.inc()).unwrap();
 						self.push(IR::Two(AT::MacL, rn, rm));
 					} else {
 						self.unexpected(line!());
@@ -735,33 +645,7 @@ impl<'a> Parser<'a> {
 				}
 
 				TT::And => {
-					if self.token(TT::Hash).is_some() {
-						let imm = self.immediate().unwrap();
-						self.token(TT::Comma).unwrap();
-						self.r0().unwrap();
-						if i8_sized(imm) {
-							self.push(IR::Imm(AT::AndImmR0, imm as u8));
-						} else {
-							panic!("AND input too large: found({imm}), limit({}..={})", i32::MIN, i32::MAX);
-						}
-					} else if self.token(TT::Dot).is_some() {
-						self.token(TT::Byte).unwrap();
-						let imm = self.immediate().unwrap();
-						self.token(TT::At).unwrap();
-						self.token(TT::OParen).unwrap();
-						self.r0().unwrap();
-						self.token(TT::Comma).unwrap();
-						self.token(TT::Gbr).unwrap();
-						self.token(TT::CParen).unwrap();
-						if i8_sized(imm) {
-							self.push(IR::Imm(AT::AndImmGbr, imm as u8));
-						} else {
-							panic!("AND input too large: found({imm}), limit({}..={})", i32::MIN, i32::MAX);
-						}
-					} else {
-						let (rm,rn) = self.reg2().unwrap();
-						self.push(IR::Two(AT::AndRegReg, rn, rm));
-					}
+					self.logic(AT::AndImmR0, AT::AndImmGbr, AT::AndRegReg);
 				}
 
 				TT::Not => {
@@ -770,99 +654,20 @@ impl<'a> Parser<'a> {
 				}
 
 				TT::Or => {
-					if self.token(TT::Hash).is_some() {
-						let imm = self.immediate().unwrap();
-						self.token(TT::Comma).unwrap();
-						self.r0().unwrap();
-						if i8_sized(imm) {
-							self.push(IR::Imm(AT::OrImmR0, imm as u8));
-						} else {
-							panic!("OR input too large: found({imm}), limit({}..={})", i32::MIN, i32::MAX);
-						}
-					} else if self.token(TT::Dot).is_some() {
-						self.token(TT::Byte).unwrap();
-						let imm = self.immediate().unwrap();
-						self.token(TT::At).unwrap();
-						self.token(TT::OParen).unwrap();
-						self.r0().unwrap();
-						self.token(TT::Comma).unwrap();
-						self.token(TT::Gbr).unwrap();
-						self.token(TT::CParen).unwrap();
-						if i8_sized(imm) {
-							self.push(IR::Imm(AT::OrImmGbr, imm as u8));
-						} else {
-							panic!("OR input too large: found({imm}), limit({}..={})", i32::MIN, i32::MAX);
-						}
-					} else {
-						let (rm,rn) = self.reg2().unwrap();
-						self.push(IR::Two(AT::OrRegReg, rn, rm));
-					}
+					self.logic(AT::OrImmR0, AT::OrImmGbr, AT::OrRegReg);
 				}
 
 				TT::Tas => {
-					self.token(TT::At).unwrap();
-					let rn = self.reg().unwrap();
+					let rn = self.adr().unwrap();
 					self.push(IR::One(AT::Tas, rn));
 				}
 
 				TT::Tst => {
-					if self.token(TT::Hash).is_some() {
-						let imm = self.immediate().unwrap();
-						self.token(TT::Comma).unwrap();
-						self.r0().unwrap();
-						if i8_sized(imm) {
-							self.push(IR::Imm(AT::TstImmR0, imm as u8));
-						} else {
-							panic!("TST input too large: found({imm}), limit({}..={})", i32::MIN, i32::MAX);
-						}
-					} else if self.token(TT::Dot).is_some() {
-						self.token(TT::Byte).unwrap();
-						let imm = self.immediate().unwrap();
-						self.token(TT::At).unwrap();
-						self.token(TT::OParen).unwrap();
-						self.r0().unwrap();
-						self.token(TT::Comma).unwrap();
-						self.token(TT::Gbr).unwrap();
-						self.token(TT::CParen).unwrap();
-						if i8_sized(imm) {
-							self.push(IR::Imm(AT::TstImmGbr, imm as u8));
-						} else {
-							panic!("TST input too large: found({imm}), limit({}..={})", i32::MIN, i32::MAX);
-						}
-					} else {
-						let (rm,rn) = self.reg2().unwrap();
-						self.push(IR::Two(AT::TstRegReg, rn, rm));
-					}
+					self.logic(AT::TstImmR0, AT::TstImmGbr, AT::TstRegReg);
 				}
 
 				TT::Xor => {
-					if self.token(TT::Hash).is_some() {
-						let imm = self.immediate().unwrap();
-						self.token(TT::Comma).unwrap();
-						self.r0().unwrap();
-						if i8_sized(imm) {
-							self.push(IR::Imm(AT::XorImmR0, imm as u8));
-						} else {
-							panic!("XOR input too large: found({imm}), limit({}..={})", i32::MIN, i32::MAX);
-						}
-					} else if self.token(TT::Dot).is_some() {
-						self.token(TT::Byte).unwrap();
-						let imm = self.immediate().unwrap();
-						self.token(TT::At).unwrap();
-						self.token(TT::OParen).unwrap();
-						self.r0().unwrap();
-						self.token(TT::Comma).unwrap();
-						self.token(TT::Gbr).unwrap();
-						self.token(TT::CParen).unwrap();
-						if i8_sized(imm) {
-							self.push(IR::Imm(AT::XorImmGbr, imm as u8));
-						} else {
-							panic!("XOR input too large: found({imm}), limit({}..={})", i32::MIN, i32::MAX);
-						}
-					} else {
-						let (rm,rn) = self.reg2().unwrap();
-						self.push(IR::Two(AT::XorRegReg, rn, rm));
-					}
+					self.logic(AT::XorImmR0, AT::XorImmGbr, AT::XorRegReg);
 				}
 
 				TT::RotL => {
@@ -937,52 +742,27 @@ impl<'a> Parser<'a> {
 
 				TT::Bf => {
 					let label = self.label().unwrap();
-					if let Some(addr) = self.preprocessor.labels.get(&label) {
-						debug!("check jump distance");
-						self.push(IR::Imm(AT::Bf, (addr >> 1) as u8));
-					} else {
-						self.push_placeholder(AT::Bf, PH::Label(label));
-					}
+					self.push(IR::Jmp(AT::Bf, label));
 				}
 
 				TT::BfS => {
 					let label = self.label().unwrap();
-					if let Some(addr) = self.preprocessor.labels.get(&label) {
-						debug!("check jump distance");
-						self.push(IR::Imm(AT::BfS, (addr >> 1) as u8));
-					} else {
-						self.push_placeholder(AT::BfS, PH::Label(label));
-					}
+					self.push(IR::Jmp(AT::BfS, label));
 				}
 
 				TT::Bt => {
 					let label = self.label().unwrap();
-					if let Some(addr) = self.preprocessor.labels.get(&label) {
-						debug!("check jump distance");
-						self.push(IR::Imm(AT::Bt, (addr >> 1) as u8));
-					} else {
-						self.push_placeholder(AT::Bt, PH::Label(label));
-					}
+					self.push(IR::Jmp(AT::Bt, label));
 				}
 
 				TT::BtS => {
 					let label = self.label().unwrap();
-					if let Some(addr) = self.preprocessor.labels.get(&label) {
-						debug!("check jump distance");
-						self.push(IR::Imm(AT::BtS, (addr >> 1) as u8));
-					} else {
-						self.push_placeholder(AT::BtS, PH::Label(label));
-					}
+					self.push(IR::Jmp(AT::BtS, label));
 				}
 
 				TT::Bra => {
 					let label = self.label().unwrap();
-					if let Some(addr) = self.preprocessor.labels.get(&label) {
-						debug!("check jump distance");
-						self.push(IR::Imm12(AT::Bra, (addr >> 1) as u16));
-					} else {
-						self.push_placeholder(AT::Bra, PH::Label(label));
-					}
+					self.push(IR::Jmp(AT::Bra, label));
 				}
 
 				TT::BraF => {
@@ -992,12 +772,7 @@ impl<'a> Parser<'a> {
 
 				TT::Bsr => {
 					let label = self.label().unwrap();
-					if let Some(addr) = self.preprocessor.labels.get(&label) {
-						debug!("check jump distance");
-						self.push(IR::Imm12(AT::Bsr, (addr >> 1) as u16));
-					} else {
-						self.push_placeholder(AT::Bsr, PH::Label(label));
-					}
+					self.push(IR::Jmp(AT::Bsr, label));
 				}
 
 				TT::BsrF => {
@@ -1028,27 +803,18 @@ impl<'a> Parser<'a> {
 				}
 
 				TT::LdC => {
-					if let Some(rm) = self.reg() {
-						self.token(TT::Comma).unwrap();
-						if self.token(TT::Sr).is_some() {
-							self.push(IR::One(AT::LdcRegSr, rm));
-						} else if self.token(TT::Gbr).is_some() {
-							self.push(IR::One(AT::LdcRegGbr, rm));
-						} else if self.token(TT::Vbr).is_some() {
-							self.push(IR::One(AT::LdcRegVbr, rm));
-						} else {
-							self.unexpected(line!());
-						}
-					} else if let Some(rm) = self.token(TT::Dot)
-						.and_then(|_| self.token(TT::Long))
-						.and_then(|_| self.inc())
-					{
-						self.token(TT::Comma).unwrap();
-						if self.token(TT::Sr).is_some() {
+					if let Some(rm) = self.reg_spec(TT::Sr) {
+						self.push(IR::One(AT::LdcRegSr, rm));
+					} else if let Some(rm) = self.reg_spec(TT::Gbr) {
+						self.push(IR::One(AT::LdcRegGbr, rm));
+					} else if let Some(rm) = self.reg_spec(TT::Vbr) {
+						self.push(IR::One(AT::LdcRegVbr, rm));
+					} else if self.token_list(&[TT::Dot, TT::Long]).is_some() {
+						if let Some(rm) = self.inc_spec(TT::Sr) {
 							self.push(IR::One(AT::LdcIncSr, rm));
-						} else if self.token(TT::Gbr).is_some() {
+						} else if let Some(rm) = self.inc_spec(TT::Gbr) {
 							self.push(IR::One(AT::LdcIncGbr, rm));
-						} else if self.token(TT::Vbr).is_some() {
+						} else if let Some(rm) = self.inc_spec(TT::Vbr) {
 							self.push(IR::One(AT::LdcIncVbr, rm));
 						} else {
 							self.unexpected(line!());
@@ -1059,27 +825,18 @@ impl<'a> Parser<'a> {
 				}
 
 				TT::LdS => {
-					if let Some(rm) = self.reg() {
-						self.token(TT::Comma).unwrap();
-						if self.token(TT::Mach).is_some() {
-							self.push(IR::One(AT::LdsRegMach, rm));
-						} else if self.token(TT::Macl).is_some() {
-							self.push(IR::One(AT::LdsRegMacl, rm));
-						} else if self.token(TT::Pr).is_some() {
-							self.push(IR::One(AT::LdsRegPr, rm));
-						} else {
-							self.unexpected(line!());
-						}
-					} else if let Some(rm) = self.token(TT::Dot)
-						.and_then(|_| self.token(TT::Long))
-						.and_then(|_| self.inc())
-					{
-						self.token(TT::Comma).unwrap();
-						if self.token(TT::Mach).is_some() {
+					if let Some(rm) = self.reg_spec(TT::Mach) {
+						self.push(IR::One(AT::LdsRegMach, rm));
+					} else if let Some(rm) = self.reg_spec(TT::Macl) {
+						self.push(IR::One(AT::LdsRegMacl, rm));
+					} else if let Some(rm) = self.reg_spec(TT::Pr) {
+						self.push(IR::One(AT::LdsRegPr, rm));
+					} else if self.token_list(&[TT::Dot, TT::Long]).is_some() {
+						if let Some(rm) = self.inc_spec(TT::Mach) {
 							self.push(IR::One(AT::LdsIncMach, rm));
-						} else if self.token(TT::Macl).is_some() {
+						} else if let Some(rm) = self.inc_spec(TT::Macl) {
 							self.push(IR::One(AT::LdsIncMacl, rm));
-						} else if self.token(TT::Pr).is_some() {
+						} else if let Some(rm) = self.inc_spec(TT::Pr) {
 							self.push(IR::One(AT::LdsIncPr, rm));
 						} else {
 							self.unexpected(line!());
@@ -1106,31 +863,18 @@ impl<'a> Parser<'a> {
 				}
 
 				TT::StC => {
-					if self.token(TT::Sr).is_some() {
-						self.token(TT::Comma).unwrap();
-						let rn = self.reg().unwrap();
+					if let Some(rn) = self.spec_reg(TT::Sr) {
 						self.push(IR::One(AT::StcSrReg, rn));
-					} else if self.token(TT::Gbr).is_some() {
-						self.token(TT::Comma).unwrap();
-						let rn = self.reg().unwrap();
+					} else if let Some(rn) = self.spec_reg(TT::Gbr) {
 						self.push(IR::One(AT::StcGbrReg, rn));
-					} else if self.token(TT::Vbr).is_some() {
-						self.token(TT::Comma).unwrap();
-						let rn = self.reg().unwrap();
+					} else if let Some(rn) = self.spec_reg(TT::Vbr) {
 						self.push(IR::One(AT::StcVbrReg, rn));
-					} else if self.token(TT::Dot).is_some() {
-						self.token(TT::Long).unwrap();
-						if self.token(TT::Sr).is_some() {
-							self.token(TT::Comma).unwrap();
-							let rn = self.dec().unwrap();
+					} else if self.token_list(&[TT::Dot, TT::Long]).is_some() {
+						if let Some(rn) = self.spec_dec(TT::Sr) {
 							self.push(IR::One(AT::StcSrDec, rn));
-						} else if self.token(TT::Gbr).is_some() {
-							self.token(TT::Comma).unwrap();
-							let rn = self.dec().unwrap();
+						} else if let Some(rn) = self.spec_dec(TT::Gbr) {
 							self.push(IR::One(AT::StcGbrDec, rn));
-						} else if self.token(TT::Vbr).is_some() {
-							self.token(TT::Comma).unwrap();
-							let rn = self.dec().unwrap();
+						} else if let Some(rn) = self.spec_dec(TT::Vbr) {
 							self.push(IR::One(AT::StcVbrDec, rn));
 						} else {
 							self.unexpected(line!());
@@ -1141,31 +885,18 @@ impl<'a> Parser<'a> {
 				}
 
 				TT::StS => {
-					if self.token(TT::Mach).is_some() {
-						self.token(TT::Comma).unwrap();
-						let rn = self.reg().unwrap();
+					if let Some(rn) = self.spec_reg(TT::Mach) {
 						self.push(IR::One(AT::StsMachReg, rn));
-					} else if self.token(TT::Macl).is_some() {
-						self.token(TT::Comma).unwrap();
-						let rn = self.reg().unwrap();
+					} else if let Some(rn) = self.spec_reg(TT::Macl) {
 						self.push(IR::One(AT::StsMaclReg, rn));
-					} else if self.token(TT::Pr).is_some() {
-						self.token(TT::Comma).unwrap();
-						let rn = self.reg().unwrap();
+					} else if let Some(rn) = self.spec_reg(TT::Pr) {
 						self.push(IR::One(AT::StsPrReg, rn));
-					} else if self.token(TT::Dot).is_some() {
-						self.token(TT::Long).unwrap();
-						if self.token(TT::Mach).is_some() {
-							self.token(TT::Comma).unwrap();
-							let rn = self.dec().unwrap();
+					} else if self.token_list(&[TT::Dot, TT::Long]).is_some() {
+						if let Some(rn) = self.spec_dec(TT::Mach) {
 							self.push(IR::One(AT::StsMachDec, rn));
-						} else if self.token(TT::Macl).is_some() {
-							self.token(TT::Comma).unwrap();
-							let rn = self.dec().unwrap();
+						} else if let Some(rn) = self.spec_dec(TT::Macl) {
 							self.push(IR::One(AT::StsMaclDec, rn));
-						} else if self.token(TT::Pr).is_some() {
-							self.token(TT::Comma).unwrap();
-							let rn = self.dec().unwrap();
+						} else if let Some(rn) = self.spec_dec(TT::Pr) {
 							self.push(IR::One(AT::StsPrDec, rn));
 						} else {
 							self.unexpected(line!());
@@ -1179,7 +910,7 @@ impl<'a> Parser<'a> {
 					self.token(TT::Hash).unwrap();
 					let imm = self.immediate().unwrap();
 					let d = imm / 4;
-					if !(u8::MIN as i64..=u8::MAX as i64).contains(&d) {
+					if !u8_sized(d) {
 						panic!("trap offset too large: found({imm}), limit(0..={})", u8::MAX as i64 * 4);
 					}
 					self.push(IR::Imm(AT::TrapA, d as u8));
@@ -1208,70 +939,74 @@ impl<'a> Parser<'a> {
 	fn output(&mut self) {
 		for (addr, at, ph) in self.preprocessor.waiting.drain(..) {
 			let index = self.preprocessor.intermediates.iter().position(|(ir_addr,_)| *ir_addr == addr).unwrap();
-			match at {
-				AT::MovPcRegW => match ph {
-					PH::Reg(rn) => {
-						let (caddr,_) = self.preprocessor.constants.pop_front().unwrap();
-						let offset = (caddr - addr) >> 1;
-						debug!("check displacement distance");
-						self.preprocessor.intermediates[index] = (addr, IR::NI(at, rn, offset as u8));
+			if let Some(at) = at {
+				match at {
+					AT::MovPcRegW => match ph {
+						PH::Reg(rn) => {
+							let (caddr,_) = self.preprocessor.constants.pop_front().unwrap();
+							let offset = (caddr - addr) >> 1;
+							if !u8_sized(offset as i64) {
+								error!("{at:?} offset too large: found({offset}), limit(0..={})", u8::MAX);
+								continue;
+							}
+							self.preprocessor.intermediates[index] = (addr, IR::NI(at, rn, offset as u8));
+						}
+						PH::LabelReg(label,rn) | PH::ImmLabelReg(label,rn) => {
+							let laddr = self.preprocessor.labels[&label];
+							let offset = (laddr - addr) >> 1;
+							if !u8_sized(offset as i64) {
+								error!("{at:?} offset too large: found({offset}), limit(0..={})", u8::MAX);
+								continue;
+							}
+							self.preprocessor.intermediates[index] = (addr, IR::NI(at, rn, offset as u8));
+						}
+						_ => todo!("{at:?} - {ph:?}"),
 					}
-					PH::LabelReg(label,rn) | PH::ImmLabelReg(label,rn) => {
-						let laddr = self.preprocessor.labels[&label];
-						let offset = (laddr - addr) >> 1;
-						debug!("check displacement distance");
-						self.preprocessor.intermediates[index] = (addr, IR::NI(at, rn, offset as u8));
+					AT::MovPcRegL => match ph {
+						PH::Reg(rn) => {
+							let (caddr,_) = self.preprocessor.constants.pop_front().unwrap();
+							let offset = (caddr - addr) >> 2;
+							if !u8_sized(offset as i64) {
+								error!("{at:?} offset too large: found({offset}), limit(0..={})", u8::MAX);
+								continue;
+							}
+							self.preprocessor.intermediates[index] = (addr, IR::NI(at, rn, offset as u8));
+						}
+						PH::LabelReg(label,rn) | PH::ImmLabelReg(label,rn) => {
+							let laddr = self.preprocessor.labels[&label];
+							let offset = (laddr - addr) >> 2;
+							if !u8_sized(offset as i64) {
+								error!("{at:?} offset too large: found({offset}), limit(0..={})", u8::MAX);
+								continue;
+							}
+							self.preprocessor.intermediates[index] = (addr, IR::NI(at, rn, offset as u8));
+						}
+						_ => todo!("{at:?} - {ph:?}"),
 					}
-					_ => todo!("{at:?} - {ph:?}"),
+					AT::MovDspRegL | AT::MovRegDspL => match ph {
+						PH::Dsp(label,rm,rn) => {
+							let d = self.preprocessor.values[&label];
+							self.preprocessor.intermediates[index] = (addr, IR::NM4(at, rn, rm, d as u8));
+						}
+						_ => todo!("{at:?} - {ph:?}"),
+					}
+					_ => {
+						panic!("Unexpected instruction type found for delayed output: '{at:?}'");
+					}
 				}
-				AT::MovPcRegL => match ph {
-					PH::Reg(rn) => {
-						let (caddr,_) = self.preprocessor.constants.pop_front().unwrap();
-						let offset = (caddr - addr) >> 2;
-						debug!("check displacement distance");
-						self.preprocessor.intermediates[index] = (addr, IR::NI(at, rn, offset as u8));
-					}
-					PH::LabelReg(label,rn) | PH::ImmLabelReg(label,rn) => {
-						let laddr = self.preprocessor.labels[&label];
-						let offset = (laddr - addr) >> 2;
-						debug!("check displacement distance");
-						self.preprocessor.intermediates[index] = (addr, IR::NI(at, rn, offset as u8));
-					}
-					_ => todo!("{at:?} - {ph:?}"),
-				}
-				AT::MovDspRegL | AT::MovRegDspL => match ph {
-					PH::Dsp(label,rm,rn) => {
-						let d = self.preprocessor.values[&label];
-						self.preprocessor.intermediates[index] = (addr, IR::NM4(at, rn, rm, d as u8));
-					}
-					_ => todo!("{at:?} - {ph:?}"),
-				}
-				AT::Bra | AT::Bsr => match ph {
+			} else {
+				match ph {
 					PH::Label(label) => {
 						let laddr = self.preprocessor.labels[&label];
-						let offset = (laddr - addr) >> 1;
-						debug!("check jump distance");
-						self.preprocessor.intermediates[index] = (addr, IR::Imm12(at, offset as u16));
+						self.preprocessor.intermediates[index] = (addr, IR::Long(laddr));
 					}
 					_ => todo!("{at:?} - {ph:?}"),
-				}
-				AT::Bf | AT::BfS | AT::Bt | AT::BtS => match ph {
-					PH::Label(label) => {
-						let laddr = self.preprocessor.labels[&label];
-						let offset = (laddr - addr) >> 1;
-						debug!("check jump distance");
-						self.preprocessor.intermediates[index] = (addr, IR::Imm(at, offset as u8));
-					}
-					_ => todo!("{at:?} - {ph:?}"),
-				}
-				_ => {
-					panic!("Unexpected instruction type found for delayed output: '{at:?}'");
 				}
 			}
 		}
 
 		for (addr,ir) in self.preprocessor.intermediates.drain(..) {
-			eprintln!("[{addr:08X}] {ir:?}");
+			eprintln!("[{addr:08X}] {ir:X?}");
 			match ir {
 				IR::Zero(at) => self.out.push(Asm::none(at)),
 				IR::One(at,r) => self.out.push(Asm::reg1(at, r)),
@@ -1279,9 +1014,32 @@ impl<'a> Parser<'a> {
 				IR::Dsp4(at,r,d) => self.out.push(Asm::reg1_imm(at, r, d)),
 				IR::NM4(at,n,m,d) => self.out.push(Asm::reg2_imm(at, n, m, d)),
 				IR::Imm(at,d) => self.out.push(Asm::imm8(at, d)),
-				IR::Imm12(at,d) => self.out.push(Asm::imm12(at, d)),
 				IR::NI(at,r,d) => self.out.push(Asm::reg1_imm(at, r, d)),
-				IR::Jmp(at,label) => todo!("JMP IR: {at:?} - {label}"),
+				IR::Jmp(at,label) => {
+					match at {
+						AT::Bf | AT::BfS | AT::Bt | AT::BtS => {
+							let laddr = self.preprocessor.labels[&label];
+							let offset = (laddr - addr) >> 1;
+							if !u8_sized(offset as i64) {
+								error!("{at:?} offset too large: found({offset}), limit(0..={})", u8::MAX);
+								continue;
+							}
+							self.out.push(Asm::imm8(at, offset as u8));
+						}
+						AT::Bra | AT::Bsr => {
+							let laddr = self.preprocessor.labels[&label];
+							let offset = (laddr - addr) >> 1;
+							if !u16_sized(offset as i64) {
+								error!("{at:?} offset too large: found({offset}), limit(0..={})", u16::MAX);
+								continue;
+							}
+							self.out.push(Asm::imm12(at, offset as u16));
+						}
+						_ => {
+							panic!("unexpected AsmType for Jump IR during output: {at:?}")
+						}
+					}
+				}
 				IR::Byte(_value) => {}
 				IR::Word(_value) => {}
 				IR::Long(_value) => {}
@@ -1310,8 +1068,13 @@ impl Preprocessor {
 	}
 
 	fn push_placeholder(&mut self, at: AT, ph: PH) {
-		self.waiting.push((self.address, at, ph));
+		self.waiting.push((self.address, Some(at), ph));
 		self.push(IR::Placeholder);
+	}
+
+	fn push_const_placeholder(&mut self, label: Box<str>) {
+		self.waiting.push((self.address, None, PH::Label(label)));
+		self.push(IR::Placeholder4);
 	}
 }
 
@@ -1353,6 +1116,10 @@ impl<'a> Parser<'a> {
 		self.preprocessor.push_placeholder(at, ph);
 	}
 
+	fn push_const_placeholder(&mut self, label: Box<str>) {
+		self.preprocessor.push_const_placeholder(label);
+	}
+
 	fn next(&mut self) -> Option<&Token> {
 		let token = self.tokens.get(self.index)?;
 		self.index += 1;
@@ -1369,6 +1136,20 @@ impl<'a> Parser<'a> {
 			self.index = self.index.saturating_sub(1);
 			None
 		}
+	}
+
+	fn token_list(&mut self, tts: &[TT]) -> Option<()> {
+		let index = self.index;
+		for tt in tts {
+			if self.next()
+				.filter(|token| &token.tt == tt)
+				.is_none()
+			{
+				self.index = index;
+				return None;
+			}
+		}
+		Some(())
 	}
 
 	fn char(&mut self) -> Option<char> {
@@ -1407,147 +1188,125 @@ impl<'a> Parser<'a> {
 		}
 	}
 
-	fn r0(&mut self) -> Option<()> {
-		if let Some(0) = self.reg() {
-			Some(())
-		} else {
+	fn single<A>(&mut self,
+		fn_a: impl FnOnce(&mut Parser) -> Option<A>,
+	) -> Option<A> {
+		let index = self.index;
+		fn_a(self).or_else(|| {
+			self.index = index;
 			None
-		}
+		})
 	}
 
-	fn reg2(&mut self) -> Option<(u8,u8)> {
-		let index = self.index;
-		self.reg()
-			.filter(|_| self.token(TT::Comma).is_some())
-			.zip(self.reg())
-			.or_else(|| {
-				self.index = index;
-				None
-			})
+	fn pair<A,B>(
+		&mut self,
+		fn_a: impl FnOnce(&mut Parser) -> Option<A>,
+		fn_b: impl FnOnce(&mut Parser) -> Option<B>,
+	) -> Option<(A,B)> {
+		self.single(|p| fn_a(p)
+			.filter(|_| p.token(TT::Comma).is_some())
+			.zip(fn_b(p))
+		)
 	}
 
+	fn at_pair<A,B>(
+		&mut self,
+		fn_a: impl FnOnce(&mut Parser) -> Option<A>,
+		fn_b: impl FnOnce(&mut Parser) -> Option<B>,
+	) -> Option<(A,B)> {
+		self.single(|p| p.token_list(&[TT::At, TT::OParen])
+			.and_then(|_| p.pair(fn_a, fn_b))
+			.filter(|_| p.token(TT::CParen).is_some())
+		)
+	}
+
+	/// @(imm,PC)
 	fn disp_pc(&mut self) -> Option<u16> {
-		let index = self.index;
-		self.token(TT::At)
-			.and_then(|_| self.token(TT::OParen))
-			.and_then(|_| self.immediate())
-			.or_else(|| {
-				let label = self.label()?;
-				self.preprocessor.values.get(&label).copied()
-			})
-			.filter(|_| self.token(TT::Comma).is_some())
-			.filter(|_| self.token(TT::Pc).is_some())
-			.filter(|_| self.token(TT::CParen).is_some())
-			.and_then(|d| if u16_sized(d) {
-				Some(d as u16)
-			} else {
-				error!("displacement value too large: found({d}), limit({}..={})", i32::MIN, i32::MAX);
-				None
-			})
-			.or_else(|| {
-				self.index = index;
-				None
-			})
+		self.at_pair(
+			|p| p.immediate()
+				.and_then(|d| if u16_sized(d) {
+					Some(d as u16)
+				} else {
+					error!("displacement value too large: found({d}), limit({}..={})", i32::MIN, i32::MAX);
+					None
+				}),
+			|p| p.token(TT::Pc),
+		).map(|(d,_)| d)
+	}
+	
+	/// @(label,PC)
+	fn label_pc(&mut self) -> Option<u16> {
+		self.at_pair(
+			|p| p.label()
+				.and_then(|label| p.preprocessor.values.get(&label).copied())
+				.and_then(|d| if u16_sized(d) {
+					Some(d as u16)
+				} else {
+					error!("displacement value too large: found({d}), limit({}..={})", i32::MIN, i32::MAX);
+					None
+				}),
+			|p| p.token(TT::Pc),
+		).map(|(d,_)| d)
 	}
 
+	/// @(imm,GBR)
 	fn disp_gbr(&mut self) -> Option<u8> {
-		let index = self.index;
-		self.token(TT::At)
-			.filter(|_| self.token(TT::OParen).is_some())
-			.and_then(|_| self.immediate())
-			.filter(|_| self.token(TT::Comma).is_some())
-			.filter(|_| self.token(TT::Gbr).is_some())
-			.filter(|_| self.token(TT::CParen).is_some())
-			.and_then(|d| if i8_sized(d) {
-				Some(d as u8)
-			} else {
-				error!("displacement value too large: found({d}), limit({}..={})", i8::MIN, i8::MAX);
-				None
-			})
-			.or_else(|| {
-				self.index = index;
-				None
-			})
+		self.at_pair(
+			|p| p.immediate()
+				.and_then(|d| if i8_sized(d) {
+					Some(d as u8)
+				} else {
+					error!("displacement value too large: found({d}), limit({}..={})", i8::MIN, i8::MAX);
+					None
+				}),
+			|p| p.token(TT::Gbr),
+		).map(|(d,_)| d)
 	}
 
+	/// @(imm,reg)
 	fn disp_reg(&mut self) -> Option<(u8,u8)> {
-		let index = self.index;
-		self.token(TT::At)
-			.filter(|_| self.token(TT::OParen).is_some())
-			.and_then(|_| self.immediate())
-			.and_then(|d| if u8_sized(d) {
-				Some(d as u8)
-			} else {
-				error!("displacement value too large: found({d}), limit(0..={})", u8::MAX);
-				None
-			})
-			.filter(|_| self.token(TT::Comma).is_some())
-			.zip(self.reg())
-			.filter(|_| self.token(TT::CParen).is_some())
-			.or_else(|| {
-				self.index = index;
-				None
-			})
+		self.at_pair(
+			|p| p.immediate()
+				.and_then(|d| if u8_sized(d) {
+					Some(d as u8)
+				} else {
+					error!("displacement value too large: found({d}), limit(0..={})", u8::MAX);
+					None
+				}),
+			|p| p.reg(),
+		)
 	}
 
 	fn label_reg(&mut self) -> Option<(Box<str>,u8)> {
-		let index = self.index;
-		self.token(TT::At)
-			.filter(|_| self.token(TT::OParen).is_some())
-			.and_then(|_| self.label())
-			.filter(|_| self.token(TT::Comma).is_some())
-			.zip(self.reg())
-			.filter(|_| self.token(TT::CParen).is_some())
-			.or_else(|| {
-				self.index = index;
-				None
-			})
+		self.at_pair(|p| p.label(), |p| p.reg())
 	}
 
 	fn idx(&mut self) -> Option<u8> {
-		let index = self.index;
-		self.token(TT::At)
-			.filter(|_| self.token(TT::OParen).is_some())
-			.filter(|_| self.r0().is_some())
-			.filter(|_| self.token(TT::Comma).is_some())
-			.and_then(|_| self.reg())
-			.filter(|_| self.token(TT::CParen).is_some())
-			.or_else(|| {
-				self.index = index;
-				None
-			})
+		self.at_pair(|p| p.token(TT::Reg(0)), |p| p.reg())
+			.map(|(_,r)| r)
+	}
+
+	fn reg2(&mut self) -> Option<(u8,u8)> {
+		self.pair(|p| p.reg(), |p| p.reg())
 	}
 
 	fn inc(&mut self) -> Option<u8> {
-		let index = self.index;
-		self.token(TT::At)
-			.and_then(|_| self.reg())
-			.filter(|_| self.token(TT::Plus).is_some())
-			.or_else(|| {
-				self.index = index;
-				None
-			})
+		self.single(|p| p.token(TT::At)
+			.and_then(|_| p.reg())
+			.filter(|_| p.token(TT::Plus).is_some())
+		)
 	}
 
 	fn adr(&mut self) -> Option<u8> {
-		let index = self.index;
-		self.token(TT::At)
-			.and_then(|_| self.reg())
-			.or_else(|| {
-				self.index = index;
-				None
-			})
+		self.single(|p| p.token(TT::At)
+			.and_then(|_| p.reg())
+		)
 	}
 
 	fn dec(&mut self) -> Option<u8> {
-		let index = self.index;
-		self.token(TT::At)
-			.filter(|_| self.token(TT::Dash).is_some())
-			.and_then(|_| self.reg())
-			.or_else(|| {
-				self.index = index;
-				None
-			})
+		self.single(|p| p.token_list(&[TT::At, TT::Dash])
+			.and_then(|_| p.reg())
+		)
 	}
 
 	fn immediate(&mut self) -> Option<i64> {
@@ -1576,6 +1335,113 @@ impl<'a> Parser<'a> {
 			self.index -= 1;
 			self.immediate()
 		}
+	}
+
+	fn logic(&mut self, at_imm_r0: AT, at_imm_gbr: AT, at_reg_reg: AT) {
+		let index = self.index;
+		// LOGIC #imm,R0
+		if let Some(imm) = self.token(TT::Hash)
+			.and_then(|_| self.neg_immediate())
+			.filter(|_| self.token_list(&[TT::Comma, TT::Reg(0)]).is_some())
+			.and_then(|imm| if i8_sized(imm) {
+				Some(imm as u8)
+			} else {
+				error!("input too large: found({imm}), limit({}..={})", i32::MIN, i32::MAX);
+				None
+			})
+		{
+			self.push(IR::Imm(at_imm_r0, imm));
+		}
+		// LOGIC.B #imm,@(R0,GBR)
+		else if let Some(imm) = self.token_list(&[TT::Dot, TT::Byte, TT::Hash])
+			.and_then(|_| self.neg_immediate())
+			.filter(|_| self.token_list(&[
+				TT::Comma, TT::At, TT::OParen, TT::Reg(0), TT::Comma, TT::Gbr, TT::CParen,
+			]).is_some())
+			.and_then(|imm| if i8_sized(imm) {
+				Some(imm as u8)
+			} else {
+				error!("input too large: found({imm}), limit({}..={})", i32::MIN, i32::MAX);
+				None
+			})
+		{
+			self.push(IR::Imm(at_imm_gbr, imm));
+		}
+		// LOGIC Rm,Rn
+		else if let Some((rm,rn)) = self.reg2()
+		{
+			self.push(IR::Two(at_reg_reg, rn, rm));
+		}
+		else
+		{
+			self.index = index;
+			self.unexpected(line!());
+		}
+	}
+
+	fn idx_reg(&mut self) -> Option<(u8,u8)> {
+		self.pair(|p| p.idx(), |p| p.reg())
+	}
+
+
+	fn spec_reg(&mut self, special_register: TT) -> Option<u8> {
+		self.pair(|p| p.token(special_register), |p| p.reg())
+			.map(|(_,r)| r)
+	}
+
+	fn spec_dec(&mut self, special_register: TT) -> Option<u8> {
+		self.pair(|p| p.token(special_register), |p| p.dec())
+			.map(|(_,r)| r)
+	}
+
+	fn reg_spec(&mut self, special_register: TT) -> Option<u8> {
+		self.pair(|p| p.reg(), |p| p.token(special_register))
+			.map(|(r,_)| r)
+	}
+
+	fn inc_spec(&mut self, special_register: TT) -> Option<u8> {
+		self.pair(|p| p.inc(), |p| p.token(special_register))
+			.map(|(r,_)| r)
+	}
+
+	fn dspgbr_reg(&mut self) -> Option<(u8,u8)> {
+		self.pair(|p| p.disp_gbr(), |p| p.reg())
+	}
+
+	fn dspreg_reg(&mut self) -> Option<((u8,u8),u8)> {
+		self.pair(|p| p.disp_reg(), |p| p.reg())
+	}
+
+	fn inc_reg(&mut self) -> Option<(u8,u8)> {
+		self.pair(|p| p.inc(), |p| p.reg())
+	}
+
+	fn adr_reg(&mut self) -> Option<(u8,u8)> {
+		self.pair(|p| p.adr(), |p| p.reg())
+	}
+
+	fn char_reg(&mut self) -> Option<(char,u8)> {
+		self.pair(|p| p.char(), |p| p.reg())
+	}
+
+	fn reg_dspgbr(&mut self) -> Option<(u8,u8)> {
+		self.pair(|p| p.reg(), |p| p.disp_gbr())
+	}
+
+	fn reg_dspreg(&mut self) -> Option<(u8,(u8,u8))> {
+		self.pair(|p| p.reg(), |p| p.disp_reg())
+	}
+
+	fn reg_idx(&mut self) -> Option<(u8,u8)> {
+		self.pair(|p| p.reg(), |p| p.idx())
+	}
+
+	fn reg_dec(&mut self) -> Option<(u8,u8)> {
+		self.pair(|p| p.reg(), |p| p.dec())
+	}
+
+	fn reg_adr(&mut self) -> Option<(u8,u8)> {
+		self.pair(|p| p.reg(), |p| p.adr())
 	}
 }
 
@@ -1614,7 +1480,7 @@ fn no_output_from_empty_source() {
 }
 
 #[test]
-fn preprocessed_labels_have_the_correct_addresses() {
+fn loop_labels_have_the_correct_addresses() {
 	let input = "
 start:
 	mov #3,r0
@@ -1626,7 +1492,40 @@ end:
 	let tokens = crate::lexer::eval(input).unwrap();
 	let mut parser = Parser::new(&tokens, "".into());
 	parser.process();
-	assert_eq!(parser.preprocessor.labels["start"], 0, "'start' label should start at address 0\nWaiting{:?}\nIntermediates{:?}", parser.preprocessor.waiting, parser.preprocessor.intermediates);
-	assert_eq!(parser.preprocessor.labels["end"], 6, "'end' label should start at address 6\nWaiting{:?}\nIntermediates{:?}", parser.preprocessor.waiting, parser.preprocessor.intermediates);
+	let pp = parser.preprocessor;
+	assert_eq!(pp.labels["start"], 0, "'start' label should start at address 0\nWaiting{:?}\nIntermediates{:?}",
+		pp.waiting, pp.intermediates);
+	assert_eq!(pp.labels["end"], 6, "'end' label should start at address 6\nWaiting{:?}\nIntermediates{:?}",
+		pp.waiting, pp.intermediates);
+}
+
+#[test]
+fn subroutine_labels_have_the_correct_addresses() {
+	let input = "
+start:
+	bsr fn1
+	nop
+	bsr fn2
+	nop
+	rts
+	nop
+fn1:
+	rts
+	mov #4,r1
+fn2:
+	add #5,r1
+	rts
+	mov r1,r0
+	";
+	let tokens = crate::lexer::eval(input).unwrap();
+	let mut parser = Parser::new(&tokens, "".into());
+	parser.process();
+	let pp = parser.preprocessor;
+	assert_eq!(pp.labels["start"], 0, "'start' label should start at address 0\nWaiting{:?}\nIntermediates{:?}",
+		pp.waiting, pp.intermediates);
+	assert_eq!(pp.labels["fn1"], 12, "'fn1' label should start at address 12\nWaiting{:?}\nIntermediates{:?}",
+		pp.waiting, pp.intermediates);
+	assert_eq!(pp.labels["fn2"], 16, "'fn2' label should start at address 16\nWaiting{:?}\nIntermediates{:?}",
+		pp.waiting, pp.intermediates);
 }
 
