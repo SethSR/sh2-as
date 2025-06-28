@@ -178,6 +178,7 @@ impl<'a> Parser<'a> {
 
 				TT::MacroStart => {
 					let name = self.label().unwrap();
+					trace!("found macro start: '{name}'");
 					let start = self.index;
 					let mut end = start;
 					while let Some(token) = self.next() {
@@ -188,10 +189,6 @@ impl<'a> Parser<'a> {
 						}
 						end = self.index;
 					}
-					trace!("found macro start: '{name}'");
-				}
-				TT::MacroEnd => {
-					panic!("unexpected macro end");
 				}
 
 				TT::Const => {
@@ -923,6 +920,7 @@ impl<'a> Parser<'a> {
 				// Skip empty lines
 				TT::NewLine => {}
 
+				TT::MacroEnd |
 				TT::String(_) | TT::Char(_) |
 				TT::Bin(_) | TT::Dec(_) | TT::Hex(_) |
 				TT::Reg(_) | TT::Pc |
@@ -1104,9 +1102,9 @@ impl<'a> Parser<'a> {
 		let start = self.tokens[..self.index].iter().rposition(|t| t.tt == TT::NewLine);
 		let end = self.tokens[self.index..].iter().position(|t| t.tt == TT::NewLine);
 		match (start, end) {
-			(Some(start), Some(end)) => eprintln!("{:?}", &self.tokens[start..self.index+end]),
+			(Some(start), Some(end)) => eprintln!("{:?}", &self.tokens[start+1..self.index+end]),
+			(Some(start), None) => eprintln!("{:?}", &self.tokens[start+1..]),
 			(None, Some(end)) => eprintln!("{:?}", &self.tokens[..self.index+end]),
-			(Some(start), None) => eprintln!("{:?}", &self.tokens[start..]),
 			(None, None) => eprintln!("{:?}", self.tokens),
 		}
 		if let Some(token) = self.tokens.get(self.index) {
