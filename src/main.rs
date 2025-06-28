@@ -2,10 +2,8 @@
 use std::{env, fs, path::PathBuf};
 
 mod asm;
-mod i4;
-mod output;
-mod parser;
 mod lexer;
+mod parser;
 mod tokens;
 
 fn main() {
