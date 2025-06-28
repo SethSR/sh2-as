@@ -29,6 +29,8 @@ fn main() {
 	let tokens = lexer::eval(&source)
 		.expect("unable to lex source (v2)");
 	let out = parser::eval(&tokens, file_path.to_path_buf());
-	println!("{out:02X?}");
+	for asm in out {
+		println!("{asm}");
+	}
 }
 
