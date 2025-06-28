@@ -200,6 +200,11 @@ pub enum Type {
 	TrapA,
 }
 
+fn from_imm12(n: u8, d: u8) -> i16 {
+	let n = if (n & 0x08) > 0 { n | 0xF0 } else { n };
+	i16::from_be_bytes([n, d])
+}
+
 impl fmt::Display for Asm {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
 		let Asm { n, m, d, atype } = self;
@@ -207,8 +212,8 @@ impl fmt::Display for Asm {
 		match atype {
 			/* Data Transfer */
 			Type::MovImm     => write!(f, "MOV #{},R{n}", *d as i8),
-			Type::MovPcRegW  => write!(f, "MOV.W @({},PC),R{n}", *d as i16 * 2),
-			Type::MovPcRegL  => write!(f, "MOV.L @({},PC),R{n}", *d as i32 * 4),
+			Type::MovPcRegW  => write!(f, "MOV.W @({},PC),R{n}", 2 * *d as i16),
+			Type::MovPcRegL  => write!(f, "MOV.L @({},PC),R{n}", 2 * *d as i32),
 			Type::MovRegReg  => write!(f, "MOV R{m},R{n}"),
 			Type::MovRegAdrB => write!(f, "MOV.B R{m},@R{n}"),
 			Type::MovRegAdrW => write!(f, "MOV.W R{m},@R{n}"),
@@ -222,12 +227,12 @@ impl fmt::Display for Asm {
 			Type::MovIncRegB => write!(f, "MOV.B @R{m}+,R{n}"),
 			Type::MovIncRegW => write!(f, "MOV.W @R{m}+,R{n}"),
 			Type::MovIncRegL => write!(f, "MOV.L @R{m}+,R{n}"),
-			Type::MovR0DspB  => write!(f, "MOV.B R0,@({},R{n})", *d as i8),
-			Type::MovR0DspW  => write!(f, "MOV.W R0,@({},R{n})", *d as i16 * 2),
-			Type::MovRegDspL => write!(f, "MOV.L R{m},@({},R{n})", *d as i32 * 4),
-			Type::MovDspR0B  => write!(f, "MOV.B @({},R{m}),R0", *d as i8),
-			Type::MovDspR0W  => write!(f, "MOV.W @({},R{m}),R0", *d as i16 * 2),
-			Type::MovDspRegL => write!(f, "MOV.L @({},R{m}),R{n}", *d as i32 * 4),
+			Type::MovR0DspB  => write!(f, "MOV.B R{m},@({},R{n})", *d as i8),
+			Type::MovR0DspW  => write!(f, "MOV.W R{m},@({},R{n})", 2 * *d as i16),
+			Type::MovRegDspL => write!(f, "MOV.L R{m},@({},R{n})", 4 * *d as i32),
+			Type::MovDspR0B  => write!(f, "MOV.B @({},R{m}),R{n}", *d as i8),
+			Type::MovDspR0W  => write!(f, "MOV.W @({},R{m}),R{n}", 2 * *d as i16),
+			Type::MovDspRegL => write!(f, "MOV.L @({},R{m}),R{n}", 4 * *d as i32),
 			Type::MovRegR0B  => write!(f, "MOV.B R{m},@(R0,R{n})"),
 			Type::MovRegR0W  => write!(f, "MOV.W R{m},@(R0,R{n})"),
 			Type::MovRegR0L  => write!(f, "MOV.L R{m},@(R0,R{n})"),
@@ -235,12 +240,12 @@ impl fmt::Display for Asm {
 			Type::MovR0RegW  => write!(f, "MOV.W @(R0,R{m}),R{n}"),
 			Type::MovR0RegL  => write!(f, "MOV.L @(R0,R{m}),R{n}"),
 			Type::MovR0GbrB  => write!(f, "MOV.B R0,@({d},GBR)"),
-			Type::MovR0GbrW  => write!(f, "MOV.W R0,@({},GBR)", d * 2),
-			Type::MovR0GbrL  => write!(f, "MOV.L R0,@({},GBR)", d * 4),
+			Type::MovR0GbrW  => write!(f, "MOV.W R0,@({},GBR)", 2 * d),
+			Type::MovR0GbrL  => write!(f, "MOV.L R0,@({},GBR)", 4 * d),
 			Type::MovGbrR0B  => write!(f, "MOV.B @({d},GBR),R0"),
-			Type::MovGbrR0W  => write!(f, "MOV.W @({},GBR),R0", d * 2),
-			Type::MovGbrR0L  => write!(f, "MOV.L @({},GBR),R0", d * 4),
-			Type::MovA       => write!(f, "MOVA @({},PC),R0", d * 4),
+			Type::MovGbrR0W  => write!(f, "MOV.W @({},GBR),R0", 2 * d),
+			Type::MovGbrR0L  => write!(f, "MOV.L @({},GBR),R0", 4 * d),
+			Type::MovA       => write!(f, "MOVA @({},PC),R0", 4 * d),
 			Type::MovT       => write!(f, "MOVT R{n}"),
 			Type::SwapB      => write!(f, "SWAP.B R{m},R{n}"),
 			Type::SwapW      => write!(f, "SWAP.W R{m},R{n}"),
@@ -314,13 +319,13 @@ impl fmt::Display for Asm {
 			Type::ShLR16 => write!(f, "SHLR16 R{n}"),
 
 			/* Branch */
-			Type::Bf   => write!(f, "BF @({},PC)", d * 2),
-			Type::BfS  => write!(f, "BF/S @({},PC)", d * 2),
-			Type::Bt   => write!(f, "BT @({},PC)", d * 2),
-			Type::BtS  => write!(f, "BT/S @({},PC)", d * 2),
-			Type::Bra  => write!(f, "BRA @({},PC)", ((*n as u16) << 8 | *d as u16) * 2),
+			Type::Bf   => write!(f, "BF @({},PC)",   2 * *d as u32),
+			Type::BfS  => write!(f, "BF/S @({},PC)", 2 * *d as u32),
+			Type::Bt   => write!(f, "BT @({},PC)",   2 * *d as u32),
+			Type::BtS  => write!(f, "BT/S @({},PC)", 2 * *d as u32),
+			Type::Bra  => write!(f, "BRA @({},PC)",  2 * from_imm12(*n,*d)),
 			Type::BraF => write!(f, "BRAF R{n}"),
-			Type::Bsr  => write!(f, "BSR @({},PC)", ((*n as u16) << 8 | *d as u16) * 2),
+			Type::Bsr  => write!(f, "BSR @({},PC)",  2 * from_imm12(*n,*d)),
 			Type::BsrF => write!(f, "BSRF R{n}"),
 			Type::Jmp  => write!(f, "JMP @R{n}"),
 			Type::Jsr  => write!(f, "JSR @R{n}"),
@@ -357,7 +362,7 @@ impl fmt::Display for Asm {
 			Type::StsMachDec => write!(f, "STS.L MACH,@-R{n}"),
 			Type::StsMaclDec => write!(f, "STS.L MACL,@-R{n}"),
 			Type::StsPrDec   => write!(f, "STS.L PR,@-R{n}"),
-			Type::TrapA      => write!(f, "TRAPA #{}", *d as u16 * 4),
+			Type::TrapA      => write!(f, "TRAPA #{}", 4 * *d as u16),
 		}
 	}
 }
