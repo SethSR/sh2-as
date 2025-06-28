@@ -15,6 +15,7 @@ VblankWait2:
 	tst	#8,r0			;%------LS----VHOP V=Vblank H=Hblank O=Odd field P=Pal
 	bt	VblankWait2		;V=1=In Vblank
 	rts
+	nop
 	
 PageFlip:
 	rts
